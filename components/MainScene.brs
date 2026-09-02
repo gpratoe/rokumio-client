@@ -2313,6 +2313,23 @@ function StreamingServerDisplay() as string
     return m.streamingServerUrl
 end function
 
+' Resolve a torrent-only stream to the streaming server's HLS playlist. The
+' server lazily creates the torrent engine on first request and uses the file
+' id (or -1 to auto-guess) to pick the file. Empty when unusable.
+function StreamingServerStreamUrl(stream as object) as string
+    if not StreamingServerConfigured() then return ""
+    if stream = invalid or not stream.DoesExist("infoHash") then return ""
+    infoHash = LCase(stream.infoHash.ToStr()).Trim()
+    if Len(infoHash) <> 40 then return ""
+
+    fileId = "-1"
+    if stream.DoesExist("fileIdx") and stream.fileIdx <> invalid
+        fileId = stream.fileIdx.ToStr()
+    end if
+
+    return m.streamingServerUrl + "/" + infoHash + "/" + fileId + "/hls.m3u8"
+end function
+
 sub LoadAddonConfiguration()
     section = CreateObject("roRegistrySection", "Stroku")
     urls = []
@@ -3187,8 +3204,8 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
                 m.streams.Push(stream)
             else if stream <> invalid and stream.DoesExist("infoHash")
                 ' Torrent-only results have no direct URL. They are listed so the
-                ' user can see them, but persistent playback arrives with the
-                ' dedicated streaming server work.
+                ' user can see them, and played back through the dedicated
+                ' streaming server when one is configured.
                 stream.strokuTorrent = true
                 stream.strokuAddonName = addonName
                 m.streams.Push(stream)
@@ -3216,6 +3233,14 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
         if DirectStreamUrl(m.streams[streamIndex]) <> ""
             FindSubtitles(m.streams[streamIndex])
             return
+        end if
+        if m.streams[streamIndex].strokuTorrent
+            serverUrl = StreamingServerStreamUrl(m.streams[streamIndex])
+            if serverUrl <> ""
+                m.streams[streamIndex].url = serverUrl
+                FindSubtitles(m.streams[streamIndex])
+                return
+            end if
         end if
     end if
 
@@ -3291,6 +3316,14 @@ sub onChoiceSelected(event as object)
         m.playbackReturnMode = "streams"
         stream = m.streams[index]
         if DirectStreamUrl(stream) = ""
+            if stream.strokuTorrent
+                serverUrl = StreamingServerStreamUrl(stream)
+                if serverUrl <> ""
+                    stream.url = serverUrl
+                    FindSubtitles(stream)
+                    return
+                end if
+            end if
             ShowStatus(TrText("status.streams.torrentNotPlayable"), false)
             return
         end if
