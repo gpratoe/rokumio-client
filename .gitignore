@@ -22,3 +22,5 @@ rokudeploy.json
 
 # Generated repo snapshot (contains a full stale copy of the codebase)
 repomix-output.xml
+
+reference/
