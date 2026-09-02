@@ -144,6 +144,7 @@ sub init()
     m.watchedItems = []
     m.libraryById = {}
     m.stremioAuthKey = ""
+    m.streamingServerUrl = ""
     m.linkCode = ""
     m.linkUrl = ""
     m.selectedItem = invalid
@@ -233,9 +234,11 @@ sub init()
     m.video.ObserveField("position", "onVideoPositionChanged")
     m.video.ObserveField("duration", "onVideoDurationChanged")
     m.top.ObserveField("configurationUrl", "onConfigurationUrlChanged")
+    m.top.ObserveField("streamingServerUrl", "onStreamingServerUrlChanged")
     m.linkPollTimer.ObserveField("fire", "onLinkPollTimer")
 
     LoadAddonConfiguration()
+    LoadStreamingServerConfig()
     LoadSubtitlePreferences()
     LoadInterfacePreferences()
     ' Must precede the first render: every label below reads the active language.
@@ -1073,6 +1076,13 @@ function BuildGeneralSettingsRows() as object
         rows.Push(SettingRow(TrText("settings.general.disconnect"), "", "disconnect", invalid, "action", TrText("settings.general.disconnect.hint")))
     end if
 
+    rows.Push(SettingHeader(TrText("settings.general.header.streaming")))
+    rows.Push(SettingRow(TrText("settings.general.streamingServer"), StreamingServerDisplay(), "streamingServer", invalid, "action", TrText("settings.general.streamingServer.hint")))
+    rows.Push(SettingRow(TrText("settings.general.testStreamingServer"), "", "testStreamingServer", invalid, "action", TrText("settings.general.testStreamingServer.hint")))
+    if StreamingServerConfigured()
+        rows.Push(SettingRow(TrText("settings.general.clearStreamingServer"), "", "clearStreamingServer", invalid, "action", TrText("settings.general.clearStreamingServer.hint")))
+    end if
+
     rows.Push(SettingHeader(TrText("settings.general.header.about")))
     rows.Push(SettingRow(TrText("settings.general.appVersion"), AppVersionValue(), "none", invalid, "info", TrText("settings.general.appVersion.hint")))
     rows.Push(SettingRow(TrText("settings.general.channelBuild"), AppBuildValue(), "none", invalid, "info", TrText("settings.general.channelBuild.hint")))
@@ -1333,6 +1343,16 @@ sub ActivateAction(actionType as string, payload as dynamic)
         CycleSubtitleOutlineColor()
     else if actionType = "defaultAudioTrack"
         CycleDefaultAudioTrack()
+    else if actionType = "streamingServer"
+        OpenStreamingServerConfiguration()
+    else if actionType = "testStreamingServer"
+        TestStreamingServer()
+    else if actionType = "clearStreamingServer"
+        m.streamingServerUrl = ""
+        SaveStreamingServerConfig()
+        HideStatus()
+        RenderSettings(true)
+        ShowStatus(TrText("status.server.cleared"), false)
     else if actionType = "calendarEpisode"
         OpenCalendarEpisode(payload)
     end if
@@ -2266,6 +2286,34 @@ sub LoadStremioAccount()
     end if
 end sub
 
+sub LoadStreamingServerConfig()
+    section = CreateObject("roRegistrySection", "Stroku")
+    if section.Exists("streamingServerUrl")
+        m.streamingServerUrl = section.Read("streamingServerUrl")
+    end if
+end sub
+
+sub SaveStreamingServerConfig()
+    section = CreateObject("roRegistrySection", "Stroku")
+    if m.streamingServerUrl = ""
+        section.Delete("streamingServerUrl")
+    else
+        section.Write("streamingServerUrl", m.streamingServerUrl)
+    end if
+    section.Flush()
+end sub
+
+' The dedicated streaming server is optional: without it torrent-only add-ons
+' keep being shown as unplayable, exactly as before this setting existed.
+function StreamingServerConfigured() as boolean
+    return m.streamingServerUrl <> ""
+end function
+
+function StreamingServerDisplay() as string
+    if not StreamingServerConfigured() then return TrText("settings.general.notConfigured")
+    return m.streamingServerUrl
+end function
+
 sub LoadAddonConfiguration()
     section = CreateObject("roRegistrySection", "Stroku")
     urls = []
@@ -2478,6 +2526,9 @@ sub onHttpResponse(event as object)
             HandleStreamRequestError(response.error)
         else if requestType = "subtitles"
             HandleSubtitleRequestError(response.error)
+        else if requestType = "serverTest"
+            HideStatus()
+            ShowStatus(TrFormat("status.server.failed", response.error), false)
         else
             ShowStatus(response.error, false)
         end if
@@ -2521,6 +2572,9 @@ sub onHttpResponse(event as object)
         HandleLibraryPutResponse(response.data)
     else if requestType = "libraryPutSilent"
         print "[Stroku] Silent library update succeeded"
+    else if requestType = "serverTest"
+        HideStatus()
+        ShowStatus(TrText("status.server.ok"), false)
     end if
 end sub
 
@@ -4209,6 +4263,92 @@ end sub
 
 function IsValidManifestUrl(url as string) as boolean
     return Left(LCase(url), 8) = "https://" and Right(LCase(url), 14) = "/manifest.json"
+end function
+
+sub OpenStreamingServerConfiguration()
+    dialog = CreateObject("roSGNode", "KeyboardDialog")
+    dialog.title = TrText("dialog.streamingServer.title")
+    dialog.message = TrText("dialog.streamingServer.message")
+    dialog.text = m.streamingServerUrl
+    dialog.buttons = ["Save", "Cancel"]
+    dialog.ObserveField("buttonSelected", "onStreamingServerButton")
+    m.keyboardDialog = dialog
+    m.top.dialog = dialog
+end sub
+
+sub onStreamingServerButton(event as object)
+    button = event.GetData()
+    if button <> 0
+        m.keyboardDialog.close = true
+        return
+    end if
+
+    url = NormalizeStreamingServerUrl(m.keyboardDialog.text)
+    if not IsValidStreamingServerUrl(url)
+        m.keyboardDialog.message = TrText("dialog.streamingServer.invalid")
+        return
+    end if
+
+    m.keyboardDialog.close = true
+    m.streamingServerUrl = url
+    SaveStreamingServerConfig()
+    RenderSettings(true)
+    TestStreamingServer()
+end sub
+
+sub onStreamingServerUrlChanged(event as object)
+    url = NormalizeStreamingServerUrl(event.GetData())
+    if not IsValidStreamingServerUrl(url)
+        ShowStatus(TrText("status.server.invalidFromPhone"), false)
+        return
+    end if
+
+    m.streamingServerUrl = url
+    SaveStreamingServerConfig()
+    TestStreamingServer()
+end sub
+
+sub TestStreamingServer()
+    if not StreamingServerConfigured() then return
+    ShowStatus(TrText("status.server.testing"), true)
+    StartServerTestRequest()
+end sub
+
+sub StartServerTestRequest()
+    task = CreateObject("roSGNode", "HttpTask")
+    task.url = m.streamingServerUrl + "/heartbeat"
+    task.requestId = "serverTest"
+    task.timeoutMs = 8000
+    task.ObserveField("response", "onHttpResponse")
+    m.tasks.Push(task)
+    task.control = "RUN"
+end sub
+
+' The streaming server is reached over plain HTTP on the local network, so the
+' rules are looser than IsValidManifestUrl: the scheme defaults to http, the
+' port is optional, and no /manifest.json suffix is expected.
+function NormalizeStreamingServerUrl(url as string) as string
+    url = url.Trim()
+    while Right(url, 1) = "/"
+        url = Left(url, Len(url) - 1)
+    end while
+    if Instr(1, url, "://") = 0
+        url = "http://" + url
+    end if
+    return url
+end function
+
+function IsValidStreamingServerUrl(url as string) as boolean
+    lower = LCase(url)
+    if Left(lower, 7) <> "http://" and Left(lower, 8) <> "https://" then return false
+
+    host = url
+    marker = "://"
+    schemeEnd = Instr(1, url, marker)
+    if schemeEnd > 0 then host = Mid(url, schemeEnd + Len(marker))
+    if host = "" or Left(host, 1) = "/" then return false
+    if Instr(1, host, "@") > 0 or Instr(1, host, "#") > 0 or Instr(1, host, " ") > 0 then return false
+    return true
 end function
 
 function IsValidAddonManifest(manifest as dynamic) as boolean

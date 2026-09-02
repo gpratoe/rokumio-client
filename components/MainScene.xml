@@ -4,6 +4,7 @@
         <function name="PlayExternal" />
         <function name="ShowSetupAddress" />
         <field id="configurationUrl" type="string" alwaysNotify="true" />
+        <field id="streamingServerUrl" type="string" alwaysNotify="true" />
         <field id="exitApp" type="boolean" alwaysNotify="true" value="false" />
     </interface>
 

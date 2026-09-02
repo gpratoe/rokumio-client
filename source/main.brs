@@ -186,9 +186,25 @@ sub HandleSetupHttpRequest(connection as object, request as string, scene as obj
         return
     end if
 
+    serverUrl = ReadFormValue(body, "server").Trim()
+    if serverUrl <> "" and not IsValidSetupStreamingServerUrl(serverUrl)
+        SendHttpResponse(connection, 400, "Bad Request", ErrorPage("Enter a streaming server URL like http://192.168.1.20:11470."))
+        return
+    end if
+
     scene.configurationUrl = manifestUrl
+    if serverUrl <> ""
+        scene.streamingServerUrl = serverUrl
+    end if
     SendHttpResponse(connection, 200, "OK", SuccessPage())
 end sub
+
+function IsValidSetupStreamingServerUrl(url as string) as boolean
+    lower = LCase(url)
+    if Left(lower, 7) <> "http://" and Left(lower, 8) <> "https://" then return false
+    if Instr(1, url, " ") > 0 then return false
+    return true
+end function
 
 function IsValidSetupManifestUrl(url as string) as boolean
     return Left(LCase(url), 8) = "https://" and Right(LCase(url), 14) = "/manifest.json"
@@ -221,7 +237,7 @@ sub SendHttpResponse(connection as object, statusCode as integer, statusText as 
 end sub
 
 function SetupPage() as string
-    return PageStart("Configure Stroku") + "<h1>Add a Stremio add-on</h1><p>Paste a complete HTTPS Stremio add-on manifest URL below. It is sent directly to this Roku over your local network.</p><form method='post' action='/configure'><label for='manifest'>Add-on manifest URL</label><textarea id='manifest' name='manifest' rows='6' required autofocus placeholder='https://.../manifest.json'></textarea><button type='submit'>Add to Roku</button></form>" + PageEnd()
+    return PageStart("Configure Stroku") + "<h1>Add a Stremio add-on</h1><p>Paste a complete HTTPS Stremio add-on manifest URL below. It is sent directly to this Roku over your local network.</p><form method='post' action='/configure'><label for='manifest'>Add-on manifest URL</label><textarea id='manifest' name='manifest' rows='6' required autofocus placeholder='https://.../manifest.json'></textarea><label for='server'>Streaming server (optional)</label><textarea id='server' name='server' rows='3' placeholder='http://192.168.1.20:11470'></textarea><button type='submit'>Add to Roku</button></form>" + PageEnd()
 end function
 
 function SuccessPage() as string
