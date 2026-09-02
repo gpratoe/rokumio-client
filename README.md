@@ -1,8 +1,8 @@
 <div align="center">
 
-# Stroku Native
+# Rokumio
 
-### A native Roku client for Stremio metadata, libraries, add-ons, and direct playback
+### A modified Roku client for Stremio with support for external streaming servers.
 
 <p>
   <img src="https://img.shields.io/badge/platform-Roku-662D91?style=flat-square" alt="Roku" />
@@ -11,11 +11,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22C55E?style=flat-square" alt="MIT License" /></a>
 </p>
 
-Browse your Stremio library from the couch, install add-ons from your own manifest URLs, and play direct HTTP(S) media streams with a Roku remote.
+
+Rokumio is based on [Stroku-Native](https://github.com/gabrielsmith1874/Stroku/tree/main/Stroku-Native) and extends its native Roku Stremio client with the ability to connect to an external
+streaming server. The server can resolve and process streams that cannot be played directly by Roku.
 
 </div>
 
-## What Stroku does
+## What Rokumio does
 
 - Browse Cinemeta movie and series metadata with the Roku remote.
 - Connect a Stremio account through the official link-code flow.
@@ -26,20 +28,25 @@ Browse your Stremio library from the couch, install add-ons from your own manife
 - Play direct HTTP(S) media URLs and select subtitle tracks.
 - Customize subtitle appearance and playback settings.
 - Accept direct media URLs through Roku deep linking with `contentId`.
+- Connect to an external Stremio-compatible streaming server.
+- Send selected streams to the external server for processing and playback.
 
 ## What it does not do
-
-Stroku is a client, not a content service. It does not host, index, cache, or distribute media, and it has no torrent engine. Raw torrent-only, magnet, YouTube-ID, external-page, catalog, and metadata results are not playable in this version.
+Rokumio is a Roku client and does not provide or distribute media itself. Media that cannot be played directly by Roku can be handled by a configured external streaming server. The server is responsible for resolving and processing supported streams before they are delivered to the Roku client. Rokumio-client itself does not contain a torrent engine.
 
 ## How it works
 
 ```text
-Your Roku  <->  Stroku Native  <->  Stremio metadata / account services
-                                  \-> add-ons you install yourself
-                                  \-> direct HTTP(S) media URLs
-```
+Your Roku  <->  Rokumio-client  <->  Stremio metadata / account services
+                    │
+                    ├── add-ons you install yourself
+                    │
+                    ├── direct HTTP(S) media URLs
+                    │
+              Streaming server
+``
 
-Add-ons are supplied by the user through a manifest URL. Stroku stores configured add-ons and the Stremio auth key in the Roku registry; it does not operate or control third-party add-ons.
+Add-ons are supplied by the user through a manifest URL. Rokumio stores configured add-ons and the Stremio auth key in the Roku registry; it does not operate or control third-party add-ons.
 
 ## Quick start
 
@@ -56,7 +63,7 @@ Sideload `dist/stroku-native.zip` through Roku developer mode.
 
 ### 2. Add stream or subtitle add-ons
 
-While Stroku is open, visit the phone setup address shown in the upper-right corner of the TV. Paste a complete `https://.../manifest.json` URL and select **Add to Roku**. Your phone and Roku must be on the same local network.
+While Rokumio is open, visit the phone setup address shown in the upper-right corner of the TV. Paste a complete `https://.../manifest.json` URL and select **Add to Roku**. Your phone and Roku must be on the same local network.
 
 ### 3. Connect Stremio
 
@@ -97,18 +104,27 @@ public export pending separate ownership and trademark review.
 
 Playback depends on the protocols, codecs, and subtitle formats supported by the Roku model. Roku-specific behavior still needs testing on physical devices, especially playback headers, codec compatibility, local setup, and registry persistence.
 
+## Based on
+
+Rokumio is based on [Stroku/Stroku-Native](https://github.com/gabrielsmith1874/Stroku), originally developed by gpratoe and contributors.
+
+The original project provides the Roku-side Stremio client,
+including metadata, libraries, add-ons, subtitles, and direct
+HTTP(S) playback. Rokumio extends this functionality with
+external streaming server support.
+
 ## Disclaimer
 
 <details>
 <summary>Read the project disclaimer</summary>
 
-Stroku is a free, open-source client application. It hosts, indexes, caches, and distributes no media content, operates no content servers, and maintains no catalogue of sources. It has no torrent client and cannot process magnet links, `.torrent` files, or peer-to-peer swarms; results that are not directly playable HTTP(S) media URLs are rejected before playback.
+Rokumio is a free, open-source client application. It does not host, index, cache, or distribute media content, operate content servers, provide streaming services, or maintain a catalogue of sources. Rokumio itself has no torrent client and does not process magnet links, `.torrent` files, or peer-to-peer swarms. Users may optionally configure an external streaming server of their choice to process and serve streams that cannot be played directly by Roku. Rokumio does not provide, operate, or control such servers.
 
 The only add-on included by default is Cinemeta, the official Stremio metadata catalogue, which supplies titles, artwork, and descriptions only. Every other add-on is installed by the user from a manifest URL the user supplies. This project does not recommend, rank, bundle, link to, or distribute third-party add-ons, and does not operate or control any add-on you install.
 
 Users are responsible for ensuring that the sources they connect and the content they access are lawful in their jurisdiction. Do not use this software to infringe copyright or to circumvent access controls.
 
-Stroku is an independent project and is not affiliated with, endorsed by, or associated with Roku, Inc. or Stremio. All trademarks are the property of their respective owners.
+Rokumio is an independent project and is not affiliated with, endorsed by, or associated with Roku, Inc. or Stremio. All trademarks are the property of their respective owners.
 
 Provided “as is”, without warranty of any kind. See [LICENSE](LICENSE).
 
