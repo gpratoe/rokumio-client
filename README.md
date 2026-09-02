@@ -44,7 +44,7 @@ Your Roku  <->  Rokumio-client  <->  Stremio metadata / account services
                     ├── direct HTTP(S) media URLs
                     │
               Streaming server
-``
+```
 
 Add-ons are supplied by the user through a manifest URL. Rokumio stores configured add-ons and the Stremio auth key in the Roku registry; it does not operate or control third-party add-ons.
 
