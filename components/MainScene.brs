@@ -163,7 +163,6 @@ sub init()
     m.pendingStreamRequests = 0
     m.completedStreamRequests = 0
     m.streamRequestErrors = []
-    m.torrentOnlyCount = 0
     m.addonLoadPending = 0
     m.addonReloadActive = false
     m.pendingStreamLookup = invalid
@@ -3156,7 +3155,6 @@ sub FindStreams(contentType as string, id as string, title as string, returnMode
     m.pendingStreamRequests = matchingAddons.Count()
     m.completedStreamRequests = 0
     m.streamRequestErrors = []
-    m.torrentOnlyCount = 0
     m.streams = []
 
     for each addonIndex in matchingAddons
@@ -3188,7 +3186,12 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
                 stream.strokuAddonName = addonName
                 m.streams.Push(stream)
             else if stream <> invalid and stream.DoesExist("infoHash")
-                m.torrentOnlyCount = m.torrentOnlyCount + 1
+                ' Torrent-only results have no direct URL. They are listed so the
+                ' user can see them, but persistent playback arrives with the
+                ' dedicated streaming server work.
+                stream.strokuTorrent = true
+                stream.strokuAddonName = addonName
+                m.streams.Push(stream)
             end if
         end for
     end if
@@ -3201,12 +3204,8 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
     if m.pendingNextEpisode = invalid then m.selectedStreamIndex = 0
 
     if m.streams.Count() = 0
-        message = "The installed add-ons returned no direct playable streams."
-        if m.torrentOnlyCount > 0
-            message = message + " They returned " + m.torrentOnlyCount.ToStr() + " raw torrent result(s), but Roku cannot play torrents without a direct URL."
-        end if
         RecoverFromNextEpisodeFailure()
-        ShowNoStreamsScreen(message)
+        ShowNoStreamsScreen("The installed add-ons returned no playable streams.")
         return
     end if
 
@@ -3214,8 +3213,10 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
         streamIndex = m.selectedStreamIndex
         if streamIndex < 0 or streamIndex >= m.streams.Count() then streamIndex = 0
         m.selectedStreamIndex = streamIndex
-        FindSubtitles(m.streams[streamIndex])
-        return
+        if DirectStreamUrl(m.streams[streamIndex]) <> ""
+            FindSubtitles(m.streams[streamIndex])
+            return
+        end if
     end if
 
     ShowChoices("Choose a stream (" + m.streams.Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
@@ -3288,7 +3289,12 @@ sub onChoiceSelected(event as object)
         if index >= m.streams.Count() then return
         m.selectedStreamIndex = index
         m.playbackReturnMode = "streams"
-        FindSubtitles(m.streams[index])
+        stream = m.streams[index]
+        if DirectStreamUrl(stream) = ""
+            ShowStatus(TrText("status.streams.torrentNotPlayable"), false)
+            return
+        end if
+        FindSubtitles(stream)
     end if
 end sub
 
