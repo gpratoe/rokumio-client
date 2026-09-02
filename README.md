@@ -106,7 +106,7 @@ Playback depends on the protocols, codecs, and subtitle formats supported by the
 
 ## Based on
 
-Rokumio is based on [Stroku/Stroku-Native](https://github.com/gabrielsmith1874/Stroku), originally developed by gpratoe and contributors.
+Rokumio is based on [Stroku/Stroku-Native](https://github.com/gabrielsmith1874/Stroku), originally developed by [gabrielsmith1874](https://github.com/gabrielsmith1874) and contributors.
 
 The original project provides the Roku-side Stremio client,
 including metadata, libraries, add-ons, subtitles, and direct
