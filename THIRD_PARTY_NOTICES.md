@@ -1,7 +1,7 @@
 # Third-party notices
 
 This file records the direct development-time dependencies and generated icon
-source used by Stroku Native. The Node.js tools are not bundled into the Roku
+source used by Rokumio client. The Node.js tools are not bundled into the Roku
 channel package.
 
 ## Direct development dependencies
@@ -25,13 +25,17 @@ Icons are distributed under Apache-2.0; see the
 [MaterialDesign repository](https://github.com/Templarian/MaterialDesign) for
 the upstream notices.
 
-The support QR code, vignette, stream metadata icons, and Stroku branding
+The support QR code, vignette, stream metadata icons, and Rokumio branding
 assets are generated or authored for this project. Verify ownership before
-reusing them outside Stroku Native.
+reusing them outside Rokumio client.
+
+Some assets or references under the name “Stroku” may still remain in the codebase.
+These belong to the original Stroku Native project and have been retained as part
+of the transition to Rokumio.
 
 ## External services and trademarks
 
-Stroku Native can connect to Stremio services and user-supplied add-ons, but it
+Rokumio client can connect to Stremio services and user-supplied add-ons, but it
 does not operate those services or redistribute their content. Roku and
-Stremio are trademarks of their respective owners. Stroku Native is an
+Stremio are trademarks of their respective owners. Rokumio client is an
 independent project and is not endorsed by either company.

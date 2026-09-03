@@ -2037,7 +2037,7 @@ sub LoadSubtitlePreferences()
     m.subtitlePosition = "Bottom bar"
     m.subtitlesEnabledByDefault = false
 
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     if section.Exists("subtitleRenderMode") then m.subtitleRenderMode = section.Read("subtitleRenderMode")
     if section.Exists("subtitleFont") then m.subtitleFont = section.Read("subtitleFont")
     if section.Exists("subtitleTextSize") then m.subtitleTextSize = section.Read("subtitleTextSize")
@@ -2231,7 +2231,7 @@ sub CloseUiScaleSlider(save as boolean)
 end sub
 
 sub LoadInterfacePreferences()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     if section.Exists("interfaceLanguage") then m.interfaceLanguage = section.Read("interfaceLanguage")
     if section.Exists("uiScalePercent")
         storedScale = Int(Val(section.Read("uiScalePercent")))
@@ -2247,7 +2247,7 @@ sub LoadInterfacePreferences()
 end sub
 
 sub SaveInterfacePreferences()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     section.Write("interfaceLanguage", m.interfaceLanguage)
     section.Write("uiScalePercent", m.uiScalePercent.ToStr())
     if m.blurUnwatchedEpisodes
@@ -2259,7 +2259,7 @@ sub SaveInterfacePreferences()
 end sub
 
 sub LoadPlayerPreferences()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     if section.Exists("defaultSubtitleLanguage") then m.defaultSubtitleLanguage = section.Read("defaultSubtitleLanguage")
     if section.Exists("subtitleDefaultMode") then m.subtitleDefaultMode = section.Read("subtitleDefaultMode")
     if section.Exists("lastSubtitleSelection") then m.lastSubtitleSelection = section.Read("lastSubtitleSelection")
@@ -2268,7 +2268,7 @@ sub LoadPlayerPreferences()
 end sub
 
 sub SavePlayerPreferences()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     section.Write("defaultSubtitleLanguage", m.defaultSubtitleLanguage)
     section.Write("subtitleDefaultMode", m.subtitleDefaultMode)
     section.Write("lastSubtitleSelection", m.lastSubtitleSelection)
@@ -2278,7 +2278,7 @@ sub SavePlayerPreferences()
 end sub
 
 sub LoadStremioAccount()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     if section.Exists("stremioAuthKey")
         m.stremioAuthKey = section.Read("stremioAuthKey")
         FetchLibrary()
@@ -2286,14 +2286,14 @@ sub LoadStremioAccount()
 end sub
 
 sub LoadStreamingServerConfig()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     if section.Exists("streamingServerUrl")
         m.streamingServerUrl = section.Read("streamingServerUrl")
     end if
 end sub
 
 sub SaveStreamingServerConfig()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     if m.streamingServerUrl = ""
         section.Delete("streamingServerUrl")
     else
@@ -2331,7 +2331,7 @@ function StreamingServerStreamUrl(stream as object) as string
 end function
 
 sub LoadAddonConfiguration()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     urls = []
     if section.Exists("addonManifestUrls")
         storedUrls = ParseJson(section.Read("addonManifestUrls"))
@@ -3206,7 +3206,7 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
                 ' Torrent-only results have no direct URL. They are listed so the
                 ' user can see them, and played back through the dedicated
                 ' streaming server when one is configured.
-                stream.strokuTorrent = true
+                stream.rokumioTorrent = true
                 stream.strokuAddonName = addonName
                 m.streams.Push(stream)
             end if
@@ -3234,7 +3234,7 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
             FindSubtitles(m.streams[streamIndex])
             return
         end if
-        if m.streams[streamIndex].strokuTorrent
+        if m.streams[streamIndex].rokumioTorrent
             serverUrl = StreamingServerStreamUrl(m.streams[streamIndex])
             if serverUrl <> ""
                 m.streams[streamIndex].url = serverUrl
@@ -3316,7 +3316,7 @@ sub onChoiceSelected(event as object)
         m.playbackReturnMode = "streams"
         stream = m.streams[index]
         if DirectStreamUrl(stream) = ""
-            if stream.strokuTorrent
+            if stream.rokumioTorrent
                 serverUrl = StreamingServerStreamUrl(stream)
                 if serverUrl <> ""
                     stream.url = serverUrl
@@ -3597,13 +3597,13 @@ sub SaveSubtitleSyncOffset(offset as float)
         offsets[key] = offset
     end if
 
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     section.Write("subtitleSyncOffsets", FormatJson(offsets))
     section.Flush()
 end sub
 
 function LoadSubtitleSyncOffsets() as object
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     if section.Exists("subtitleSyncOffsets")
         parsed = ParseJson(section.Read("subtitleSyncOffsets"))
         if parsed <> invalid then return parsed
@@ -3846,7 +3846,7 @@ sub onSubtitleSettingsButton(event as object)
 end sub
 
 sub SaveSubtitlePreferences()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     section.Write("subtitleRenderMode", m.subtitleRenderMode)
     section.Write("subtitleFont", m.subtitleFont)
     section.Write("subtitleTextSize", m.subtitleTextSize)
@@ -3890,10 +3890,10 @@ sub OpenSettingsLink(kind as string)
     ' authored in every language.
     if kind = "support"
         dialog.title = TrText("dialog.link.support.title")
-        dialog.message = TrText("dialog.link.support.message") + Chr(10) + "https://github.com/gabrielsmith1874/Stroku/issues"
+        dialog.message = TrText("dialog.link.support.message") + Chr(10) + "https://github.com/gpratoe/rokumio-client/issues"
     else if kind = "source"
         dialog.title = TrText("dialog.link.source.title")
-        dialog.message = TrText("dialog.link.source.message") + Chr(10) + "https://github.com/gabrielsmith1874/Stroku/tree/main/Stroku-Native"
+        dialog.message = TrText("dialog.link.source.message") + Chr(10) + "https://github.com/gpratoe/rokumio-client"
     else if kind = "terms"
         dialog.title = TrText("dialog.link.terms.title")
         dialog.message = TrText("dialog.link.terms.message") + Chr(10) + "https://www.stremio.com/tos"
@@ -4032,7 +4032,7 @@ sub HandleLinkReadResponse(data as object)
     m.linkCode = ""
     if m.linkDialog <> invalid then m.linkDialog.close = true
 
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     section.Write("stremioAuthKey", authKey)
     section.Flush()
     m.stremioAuthKey = authKey
@@ -4041,7 +4041,7 @@ sub HandleLinkReadResponse(data as object)
 end sub
 
 sub DisconnectStremio()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     section.Delete("stremioAuthKey")
     section.Flush()
     m.stremioAuthKey = ""
@@ -4559,7 +4559,7 @@ sub ReplaceStoredAddonUrl(oldUrl as string, newUrl as string)
 end sub
 
 sub StoreAddonUrls()
-    section = CreateObject("roRegistrySection", "Stroku")
+    section = CreateObject("roRegistrySection", "Rokumio")
     section.Write("addonManifestUrls", FormatJson(m.addonManifestUrls))
     section.Flush()
 end sub

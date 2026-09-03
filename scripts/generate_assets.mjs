@@ -7,7 +7,7 @@ import QRCode from 'qrcode';
 
 const outDir = path.resolve('images');
 
-const supportUrl = 'https://buymeacoffee.com/gabrielsmith';
+const supportUrl = 'soon';
 
 async function downloadIcon(name, iconifyId, size = 128) {
   const url = `https://api.iconify.design/${iconifyId}.svg?color=white&width=${size}&height=${size}`;

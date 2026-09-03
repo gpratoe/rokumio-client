@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $outputDirectory = Join-Path $projectRoot "dist"
-$outputFile = Join-Path $outputDirectory "stroku-native.zip"
+$outputFile = Join-Path $outputDirectory "rokumio-client.zip"
 
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 if (Test-Path $outputFile) {

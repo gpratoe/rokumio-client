@@ -18,7 +18,7 @@ sub execute()
     transfer.RetainBodyOnError(true)
     transfer.EnableEncodings(true)
     transfer.AddHeader("Accept", "application/json")
-    transfer.AddHeader("User-Agent", "Stroku/0.1 Roku")
+    transfer.AddHeader("User-Agent", "Rokumio/0.1 Roku")
     if UCase(m.top.method) = "POST"
         transfer.AddHeader("Content-Type", "application/json")
     end if

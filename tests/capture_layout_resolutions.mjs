@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 const projectRoot = process.cwd();
 const toolsRoot = path.resolve(projectRoot, '..', 'tools', 'brs-engine');
 const outputDir = path.join(projectRoot, 'screenshots', 'resolution-check');
-const appSlot = path.join(toolsRoot, 'packages', 'browser', 'apps', 'stroku-native.zip');
+const appSlot = path.join(toolsRoot, 'packages', 'browser', 'apps', 'rokumio-client.zip');
 const mockZip = path.join(projectRoot, 'dist', 'stroku-native-mock.zip');
 
 const profiles = [

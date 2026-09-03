@@ -5,8 +5,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$stagingRoot = Join-Path $env:TEMP "stroku-native-mock"
-$outputFile = Join-Path $projectRoot "dist\stroku-native-mock.zip"
+$stagingRoot = Join-Path $env:TEMP "rokumio-client-mock"
+$outputFile = Join-Path $projectRoot "dist\rokumio-client-mock.zip"
 
 if (Test-Path $stagingRoot) {
     $resolvedStaging = (Resolve-Path $stagingRoot).Path

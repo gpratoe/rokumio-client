@@ -59,7 +59,7 @@ npm install
 npm run package
 ```
 
-Sideload `dist/stroku-native.zip` through Roku developer mode.
+Sideload `dist/rokumio-client.zip` through Roku developer mode.
 
 ### 2. Add stream or subtitle add-ons
 

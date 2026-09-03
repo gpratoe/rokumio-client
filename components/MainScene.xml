@@ -25,7 +25,7 @@
                 translation="[34, 36]"
                 width="170"
                 height="46"
-                text="Stroku"
+                text="Rokumio"
                 font="font:MediumBoldSystemFont"
                 color="0xFFFFFFFF" />
             <Label
@@ -709,7 +709,7 @@
                 translation="[40, 42]"
                 width="600"
                 height="52"
-                text="STROKU"
+                text="ROKUMIO"
                 font="font:MediumBoldSystemFont"
                 color="0x8E73FFFF" />
             <Label
@@ -830,7 +830,7 @@
                 translation="[460, 284]"
                 width="1000"
                 height="60"
-                text="Support Stroku"
+                text="Support Rokumio"
                 font="font:LargeBoldSystemFont"
                 color="0xFFFFFFFF" />
             <Label
@@ -874,7 +874,7 @@
                 translation="[812, 560]"
                 width="648"
                 height="52"
-                text="buymeacoffee.com/gabrielsmith"
+                text="soon"
                 font="font:MediumBoldSystemFont"
                 color="0x9D86FFFF" />
             <Label

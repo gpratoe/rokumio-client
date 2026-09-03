@@ -39,9 +39,9 @@ if ([string]::IsNullOrWhiteSpace($RokuIp)) {
     throw "Set ROKU_IP or pass -RokuIp with the Roku device address before sideloading."
 }
 $outputDirectory = Join-Path $projectRoot "dist"
-$zipFile = Join-Path $outputDirectory "stroku-native.zip"
+$zipFile = Join-Path $outputDirectory "rokumio-client.zip"
 
-$secretStore = Join-Path $env:LOCALAPPDATA "Stroku\roku-secrets.xml"
+$secretStore = Join-Path $env:LOCALAPPDATA "Rokumio\roku-secrets.xml"
 
 if ($ResetSecrets -and (Test-Path $secretStore)) {
     Remove-Item -LiteralPath $secretStore -Force
@@ -168,7 +168,7 @@ try {
         throw "Roku did not return a package link. The signing key is probably wrong for this device (rerun with -ResetSecrets)."
     }
 
-    $pkgFile = Join-Path $outputDirectory "stroku-native.pkg"
+    $pkgFile = Join-Path $outputDirectory "rokumio-client.pkg"
     Write-Host "==> Downloading $($match.Value)"
     & curl.exe --silent --show-error --config $curlConfig -o $pkgFile "http://$RokuIp/$($match.Value)"
     if ($LASTEXITCODE -ne 0) { throw "Package download failed." }

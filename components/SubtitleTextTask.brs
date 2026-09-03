@@ -18,7 +18,7 @@ sub execute()
     transfer.RetainBodyOnError(true)
     transfer.EnableEncodings(true)
     transfer.AddHeader("Accept", "text/plain, application/x-subrip, */*")
-    transfer.AddHeader("User-Agent", "Stroku/0.1 Roku")
+    transfer.AddHeader("User-Agent", "Rokumio/0.1 Roku")
 
     port = CreateObject("roMessagePort")
     transfer.SetMessagePort(port)

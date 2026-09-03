@@ -1,5 +1,5 @@
 {
-  "name": "stroku-native",
+  "name": "rokumio-client",
   "version": "0.1.0",
   "private": false,
   "description": "Native Roku client for Stremio addons and debrid streams",

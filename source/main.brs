@@ -237,15 +237,15 @@ sub SendHttpResponse(connection as object, statusCode as integer, statusText as 
 end sub
 
 function SetupPage() as string
-    return PageStart("Configure Stroku") + "<h1>Add a Stremio add-on</h1><p>Paste a complete HTTPS Stremio add-on manifest URL below. It is sent directly to this Roku over your local network.</p><form method='post' action='/configure'><label for='manifest'>Add-on manifest URL</label><textarea id='manifest' name='manifest' rows='6' required autofocus placeholder='https://.../manifest.json'></textarea><label for='server'>Streaming server (optional)</label><textarea id='server' name='server' rows='3' placeholder='http://192.168.1.20:11470'></textarea><button type='submit'>Add to Roku</button></form>" + PageEnd()
+    return PageStart("Configure Rokumio") + "<h1>Add a Stremio add-on</h1><p>Paste a complete HTTPS Stremio add-on manifest URL below. It is sent directly to this Roku over your local network.</p><form method='post' action='/configure'><label for='manifest'>Add-on manifest URL</label><textarea id='manifest' name='manifest' rows='6' required autofocus placeholder='https://.../manifest.json'></textarea><label for='server'>Streaming server (optional)</label><textarea id='server' name='server' rows='3' placeholder='http://192.168.1.20:11470'></textarea><button type='submit'>Add to Roku</button></form>" + PageEnd()
 end function
 
 function SuccessPage() as string
-    return PageStart("Sent to Roku") + "<h1>Sent to Roku</h1><p>Stroku is verifying the add-on and will save it if the manifest is supported. Check the TV for the result.</p>" + PageEnd()
+    return PageStart("Sent to Roku") + "<h1>Sent to Roku</h1><p>Rokumio is verifying the add-on and will save it if the manifest is supported. Check the TV for the result.</p>" + PageEnd()
 end function
 
 function ErrorPage(message as string) as string
-    return PageStart("Stroku setup error") + "<h1>Could not save</h1><p>" + message + "</p><p><a href='/'>Return to setup</a></p>" + PageEnd()
+    return PageStart("Rokumio setup error") + "<h1>Could not save</h1><p>" + message + "</p><p><a href='/'>Return to setup</a></p>" + PageEnd()
 end function
 
 function PageStart(title as string) as string
