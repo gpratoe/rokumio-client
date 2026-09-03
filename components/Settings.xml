@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="Settings" extends="Group">
+    <!-- The Settings screen owns its whole visible region: the tab chips, the
+         row list, and the detail panel. It keeps its own focus and handles its
+         own keys, and only talks to MainScene through this interface, so none
+         of its internals leak into MainScene's flat onKeyEvent.
+
+         Inputs (MainScene -> Settings):
+           - visible (inherited Group field): MainScene shows/hides the screen and
+                         the component observes it to render + focus on show.
+           - state:    assocarray of current values the rows render from. MainScene
+                         is the source of truth for these, so it pushes a fresh
+                         state after any row action that changed one.
+         Outputs (Settings -> MainScene):
+           - action:     { type, payload } for a row the user pressed OK on. MainScene
+                         dispatches it to the shared services/persistence. Back is
+                         NOT reported here: the component returns false for back and
+                         MainScene owns leaving the screen.
+           - screenInfo:  { tabIndex, title, subtitle, heroTitle, heroDescription }
+                         so MainScene can update its shared chrome (the header and
+                         hero labels live outside this component). MainScene also
+                         mirrors tabIndex because a * (options) press on the
+                         Settings screen is handled at the scene level. -->
+    <interface>
+        <field id="state" type="assocarray" alwaysNotify="true" onChange="onStateChanged" />
+        <field id="focusRequest" type="boolean" onChange="onFocusRequest" />
+        <field id="action" type="assocarray" alwaysNotify="true" />
+        <field id="screenInfo" type="assocarray" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/UiScale.brs" />
+    <script type="text/brightscript" uri="pkg:/components/Locale.brs" />
+    <script type="text/brightscript" uri="pkg:/components/Settings.brs" />
+
+    <children>
+        <!-- Three chips of 320 at a 334 stride span 260..1248, which matches the
+             width of the list panel below them. The indicator step in
+             UpdateSettingsTabs uses the same stride. -->
+        <Rectangle id="settingsTab0Bg" translation="[260, 150]" width="320" height="56" color="0x1B1934FF" />
+        <Label
+            id="settingsTab0Label"
+            translation="[260, 150]"
+            width="320"
+            height="56"
+            text="General"
+            horizAlign="center"
+            vertAlign="center"
+            font="font:SmallBoldSystemFont"
+            color="0xA9A6B8FF" />
+        <Rectangle id="settingsTab1Bg" translation="[594, 150]" width="320" height="56" color="0x1B1934FF" />
+        <Label
+            id="settingsTab1Label"
+            translation="[594, 150]"
+            width="320"
+            height="56"
+            text="Interface"
+            horizAlign="center"
+            vertAlign="center"
+            font="font:SmallBoldSystemFont"
+            color="0xA9A6B8FF" />
+        <Rectangle id="settingsTab2Bg" translation="[928, 150]" width="320" height="56" color="0x1B1934FF" />
+        <Label
+            id="settingsTab2Label"
+            translation="[928, 150]"
+            width="320"
+            height="56"
+            text="Player"
+            horizAlign="center"
+            vertAlign="center"
+            font="font:SmallBoldSystemFont"
+            color="0xA9A6B8FF" />
+        <Rectangle
+            id="settingsTabIndicator"
+            translation="[260, 210]"
+            width="320"
+            height="5"
+            color="0x7657FFFF" />
+
+        <Rectangle id="settingsListPanel" translation="[260, 228]" width="1000" height="612" color="0x131226FF" />
+        <MarkupList
+            id="settingsList"
+            translation="[276, 244]"
+            width="968"
+            height="580"
+            itemSize="[968, 74]"
+            itemSpacing="[0, 6]"
+            numRows="7"
+            itemComponentName="SettingsRow"
+            drawFocusFeedback="false"
+            vertFocusAnimationStyle="fixedFocus" />
+
+        <Rectangle id="settingsDetailPanel" translation="[1300, 228]" width="520" height="612" color="0x161529FF" />
+        <Rectangle translation="[1300, 228]" width="6" height="612" color="0x7657FFFF" />
+        <Label
+            id="settingsDetailEyebrow"
+            translation="[1336, 258]"
+            width="448"
+            height="32"
+            text=""
+            font="font:SmallSystemFont"
+            color="0x9D86FFFF" />
+        <Label
+            id="settingsDetailTitle"
+            translation="[1336, 300]"
+            width="448"
+            height="92"
+            text=""
+            wrap="true"
+            maxLines="2"
+            font="font:MediumBoldSystemFont"
+            color="0xFFFFFFFF" />
+        <Label
+            id="settingsDetailValue"
+            translation="[1336, 402]"
+            width="448"
+            height="42"
+            text=""
+            font="font:MediumSystemFont"
+            color="0xD0C9FFFF" />
+        <Label
+            id="settingsDetailHint"
+            translation="[1336, 462]"
+            width="448"
+            height="290"
+            text=""
+            wrap="true"
+            maxLines="8"
+            font="font:SmallSystemFont"
+            color="0xB4B0C1FF" />
+    </children>
+</component>

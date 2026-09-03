@@ -10,6 +10,7 @@ const root = process.cwd();
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 const mainScene = read('components/MainScene.brs');
+const settingsSource = read('components/Settings.brs');
 const componentSources = fs
     .readdirSync(path.join(root, 'components'))
     .filter((file) => file.endsWith('.brs'))
@@ -19,7 +20,7 @@ const failures = [];
 
 checkSliderTakesFocus();
 checkSliderKeyHandling();
-checkUiScaleOpensOnFocus();
+checkUiScaleOpensOnOk();
 checkSettingsListDispatchesOwnRows();
 checkEverySelectableSettingsRowHasAHandler();
 checkRuntimeCoordinatesAreScaled();
@@ -101,50 +102,48 @@ function checkSliderKeyHandling() {
     }
 }
 
-function checkUiScaleOpensOnFocus() {
-    const focus = functionBody(mainScene, 'MaybeOpenFocusedSettingsRow');
-    if (!focus) {
-        failures.push('MainScene.brs: missing MaybeOpenFocusedSettingsRow');
+// The UI scale slider opens on an explicit OK, like every other settings row,
+// through the uiScale branch of ActivateAction. It must NOT open on focus: an old
+// MaybeOpenFocusedSettingsRow workaround opened it the moment the cursor landed on
+// the row, because OK was double-dispatched (itemSelected plus onKeyEvent) and
+// would have opened-then-immediately-closed it. That root cause is fixed, so the
+// slider opens the normal way and focus navigation stays purely navigational.
+function checkUiScaleOpensOnOk() {
+    const dispatch = functionBody(mainScene, 'ActivateAction');
+    if (!dispatch) {
+        failures.push('MainScene.brs: missing ActivateAction');
         return;
     }
-    if (!focus.includes('row.actionType = "uiScale"')) {
-        failures.push('MaybeOpenFocusedSettingsRow must detect the uiScale settings row');
+    if (!dispatch.includes('actionType = "uiScale"')) {
+        failures.push('ActivateAction must detect the uiScale settings row');
     }
-    if (!focus.includes('OpenUiScaleSlider()')) {
-        failures.push('MaybeOpenFocusedSettingsRow must open the UI scale slider');
-    }
-
-    const move = functionBody(mainScene, 'FocusSettingsSelectableRow');
-    if (!move || !move.includes('MaybeOpenFocusedSettingsRow(m.settingsRows[target])')) {
-        failures.push('FocusSettingsSelectableRow must open UI scale when focus moves to that row');
+    if (!dispatch.includes('OpenUiScaleSlider()')) {
+        failures.push('ActivateAction must open the UI scale slider on OK');
     }
 
-    const focused = functionBody(mainScene, 'onSettingsRowFocused');
-    if (!focused || !focused.includes('MaybeOpenFocusedSettingsRow(m.settingsRows[index])')) {
-        failures.push('onSettingsRowFocused must open UI scale when native list focus reaches that row');
+    if (mainScene.includes('MaybeOpenFocusedSettingsRow')) {
+        failures.push('MainScene.brs: MaybeOpenFocusedSettingsRow must be removed; the UI scale slider opens on OK, not on focus');
     }
 }
 
-// Settings rows are rendered from m.settingsRows. Routing OK through the shared
-// primary info action array is fragile because other renders also own that
-// array; when it is stale, OK on UI Scale silently returns before opening the
-// overlay.
+// Settings rows are rendered from the Settings component's own MarkupList. The
+// component observes itemSelected inside itself and reports the activated row
+// through its action field. MainScene observes that field, so activation still
+// routes through the shared ActivateAction dispatcher (the single activation
+// path) without the scene reaching into the row list.
 function checkSettingsListDispatchesOwnRows() {
-    if (!mainScene.includes('m.settingsList.ObserveField("itemSelected", "onSettingsRowSelected")')) {
-        failures.push('settingsList itemSelected must dispatch through onSettingsRowSelected');
+    if (!mainScene.includes('m.settingsScreen.ObserveField("action", "onSettingsScreenAction")')) {
+        failures.push('settingsScreen action must dispatch through onSettingsScreenAction');
     }
 
-    const selected = functionBody(mainScene, 'onSettingsRowSelected');
-    if (!selected) {
-        failures.push('MainScene.brs: missing onSettingsRowSelected');
+    const dispatched = functionBody(mainScene, 'onSettingsScreenAction');
+    if (!dispatched) {
+        failures.push('MainScene.brs: missing onSettingsScreenAction');
         return;
     }
 
-    if (!selected.includes('m.settingsRows')) {
-        failures.push('onSettingsRowSelected must read the selected row from m.settingsRows');
-    }
-    if (!selected.includes('ActivateSettingsRow')) {
-        failures.push('onSettingsRowSelected must activate the selected settings row');
+    if (!dispatched.includes('ActivateAction(action.type, action.payload)')) {
+        failures.push('onSettingsScreenAction must dispatch the row action to ActivateAction');
     }
 }
 
@@ -164,19 +163,18 @@ function checkEverySelectableSettingsRowHasAHandler() {
 
     // Info rows carry the action type second; settings rows carry a display
     // value first, so theirs is third. Both dispatch through the same handler.
-    const builders = [
-        { name: 'InfoAction', actionTypeIndex: 1 },
-        { name: 'SettingRow', actionTypeIndex: 2 },
-    ];
-
+    // InfoAction rows live in MainScene; SettingRow rows live in the Settings
+    // component now.
     const declared = new Set();
-    for (const builder of builders) {
-        for (const args of callArguments(mainScene, builder.name)) {
-            const actionType = args[builder.actionTypeIndex]?.trim();
-            // Skip rows whose action type is computed rather than a literal.
-            const literal = actionType?.match(/^"([^"]*)"$/);
-            if (literal) declared.add(literal[1]);
-        }
+    for (const args of callArguments(mainScene, 'InfoAction')) {
+        const actionType = args[1]?.trim();
+        const literal = actionType?.match(/^"([^"]*)"$/);
+        if (literal) declared.add(literal[1]);
+    }
+    for (const args of callArguments(settingsSource, 'SettingRow')) {
+        const actionType = args[2]?.trim();
+        const literal = actionType?.match(/^"([^"]*)"$/);
+        if (literal) declared.add(literal[1]);
     }
 
     // "none" is the deliberate marker for an informational row.

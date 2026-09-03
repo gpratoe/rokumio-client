@@ -44,15 +44,6 @@ const xmlChecks = [
             { id: 'addonDetailHint', label: 'addons detail hint', requireFullSafeArea: true },
             { id: 'addonDetailSource', label: 'addons detail source', requireFullSafeArea: true },
             { id: 'addonDetailActionPill', label: 'addons detail action pill', requireFullSafeArea: true },
-            { id: 'settingsTab0Bg', label: 'settings first tab', requireFullSafeArea: true },
-            { id: 'settingsTab2Bg', label: 'settings last tab', requireFullSafeArea: true },
-            { id: 'settingsTab2Label', label: 'settings last tab label', requireFullSafeArea: true },
-            { id: 'settingsTabIndicator', label: 'settings tab indicator', requireFullSafeArea: true },
-            { id: 'settingsListPanel', label: 'settings list panel', requireFullSafeArea: true },
-            { id: 'settingsList', label: 'settings list', requireFullSafeArea: true },
-            { id: 'settingsDetailPanel', label: 'settings detail panel', requireFullSafeArea: true },
-            { id: 'settingsDetailTitle', label: 'settings detail title', requireFullSafeArea: true },
-            { id: 'settingsDetailHint', label: 'settings detail hint', requireFullSafeArea: true },
             { id: 'heroTitle', label: 'home footer title', requireViewportBounds: true },
             { id: 'heroDescription', label: 'home footer description', requireViewportBounds: true },
             { id: 'noStreamsPoster', label: 'no-streams poster', requireViewportBounds: true },
@@ -83,6 +74,23 @@ const xmlChecks = [
             // sits above the 5% inset by design.
             { id: 'supportChipBg', label: 'top bar support chip', requireViewportBounds: true },
             { id: 'supportChipLabel', label: 'top bar support chip label', requireViewportBounds: true },
+        ],
+    },
+    {
+        file: 'components/Settings.xml',
+        nodes: [
+            // Settings screen. The tab chips run to the right design edge and
+            // the detail column sits hard against it, so everything in this
+            // region has to survive overscan.
+            { id: 'settingsTab0Bg', label: 'settings first tab', requireFullSafeArea: true },
+            { id: 'settingsTab2Bg', label: 'settings last tab', requireFullSafeArea: true },
+            { id: 'settingsTab2Label', label: 'settings last tab label', requireFullSafeArea: true },
+            { id: 'settingsTabIndicator', label: 'settings tab indicator', requireFullSafeArea: true },
+            { id: 'settingsListPanel', label: 'settings list panel', requireFullSafeArea: true },
+            { id: 'settingsList', label: 'settings list', requireFullSafeArea: true },
+            { id: 'settingsDetailPanel', label: 'settings detail panel', requireFullSafeArea: true },
+            { id: 'settingsDetailTitle', label: 'settings detail title', requireFullSafeArea: true },
+            { id: 'settingsDetailHint', label: 'settings detail hint', requireFullSafeArea: true },
         ],
     },
     {

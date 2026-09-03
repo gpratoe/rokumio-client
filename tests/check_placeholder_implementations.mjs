@@ -9,6 +9,8 @@ const videoXml = fs.readFileSync(path.join(root, 'components/StrokuVideoPlayer.x
 const episodeCard = fs.readFileSync(path.join(root, 'components/EpisodeCard.brs'), 'utf8');
 const episodeXml = fs.readFileSync(path.join(root, 'components/EpisodeCard.xml'), 'utf8');
 const locale = fs.readFileSync(path.join(root, 'components/Locale.brs'), 'utf8');
+const settings = fs.readFileSync(path.join(root, 'components/Settings.brs'), 'utf8');
+const settingsXml = fs.readFileSync(path.join(root, 'components/Settings.xml'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -24,20 +26,9 @@ const requiredMainPatterns = [
     ['Remote add-on details handler', /sub ShowAddonDetails\(addon as object\)/],
     ['Installed add-on details handler', /sub ShowInstalledAddonDetails\(index as integer\)/],
     ['Settings links handler', /sub OpenSettingsLink\(kind as string\)/],
-    ['Settings rows carry a value, kind, and hint', /function SettingRow\(title as string, value as string, actionType as string, payload as dynamic, kind as string, hint as string\)/],
-    ['Settings sections are headers rather than list rows', /function SettingHeader\(title as string\)/],
-    ['Settings headers are skipped when moving focus', /function NextSelectableSettingsIndex\(/],
-    ['Settings detail panel follows the focused row', /sub UpdateSettingsDetail\(index as integer\)/],
-    ['Settings headers are skipped when moving focus', /function NextSelectableSettingsIndex\(/],
-    ['Settings detail panel follows the focused row', /sub UpdateSettingsDetail\(index as integer\)/],
-    ['Settings remote movement skips headers before list focus changes', /function FocusSettingsSelectableRow\(direction as integer\) as boolean[\s\S]*?m\.settingsSuppressIndex = target[\s\S]*?m\.settingsList\.animateToItem = target[\s\S]*?UpdateSettingsDetail\(target\)[\s\S]*?return true/],
-    ['Settings up/down keys use selectable row movement', /else if \(key = "up" or key = "down"\) and m\.activeTab = "settings" and m\.settingsList\.HasFocus\(\)[\s\S]*?return FocusSettingsSelectableRow\(direction\)/],
     ['Interface preference persistence', /sub SaveInterfacePreferences\(\)/],
     ['Player preference persistence', /sub SavePlayerPreferences\(\)/],
     ['Blur unwatched episodes writes card field', /blurThumbnail: true/],
-    ['App version comes from the device rather than a literal', /SettingRow\(TrText\("settings\.general\.appVersion"\),\s*AppVersionValue\(\)/],
-    ['App version reads roAppInfo', /function AppVersionValue\(\) as string[\s\S]*?CreateObject\("roAppInfo"\)/],
-    ['Channel build reads roAppInfo', /function AppBuildValue\(\) as string[\s\S]*?CreateObject\("roAppInfo"\)/],
     ['Reload add-ons survives on the Addons screen', /AddonChip\(TrText\("addons\.reload"\),\s*"reloadAddons"/],
     ['Calendar metadata request', /"calendarMeta\|"/],
     ['Calendar entries render dated episodes', /function CalendarEntryTitle\(entry as object\) as string/],
@@ -75,6 +66,29 @@ const forbiddenMainPatterns = [
     ['Search dialog still advertises unsupported TVDB', /IMDB\/TVDB IDs/],
     ['App version hardcoded to a Stremio-mimicking literal', /appVersion"\),\s*"/],
     ['Streaming settings tab reintroduced', /"General",\s*"Interface",\s*"Player",\s*"Streaming"/],
+    ['Settings up/down still routed through the scene onKeyEvent', /else if \(key = "up" or key = "down"\) and m\.activeTab = "settings" and m\.settings(Screen|List)\.HasFocus\(\)[\s\S]*?return (true|FocusSettings)/],
+    ['Settings left/right still routed through the scene onKeyEvent', /key = "left" and m\.activeTab = "settings" and m\.settingsList\.HasFocus\(\)/],
+    ['Settings focus echo suppression moved back into the scene', /m\.settingsSuppressIndex/],
+];
+
+const requiredSettingsPatterns = [
+    ['Settings rows carry a value, kind, and hint', /function SettingRow\(title as string, value as string, actionType as string, payload as dynamic, kind as string, hint as string\)/],
+    ['Settings sections are headers rather than list rows', /function SettingHeader\(title as string\)/],
+    ['Settings skip headers when chasing a focus target', /function NextSelectableSettingsIndex\(/],
+    ['Settings detail panel follows the focused row', /sub UpdateSettingsDetail\(index as integer\)/],
+    ['Settings component skips headers before focus changes', /function NextSelectableIndex\(fromIndex as integer, direction as integer\) as integer[\s\S]*?RowIsHeader\(index\)/],
+    ['Settings component owns header skipping on focus', /sub onItemFocused[\s\S]*?if RowIsHeader\(index\)[\s\S]*?NextSelectableIndex\(index, direction\)/],
+    ['Settings component reports row activation to the scene', /sub onItemSelected[\s\S]*?m\.top\.action = \{/],
+    ['Settings component owns tab navigation internally', /function onKeyEvent[\s\S]*?if key = "left"[\s\S]*?m\.settingsTabIndex = m\.settingsTabIndex - 1[\s\S]*?else if key = "right"[\s\S]*?m\.settingsTabIndex = m\.settingsTabIndex \+ 1/],
+    ['App version comes from the device rather than a literal', /SettingRow\(TrText\("settings\.general\.appVersion"\),\s*AppVersionValue\(\)/],
+    ['App version reads roAppInfo', /function AppVersionValue\(\) as string/],
+    ['Channel build reads roAppInfo', /function AppBuildValue\(\) as string/],
+];
+
+const requiredSettingsXmlPatterns = [
+    ['Settings component exposes action and screenInfo outputs', /<field id="action" type="assocarray"/],
+    ['Settings component exposes a screenInfo output', /<field id="screenInfo" type="assocarray"/],
+    ['Settings component takes state from the scene', /<field id="state" type="assocarray"/],
 ];
 
 const requiredVideoPatterns = [
@@ -91,6 +105,14 @@ const requiredEpisodePatterns = [
 
 for (const [label, pattern] of requiredMainPatterns) {
     if (!pattern.test(mainScene)) failures.push(`${label} is missing from MainScene.brs`);
+}
+
+for (const [label, pattern] of requiredSettingsPatterns) {
+    if (!pattern.test(settings)) failures.push(`${label} is missing from Settings.brs`);
+}
+
+for (const [label, pattern] of requiredSettingsXmlPatterns) {
+    if (!pattern.test(settingsXml)) failures.push(`${label} is missing from Settings.xml`);
 }
 
 for (const [label, pattern] of forbiddenMainPatterns) {

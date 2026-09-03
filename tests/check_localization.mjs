@@ -9,6 +9,7 @@ import process from 'node:process';
 const root = process.cwd();
 const locale = fs.readFileSync(path.join(root, 'components/Locale.brs'), 'utf8');
 const mainScene = fs.readFileSync(path.join(root, 'components/MainScene.brs'), 'utf8');
+const settingsSource = fs.readFileSync(path.join(root, 'components/Settings.brs'), 'utf8');
 
 const failures = [];
 
@@ -47,10 +48,15 @@ if (!english || english.size === 0) {
 }
 
 // Every literal key looked up in app code must exist, or the UI silently renders
-// the key itself.
+// the key itself. Settings rows look up their labels and hints too.
 for (const match of mainScene.matchAll(/\bTrText\("([^"]+)"\)/g)) {
     if (english && !english.has(match[1])) {
         failures.push(`MainScene.brs looks up missing key ${match[1]}`);
+    }
+}
+for (const match of settingsSource.matchAll(/\bTrText\("([^"]+)"\)/g)) {
+    if (english && !english.has(match[1])) {
+        failures.push(`Settings.brs looks up missing key ${match[1]}`);
     }
 }
 
@@ -59,6 +65,11 @@ for (const match of mainScene.matchAll(/TrOption\("([^"]+)"/g)) {
     const prefix = `${match[1]}.`;
     const hasAny = english && [...english.keys()].some((key) => key.startsWith(prefix));
     if (!hasAny) failures.push(`MainScene.brs uses TrOption prefix ${match[1]} with no matching keys`);
+}
+for (const match of settingsSource.matchAll(/TrOption\("([^"]+)"/g)) {
+    const prefix = `${match[1]}.`;
+    const hasAny = english && [...english.keys()].some((key) => key.startsWith(prefix));
+    if (!hasAny) failures.push(`Settings.brs uses TrOption prefix ${match[1]} with no matching keys`);
 }
 
 // The mechanism has to stay wired: these are the surfaces UI Language claims to
@@ -69,7 +80,7 @@ const wiringChecks = [
     ['Language change republishes and re-renders nav', /SetLocaleLanguage\(m\.interfaceLanguage\)\s*\n\s*UpdateNavContent\(\)/, mainScene],
     ['Nav labels route through TrText', /child\.title = TrText\("nav\." \+ id\)/, mainScene],
     ['Nav identity kept separate from nav labels', /m\.navIds = \[/, mainScene],
-    ['Settings tab chips route through TrText', /label\.text = TrText\("settings\.tab\./, mainScene],
+    ['Settings tab chips route through TrText', /label\.text = TrText\("settings\.tab\./, settingsSource],
 ];
 
 for (const [label, pattern, source] of wiringChecks) {

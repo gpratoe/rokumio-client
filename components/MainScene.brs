@@ -40,19 +40,7 @@ sub init()
     m.calendarDetailDescription = m.top.FindNode("calendarDetailDescription")
     m.calendarDetailActionPill = m.top.FindNode("calendarDetailActionPill")
     m.calendarDetailAction = m.top.FindNode("calendarDetailAction")
-    m.settingsGroup = m.top.FindNode("settingsGroup")
-    m.settingsList = m.top.FindNode("settingsList")
-    m.settingsTabIndicator = m.top.FindNode("settingsTabIndicator")
-    m.settingsDetailEyebrow = m.top.FindNode("settingsDetailEyebrow")
-    m.settingsDetailTitle = m.top.FindNode("settingsDetailTitle")
-    m.settingsDetailValue = m.top.FindNode("settingsDetailValue")
-    m.settingsDetailHint = m.top.FindNode("settingsDetailHint")
-    m.settingsTabBackgrounds = []
-    m.settingsTabLabels = []
-    for index = 0 to 2
-        m.settingsTabBackgrounds.Push(m.top.FindNode("settingsTab" + index.ToStr() + "Bg"))
-        m.settingsTabLabels.Push(m.top.FindNode("settingsTab" + index.ToStr() + "Label"))
-    end for
+    m.settingsScreen = m.top.FindNode("settingsScreen")
     m.addonsGroup = m.top.FindNode("addonsGroup")
     m.addonList = m.top.FindNode("addonList")
     m.addonDetailEyebrow = m.top.FindNode("addonDetailEyebrow")
@@ -100,13 +88,8 @@ sub init()
     m.activeTab = "board"
     m.navIndex = 0
     m.settingsTabIndex = 0
-    m.settingsTabs = ["General", "Interface", "Player"]
-    m.settingsRows = []
-    m.settingsFocusIndex = 0
-    m.settingsRenderedTab = -1
-    ' Index of a row whose itemFocused notification this code caused; -1 when the
-    ' next notification is expected to be a genuine user move.
-    m.settingsSuppressIndex = -1
+    ' m.settingsTabIndex is mirrored from the Settings component's screenInfo so
+    ' the scene's * / options handler knows which settings section it is on.
     m.discoverType = "movie"
     m.discoverCatalog = "Popular"
     m.discoverGenre = "None"
@@ -208,8 +191,8 @@ sub init()
     m.navList.ObserveField("itemSelected", "onNavSelected")
     m.navList.ObserveField("itemFocused", "onNavFocused")
     m.primaryInfoList.ObserveField("itemSelected", "onPrimaryInfoSelected")
-    m.settingsList.ObserveField("itemSelected", "onSettingsRowSelected")
-    m.settingsList.ObserveField("itemFocused", "onSettingsRowFocused")
+    m.settingsScreen.ObserveField("action", "onSettingsScreenAction")
+    m.settingsScreen.ObserveField("screenInfo", "onSettingsScreenInfo")
     ' Addons has its own dispatcher: its rows carry manifest payloads rather than
     ' the InfoAction shape the shared info list uses.
     m.addonList.ObserveField("itemSelected", "onAddonCardSelected")
@@ -341,7 +324,7 @@ sub FocusTopBar(index as integer)
     ' before onKeyEvent ever sees them.
     m.catalogList.SetFocus(false)
     m.discoverGrid.SetFocus(false)
-    m.settingsList.SetFocus(false)
+    m.settingsScreen.SetFocus(false)
     m.calendarList.SetFocus(false)
     m.addonList.SetFocus(false)
     m.primaryInfoList.SetFocus(false)
@@ -365,8 +348,8 @@ sub ActivateTopBarItem(index as integer)
 end sub
 
 sub FocusActiveContent()
-    if m.settingsGroup.visible
-        m.settingsList.SetFocus(true)
+    if m.settingsScreen.visible
+        RequestSettingsFocus()
     else if m.calendarGroup.visible
         m.calendarList.SetFocus(true)
     else if m.addonsGroup.visible
@@ -398,7 +381,7 @@ sub RenderActiveTab(focusContent as boolean)
     m.discoverFilterFocus = -1
     UpdateDiscoverFilterFocus()
     m.primaryInfoGroup.visible = false
-    m.settingsGroup.visible = false
+    m.settingsScreen.visible = false
     m.calendarGroup.visible = false
     m.addonsGroup.visible = false
     m.addonChipIndex = -1
@@ -491,7 +474,7 @@ sub RenderCalendar(focusContent as boolean)
     m.primarySubtitle.text = TrText("calendar.subtitle")
     m.catalogList.visible = false
     m.primaryInfoGroup.visible = false
-    m.settingsGroup.visible = false
+    m.settingsScreen.visible = false
     m.calendarGroup.visible = true
 
     m.heroTitle.text = TrText("calendar.title")
@@ -547,8 +530,9 @@ sub RenderCalendarRows(rows as object, focusContent as boolean)
     if targetIndex < 0 then targetIndex = 0
 
     ' Assigning content and JumpToItem both echo back as itemFocused, so the row
-    ' this code chose is suppressed once. See onSettingsRowFocused for the same
-    ' pattern and why a boolean flag cannot work here.
+    ' this code chose is suppressed once. The Settings component follows the same
+    ' pattern; a boolean flag cannot work here because SceneGraph delivers field
+    ' notifications on the message loop after the assigning code returns.
     m.calendarFocusIndex = targetIndex
     m.calendarSuppressIndex = targetIndex
     m.calendarList.content = content
@@ -644,8 +628,9 @@ sub onCalendarRowFocused(event as object)
         target = NextSelectableCalendarIndex(m.calendarRows, index, direction)
         if target >= 0
             m.calendarFocusIndex = target
-            ' See onSettingsRowFocused: this list is fixedFocus too, so a skip has
-            ' to animate or the content teleports and the list appears to lurch.
+            ' See the Settings component: this list is fixedFocus too, so a skip
+            ' has to animate or the content teleports and the list appears to
+            ' lurch.
             m.calendarList.animateToItem = target
             UpdateCalendarDetail(target)
             return
@@ -936,295 +921,57 @@ function AddonDetailActionLabel(entry as object) as string
 end function
 
 sub RenderSettings(focusContent as boolean)
-    m.primaryTitle.text = "Settings"
-    m.primarySubtitle.text = SettingsTabSummary(m.settingsTabIndex)
     m.catalogList.visible = false
     m.primaryInfoGroup.visible = false
-    m.settingsGroup.visible = true
-    UpdateSettingsTabs()
-
-    rows = BuildSettingsRows()
-    m.settingsRows = rows
-    ' The settings list dispatches through onSettingsRowSelected on m.settingsRows
-    ' (see that handler and its single-path contract), NOT through m.primaryActions.
-    ' m.primaryActions is repopulated below purely so the shared home/calendar
-    ' dispatcher (onPrimaryInfoSelected) never reads a stale settings table; the
-    ' settings list itself ignores it.
-    m.primaryActions = rows
-
-    content = CreateObject("roSGNode", "ContentNode")
-    for each row in rows
-        child = content.CreateChild("SettingsRowContent")
-        child.title = row.title
-        child.value = row.value
-        child.rowKind = row.kind
-        child.hint = row.hint
-        child.selectable = SettingsRowSelectable(row)
-        child.toggleOn = row.DoesExist("toggleOn") and row.toggleOn
-    end for
-
-    ' Switching sections starts at the top; re-rendering the section the user is
-    ' already on (after a toggle, say) keeps them where they were.
-    if rows.Count() = 0
-        targetIndex = 0
-    else if m.settingsRenderedTab = m.settingsTabIndex
-        targetIndex = m.settingsFocusIndex
-        if targetIndex >= rows.Count() then targetIndex = rows.Count() - 1
-        if targetIndex < 0 then targetIndex = 0
-        if not SettingsRowSelectable(rows[targetIndex])
-            targetIndex = NextSelectableSettingsIndex(rows, targetIndex, 1)
-        end if
-    else
-        targetIndex = NextSelectableSettingsIndex(rows, -1, 1)
-    end if
-    if targetIndex < 0 then targetIndex = 0
-    m.settingsRenderedTab = m.settingsTabIndex
-
-    ' Assigning content and JumpToItem both fire itemFocused, but not until this
-    ' sub returns -- SceneGraph delivers field notifications on the message loop,
-    ' so a flag cleared on the next line is already false when the echo lands.
-    ' Suppress by index instead: the echo for this exact row is ignored once, and
-    ' a token that never gets consumed can only swallow a move to the row focus
-    ' is already on, which is a no-op anyway.
-    m.settingsFocusIndex = targetIndex
-    m.settingsSuppressIndex = targetIndex
-    m.settingsList.content = content
-    m.settingsList.JumpToItem = targetIndex
-    UpdateSettingsDetail(targetIndex)
-
-    m.heroTitle.text = "Settings"
-    m.heroDescription.text = SettingsTabDescription(m.settingsTabIndex)
-    if focusContent then m.settingsList.SetFocus(true)
+    m.settingsScreen.visible = true
+    PushSettingsState()
+    if focusContent then RequestSettingsFocus()
 end sub
 
-' One settings row. Rows carry the same actionType/payload pair as InfoAction, so
-' both lists share onPrimaryInfoSelected.
-function SettingRow(title as string, value as string, actionType as string, payload as dynamic, kind as string, hint as string) as object
-    return {
-        title: title
-        value: value
-        actionType: actionType
-        payload: payload
-        kind: kind
-        hint: hint
+' MainScene is the source of truth for the values the Settings screen renders.
+' Push them into the component; the component re-renders on change.
+sub PushSettingsState()
+    m.settingsScreen.state = {
+        authSignedIn: m.stremioAuthKey <> ""
+        streamingServerDisplay: StreamingServerDisplay()
+        streamingServerConfigured: StreamingServerConfigured()
+        interfaceLanguage: m.interfaceLanguage
+        uiScalePercent: m.uiScalePercent
+        displayDescription: m.displayDescription
+        blurUnwatched: m.blurUnwatchedEpisodes
+        defaultSubtitleLanguage: m.defaultSubtitleLanguage
+        subtitleTextSize: m.subtitleTextSize
+        subtitleTextColor: m.subtitleTextColor
+        subtitleBackdropOpacity: m.subtitleBackdropOpacity
+        subtitleOutlineColor: m.subtitleOutlineColor
+        defaultAudioTrack: m.defaultAudioTrack
     }
-end function
-
-function SettingHeader(title as string) as object
-    return SettingRow(title, "", "none", invalid, "header", "")
-end function
-
-function SettingsRowSelectable(row as object) as boolean
-    if row = invalid then return false
-    if row.kind = "header" then return false
-    return row.actionType <> "none"
-end function
-
-' Finds the next row that can take focus, searching in `direction` first and then
-' back the other way, so a section that starts or ends with a header still lands
-' somewhere sensible.
-function NextSelectableSettingsIndex(rows as object, fromIndex as integer, direction as integer) as integer
-    index = fromIndex + direction
-    while index >= 0 and index < rows.Count()
-        if SettingsRowSelectable(rows[index]) then return index
-        index = index + direction
-    end while
-
-    index = fromIndex - direction
-    while index >= 0 and index < rows.Count()
-        if SettingsRowSelectable(rows[index]) then return index
-        index = index - direction
-    end while
-
-    return -1
-end function
-
-function FocusSettingsSelectableRow(direction as integer) as boolean
-    target = m.settingsFocusIndex + direction
-    while target >= 0 and target < m.settingsRows.Count()
-        if SettingsRowSelectable(m.settingsRows[target])
-            m.settingsFocusIndex = target
-            m.settingsSuppressIndex = target
-            m.settingsList.animateToItem = target
-            UpdateSettingsDetail(target)
-            MaybeOpenFocusedSettingsRow(m.settingsRows[target])
-            return true
-        end if
-        target = target + direction
-    end while
-
-    return true
-end function
-
-sub MaybeOpenFocusedSettingsRow(row as object)
-    if row = invalid then return
-    if row.actionType = "uiScale" then OpenUiScaleSlider()
 end sub
 
-function BuildSettingsRows() as object
-    if m.settingsTabIndex = 0 then return BuildGeneralSettingsRows()
-    if m.settingsTabIndex = 1 then return BuildInterfaceSettingsRows()
-    return BuildPlayerSettingsRows()
-end function
-
-function BuildGeneralSettingsRows() as object
-    rows = [SettingHeader(TrText("settings.general.header.account"))]
-
-    if m.stremioAuthKey = ""
-        rows.Push(SettingRow(TrText("settings.general.stremioAccount"), TrText("settings.general.notConnected"), "login", invalid, "action", TrText("settings.general.stremioAccount.hintSignedOut")))
-    else
-        rows.Push(SettingRow(TrText("settings.general.stremioAccount"), TrText("settings.general.connected"), "none", invalid, "info", TrText("settings.general.stremioAccount.hintConnected")))
-        rows.Push(SettingRow(TrText("settings.general.refreshLibrary"), "", "refreshLibrary", invalid, "action", TrText("settings.general.refreshLibrary.hint")))
-        rows.Push(SettingRow(TrText("settings.general.disconnect"), "", "disconnect", invalid, "action", TrText("settings.general.disconnect.hint")))
-    end if
-
-    rows.Push(SettingHeader(TrText("settings.general.header.streaming")))
-    rows.Push(SettingRow(TrText("settings.general.streamingServer"), StreamingServerDisplay(), "streamingServer", invalid, "action", TrText("settings.general.streamingServer.hint")))
-    rows.Push(SettingRow(TrText("settings.general.testStreamingServer"), "", "testStreamingServer", invalid, "action", TrText("settings.general.testStreamingServer.hint")))
-    if StreamingServerConfigured()
-        rows.Push(SettingRow(TrText("settings.general.clearStreamingServer"), "", "clearStreamingServer", invalid, "action", TrText("settings.general.clearStreamingServer.hint")))
-    end if
-
-    rows.Push(SettingHeader(TrText("settings.general.header.about")))
-    rows.Push(SettingRow(TrText("settings.general.appVersion"), AppVersionValue(), "none", invalid, "info", TrText("settings.general.appVersion.hint")))
-    rows.Push(SettingRow(TrText("settings.general.channelBuild"), AppBuildValue(), "none", invalid, "info", TrText("settings.general.channelBuild.hint")))
-
-    rows.Push(SettingHeader(TrText("settings.general.header.help")))
-    rows.Push(SettingRow(TrText("settings.general.support"), "", "settingsLink", "support", "action", TrText("settings.general.support.hint")))
-    rows.Push(SettingRow(TrText("settings.general.source"), "", "settingsLink", "source", "action", TrText("settings.general.source.hint")))
-    rows.Push(SettingRow(TrText("settings.general.terms"), "", "settingsLink", "terms", "action", TrText("settings.general.terms.hint")))
-    rows.Push(SettingRow(TrText("settings.general.privacy"), "", "settingsLink", "privacy", "action", TrText("settings.general.privacy.hint")))
-    rows.Push(SettingRow(TrText("settings.general.coffee"), "", "settingsLink", "coffee", "action", TrText("settings.general.coffee.hint")))
-    return rows
-end function
-
-function BuildInterfaceSettingsRows() as object
-    blurValue = TrText("common.off")
-    if m.blurUnwatchedEpisodes then blurValue = TrText("common.on")
-
-    ' The pill colour follows the boolean, never the label: "Activado" and "Ein"
-    ' are not "on", so reading the state back out of the translated value would
-    ' draw every toggle as off in five of the six languages.
-    blurRow = SettingRow(TrText("settings.interface.blurUnwatched"), blurValue, "toggleBlurUnwatched", invalid, "toggle", TrText("settings.interface.blurUnwatched.hint"))
-    blurRow.toggleOn = m.blurUnwatchedEpisodes
-
-    return [
-        SettingHeader(TrText("settings.interface.header.appearance"))
-        ' Each language is shown in its own name, the way every platform picker does
-        ' it -- someone who has landed in the wrong language has to be able to read
-        ' their way out of it.
-        SettingRow(TrText("settings.interface.language"), TrOption("language.native", m.interfaceLanguage), "interfaceLanguage", invalid, "option", TrText("settings.interface.language.hint"))
-        SettingRow(TrText("settings.interface.uiScale"), m.uiScalePercent.ToStr() + "%", "uiScale", invalid, "option", TrText("settings.interface.uiScale.hint"))
-        SettingRow(TrText("settings.interface.display"), m.displayDescription, "uiScale", invalid, "info", TrText("settings.interface.display.hint"))
-        SettingHeader(TrText("settings.interface.header.episodes"))
-        blurRow
-    ]
-end function
-
-function BuildPlayerSettingsRows() as object
-    return [
-        SettingHeader(TrText("settings.player.header.subtitles"))
-        SettingRow(TrText("settings.player.defaultLanguage"), TrOption("language", m.defaultSubtitleLanguage), "defaultSubtitleLanguage", invalid, "option", TrText("settings.player.defaultLanguage.hint"))
-        SettingRow(TrText("settings.player.textSize"), TrOption("subtitle.size", m.subtitleTextSize), "subtitleSettings", invalid, "option", TrText("settings.player.textSize.hint"))
-        SettingRow(TrText("settings.player.textColor"), TrOption("subtitle.color", m.subtitleTextColor), "subtitleSettings", invalid, "option", TrText("settings.player.textColor.hint"))
-        SettingRow(TrText("settings.player.background"), TrOption("subtitle.backdrop", m.subtitleBackdropOpacity), "subtitleSettings", invalid, "option", TrText("settings.player.background.hint"))
-        SettingRow(TrText("settings.player.outlineColor"), TrOption("subtitle.color", m.subtitleOutlineColor), "subtitleOutlineColor", invalid, "option", TrText("settings.player.outlineColor.hint"))
-        SettingHeader(TrText("settings.player.header.audio"))
-        SettingRow(TrText("settings.player.defaultAudio"), TrOption("language", m.defaultAudioTrack), "defaultAudioTrack", invalid, "option", TrText("settings.player.defaultAudio.hint"))
-    ]
-end function
-
-sub UpdateSettingsTabs()
-    for index = 0 to m.settingsTabBackgrounds.Count() - 1
-        background = m.settingsTabBackgrounds[index]
-        label = m.settingsTabLabels[index]
-        if background <> invalid and label <> invalid
-            label.text = TrText("settings.tab." + LCase(m.settingsTabs[index]))
-            if index = m.settingsTabIndex
-                background.color = "0x7657FFFF"
-                label.color = "0xFFFFFFFF"
-            else
-                background.color = "0x1B1934FF"
-                label.color = "0xA9A6B8FF"
-            end if
-        end if
-    end for
-
-    m.settingsTabIndicator.translation = ScaleUiXY(260 + m.settingsTabIndex * 334, 210)
+' Ask the Settings component to take focus (it routes to its inner list).
+sub RequestSettingsFocus()
+    m.settingsScreen.focusRequest = not m.settingsScreen.focusRequest
 end sub
 
-sub UpdateSettingsDetail(index as integer)
-    m.settingsDetailEyebrow.text = UCase(TrText("settings.tab." + LCase(m.settingsTabs[m.settingsTabIndex])))
-    if index < 0 or index >= m.settingsRows.Count()
-        m.settingsDetailTitle.text = ""
-        m.settingsDetailValue.text = ""
-        m.settingsDetailHint.text = ""
-        return
-    end if
-
-    row = m.settingsRows[index]
-    m.settingsDetailTitle.text = row.title
-    m.settingsDetailValue.text = row.value
-    m.settingsDetailHint.text = row.hint
+' A settings row was activated. Dispatch through the shared action handler, then
+' push fresh state back so the rows reflect any value that changed.
+sub onSettingsScreenAction(event as object)
+    action = event.GetData()
+    if action = invalid then return
+    ActivateAction(action.type, action.payload)
+    PushSettingsState()
 end sub
 
-function SettingsTabSummary(index as integer) as string
-    if index = 0 then return TrText("settings.summary.general")
-    if index = 1 then return TrText("settings.summary.interface")
-    return TrText("settings.summary.player")
-end function
-
-function SettingsTabDescription(index as integer) as string
-    if index = 0 then return TrText("settings.description.general")
-    if index = 1 then return TrText("settings.description.interface")
-    return TrText("settings.description.player")
-end function
-
-sub onSettingsRowFocused(event as object)
-    index = event.GetData()
-    if index < 0 or index >= m.settingsRows.Count() then return
-
-    ' Echoes from the render, not moves the user made. RenderSettings assigns
-    ' `content` and then `JumpToItem`, and SceneGraph delivers a notification for
-    ' each after this sub returns -- so a single token consumed by the first echo
-    ' leaves the second to be treated as a real move. The first is the list
-    ' resetting to row 0; accepting it would leave m.settingsFocusIndex and the
-    ' detail panel describing a row that does not have focus. Ignore every echo
-    ' while the token is armed, and let the matching one disarm it.
-    if m.settingsSuppressIndex >= 0
-        if index = m.settingsSuppressIndex
-            m.settingsSuppressIndex = -1
-            m.settingsFocusIndex = index
-        end if
-        return
-    end if
-
-    ' Section headers live in the same list, so focus is pushed past them in
-    ' whichever direction the user was already moving. Landing on the row focus
-    ' was already on means the direction is unknowable, so keep going forward.
-    ' This path arms no token: it issues a single JumpToItem, and re-entering
-    ' here for `target` recomputes the same result idempotently. Arming here
-    ' could strand a token when the jump lands on the row already focused.
-    if not SettingsRowSelectable(m.settingsRows[index])
-        direction = 1
-        if index < m.settingsFocusIndex then direction = -1
-        target = NextSelectableSettingsIndex(m.settingsRows, index, direction)
-        if target >= 0
-            m.settingsFocusIndex = target
-            ' animateToItem, not JumpToItem: the list is fixedFocus, so the content
-            ' scrolls under a stationary ring. Jumping teleports it, which reads as
-            ' the list lurching two rows at once when focus passes a header.
-            ' Animating makes the skip look like the single extra step it is.
-            m.settingsList.animateToItem = target
-            UpdateSettingsDetail(target)
-            return
-        end if
-    end if
-
-    m.settingsSuppressIndex = -1
-    m.settingsFocusIndex = index
-    UpdateSettingsDetail(index)
-    MaybeOpenFocusedSettingsRow(m.settingsRows[index])
+' The Settings component finished rendering; update the shared chrome it does not
+' own and mirror the active tab for the scene's options handler.
+sub onSettingsScreenInfo(event as object)
+    info = event.GetData()
+    if info = invalid then return
+    m.settingsTabIndex = info.tabIndex
+    m.primaryTitle.text = info.title
+    m.primarySubtitle.text = info.subtitle
+    m.heroTitle.text = info.heroTitle
+    m.heroDescription.text = info.heroDescription
 end sub
 
 function InfoAction(title as string, actionType as string, payload as dynamic) as object
@@ -1313,18 +1060,6 @@ end sub
 ' flipped twice), because itemSelected fires first and the identical press then
 ' reached onKeyEvent too. Keep activation single-path: only this observer calls
 ' ActivateSettingsRow. This feels like a hacky fix so a refactor may be called for in the future.
-sub onSettingsRowSelected(event as object)
-    index = event.GetData()
-    if index < 0 or index >= m.settingsRows.Count() then return
-
-    ActivateSettingsRow(m.settingsRows[index])
-end sub
-
-sub ActivateSettingsRow(row as object)
-    if not SettingsRowSelectable(row) then return
-    ActivateAction(row.actionType, row.payload)
-end sub
-
 sub ActivateAction(actionType as string, payload as dynamic)
     if actionType = "login"
         BeginStremioLink()
@@ -1345,7 +1080,6 @@ sub ActivateAction(actionType as string, payload as dynamic)
     else if actionType = "toggleBlurUnwatched"
         m.blurUnwatchedEpisodes = not m.blurUnwatchedEpisodes
         SaveInterfacePreferences()
-        RenderSettings(true)
     else if actionType = "defaultSubtitleLanguage"
         CycleDefaultSubtitleLanguage()
     else if actionType = "subtitleOutlineColor"
@@ -1360,7 +1094,6 @@ sub ActivateAction(actionType as string, payload as dynamic)
         m.streamingServerUrl = ""
         SaveStreamingServerConfig()
         HideStatus()
-        RenderSettings(true)
         ShowStatus(TrText("status.server.cleared"), false)
     else if actionType = "calendarEpisode"
         OpenCalendarEpisode(payload)
@@ -2151,10 +1884,10 @@ sub OpenUiScaleSlider()
     m.uiScaleMessage.text = TrFormat("uiScale.message", m.displayDescription)
     UpdateUiScaleSlider()
 
-    ' The settings list keeps focus unless it is blurred first, and then it
+    ' The settings screen keeps focus unless it is blurred first, and then it
     ' swallows OK and the arrows before onKeyEvent ever sees them.
     m.primaryInfoList.SetFocus(false)
-    m.settingsList.SetFocus(false)
+    m.settingsScreen.SetFocus(false)
     m.top.SetFocus(true)
 end sub
 
@@ -2175,10 +1908,10 @@ sub OpenCoffeeSupport(swallowOpeningOk as boolean)
     m.coffeeGroup.visible = true
     m.screenMode = "coffee"
 
-    ' Same reason as the UI scale slider: the settings list swallows OK and back
+    ' Same reason as the UI scale slider: the settings screen swallows OK and back
     ' before onKeyEvent sees them unless it is blurred first.
     m.primaryInfoList.SetFocus(false)
-    m.settingsList.SetFocus(false)
+    m.settingsScreen.SetFocus(false)
     m.top.SetFocus(true)
 end sub
 
@@ -2759,7 +2492,7 @@ sub RebuildCatalog()
     end for
 
     m.catalogList.content = root
-    if m.screenMode = "home" and m.catalogList.visible and not m.navList.HasFocus() and not m.primaryInfoList.HasFocus() and not m.settingsList.HasFocus() and m.discoverFilterFocus < 0
+    if m.screenMode = "home" and m.catalogList.visible and not m.navList.HasFocus() and not m.primaryInfoList.HasFocus() and not m.settingsScreen.HasFocus() and m.discoverFilterFocus < 0
         m.catalogList.SetFocus(true)
     end if
 end sub
@@ -3964,30 +3697,6 @@ sub CycleDefaultAudioTrack()
     RenderSettings(true)
 end sub
 
-' Version strings come from roAppInfo, which reads the installed channel's own
-' manifest, so a sideload and a published build each report themselves honestly.
-function AppVersionValue() as string
-    info = CreateObject("roAppInfo")
-    if info = invalid then return TrText("common.unknown")
-
-    version = info.GetVersion()
-    if version = invalid or version = "" then return TrText("common.unknown")
-    return version
-end function
-
-' Channel identity rather than a marketing string: the ID Roku launched, plus the
-' sideloaded/published distinction.
-function AppBuildValue() as string
-    info = CreateObject("roAppInfo")
-    if info = invalid then return TrText("common.unknown")
-
-    id = info.GetID()
-    if id = invalid or id = "" then id = TrText("common.unknown")
-
-    if info.IsDev() then return id + "    " + TrText("settings.general.development")
-    return id
-end function
-
 sub BeginStremioLink()
     ShowStatus(TrText("status.link.creating"), true)
     StartRequest("https://link.stremio.com/api/v2/create?type=Create", "linkCreate|stremio")
@@ -4715,24 +4424,12 @@ function onKeyEvent(key as string, press as boolean) as boolean
                 FocusTopBar(0)
                 return true
             end if
-        else if (key = "up" or key = "down") and m.activeTab = "settings" and m.settingsList.HasFocus()
-            direction = 1
-            if key = "up" then direction = -1
-            return FocusSettingsSelectableRow(direction)
-        else if key = "left" and m.activeTab = "settings" and m.settingsList.HasFocus() and m.settingsTabIndex > 0
-            m.settingsTabIndex = m.settingsTabIndex - 1
-            RenderSettings(true)
-            return true
-        else if key = "right" and m.activeTab = "settings" and m.settingsList.HasFocus() and m.settingsTabIndex < m.settingsTabs.Count() - 1
-            m.settingsTabIndex = m.settingsTabIndex + 1
-            RenderSettings(true)
-            return true
         else if key = "left" and not m.navList.HasFocus()
             m.navList.SetFocus(true)
             return true
         else if key = "right" and m.navList.HasFocus()
-            if m.settingsGroup.visible
-                m.settingsList.SetFocus(true)
+            if m.settingsScreen.visible
+                RequestSettingsFocus()
             else if m.calendarGroup.visible
                 m.calendarList.SetFocus(true)
             else if m.addonsGroup.visible
