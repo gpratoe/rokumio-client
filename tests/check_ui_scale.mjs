@@ -89,11 +89,15 @@ function checkSliderKeyHandling() {
         }
     }
 
-    if (!onKeyEvent.includes('key = "OK" and m.activeTab = "settings" and m.settingsList.HasFocus()')) {
-        failures.push('onKeyEvent must activate the focused settings row on OK');
-    }
-    if (!onKeyEvent.includes('ActivateSettingsRow(m.settingsRows[m.settingsFocusIndex])')) {
-        failures.push('settings OK handling must activate m.settingsRows[m.settingsFocusIndex]');
+    // Anti-regression: the settings list activates a row through its itemSelected
+    // observer (see checkSettingsListDispatchesOwnRows), NOT through onKeyEvent. An
+    // old onKeyEvent branch re-dispatched ActivateSettingsRow for the same OK press,
+    // so itemSelected ran the row's action and the identical press then reached
+    // onKeyEvent and ran it again -- language cycles skipped languages and toggles
+    // flipped twice. Keep activation single-path: onKeyEvent must never activate a
+    // settings row.
+    if (onKeyEvent.includes('ActivateSettingsRow(m.settingsRows[m.settingsFocusIndex])')) {
+        failures.push('onKeyEvent must not also activate the focused settings row on OK; the itemSelected observer is the single activation path');
     }
 }
 

@@ -945,8 +945,11 @@ sub RenderSettings(focusContent as boolean)
 
     rows = BuildSettingsRows()
     m.settingsRows = rows
-    ' The settings list shares onPrimaryInfoSelected, which dispatches on
-    ' m.primaryActions.
+    ' The settings list dispatches through onSettingsRowSelected on m.settingsRows
+    ' (see that handler and its single-path contract), NOT through m.primaryActions.
+    ' m.primaryActions is repopulated below purely so the shared home/calendar
+    ' dispatcher (onPrimaryInfoSelected) never reads a stale settings table; the
+    ' settings list itself ignores it.
     m.primaryActions = rows
 
     content = CreateObject("roSGNode", "ContentNode")
@@ -1303,6 +1306,13 @@ sub onPrimaryInfoSelected(event as object)
     ActivateAction(action.actionType, action.payload)
 end sub
 
+' A settings row is activated exactly once, from here. The scrollable settings
+' list owns its OK press and reports it through its itemSelected observer; onKeyEvent
+' must NOT also dispatch it. When the old onKeyEvent branch duplicated this call the
+' same OK ran the row's action twice (language cycle skipped languages, toggles
+' flipped twice), because itemSelected fires first and the identical press then
+' reached onKeyEvent too. Keep activation single-path: only this observer calls
+' ActivateSettingsRow. This feels like a hacky fix so a refactor may be called for in the future.
 sub onSettingsRowSelected(event as object)
     index = event.GetData()
     if index < 0 or index >= m.settingsRows.Count() then return
@@ -4709,11 +4719,6 @@ function onKeyEvent(key as string, press as boolean) as boolean
             direction = 1
             if key = "up" then direction = -1
             return FocusSettingsSelectableRow(direction)
-        else if key = "OK" and m.activeTab = "settings" and m.settingsList.HasFocus()
-            if m.settingsFocusIndex >= 0 and m.settingsFocusIndex < m.settingsRows.Count()
-                ActivateSettingsRow(m.settingsRows[m.settingsFocusIndex])
-            end if
-            return true
         else if key = "left" and m.activeTab = "settings" and m.settingsList.HasFocus() and m.settingsTabIndex > 0
             m.settingsTabIndex = m.settingsTabIndex - 1
             RenderSettings(true)
