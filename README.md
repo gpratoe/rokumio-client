@@ -69,6 +69,14 @@ While Rokumio is open, visit the phone setup address shown in the upper-right co
 
 Press `*` on the home screen, choose **Connect Stremio**, then open the displayed `link.stremio.com` URL on another device and approve the connection. Once connected, your library and watch history can be accessed from the Roku.
 
+### 4. Connect an external streaming server
+
+For streams that cannot be played directly by Roku, you can optionally configure an external Stremio-compatible streaming server.
+
+For a quick setup on a mobile device, you can use [Rokumio Service](https://github.com/gpratoe/rokumio-service). Alternatively, you can use a desktop device running Stremio Service or another Stremio-compatible streaming server of your choice.
+
+Rokumio Client does not provide or operate the streaming server itself.
+
 ## Development
 
 Run the checks locally:
