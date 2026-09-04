@@ -11,6 +11,7 @@ const episodeXml = fs.readFileSync(path.join(root, 'components/EpisodeCard.xml')
 const locale = fs.readFileSync(path.join(root, 'components/Locale.brs'), 'utf8');
 const settings = fs.readFileSync(path.join(root, 'components/Settings.brs'), 'utf8');
 const settingsXml = fs.readFileSync(path.join(root, 'components/Settings.xml'), 'utf8');
+const addons = fs.readFileSync(path.join(root, 'components/Addons.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -20,8 +21,6 @@ const englishTable = (locale.match(/function LocaleStringsEnglish\(\) as object(
 const failures = [];
 
 const requiredMainPatterns = [
-    ['Addons Installed filter action', /AddonChip\(TrText\("addons\.filter\.installed"\),\s*"addonFilterInstalled"/],
-    ['Addons All filter action', /AddonChip\(TrText\("addons\.filter\.all"\),\s*"addonFilterAll"/],
     ['Remote Stremio add-on collection request', /https:\/\/api\.strem\.io\/addonscollection\.json/],
     ['Remote add-on details handler', /sub ShowAddonDetails\(addon as object\)/],
     ['Installed add-on details handler', /sub ShowInstalledAddonDetails\(index as integer\)/],
@@ -29,7 +28,6 @@ const requiredMainPatterns = [
     ['Interface preference persistence', /sub SaveInterfacePreferences\(\)/],
     ['Player preference persistence', /sub SavePlayerPreferences\(\)/],
     ['Blur unwatched episodes writes card field', /blurThumbnail: true/],
-    ['Reload add-ons survives on the Addons screen', /AddonChip\(TrText\("addons\.reload"\),\s*"reloadAddons"/],
     ['Calendar metadata request', /"calendarMeta\|"/],
     ['Calendar entries render dated episodes', /function CalendarEntryTitle\(entry as object\) as string/],
     ['Calendar loading row is inert', /CalendarMessageRow\(TrText\("calendar\.loading"\)\)/],
@@ -42,8 +40,7 @@ const requiredMainPatterns = [
     // without proving anything about the calendar.
     ['Calendar refresh preserves focused control', /else if not focusContent\s+targetIndex = m\.calendarFocusIndex/],
     ['Calendar chips and cards do not both own the Addons screen', /sub DispatchAddonAction\(actionType as string, payload as dynamic\)/],
-    ['Addons toolbar is reachable from the card list', /FocusAddonChips\(\)\s*\n\s*return true/],
-    ['Addons toolbar hands OK to the chip it is on', /ActivateAddonChip\(m\.addonChipIndex\)/],
+    ['Addons toolbar is reachable from the card list', /m\.addonsScreen\.callFunc\("FocusChips"\)/],
     ['Calendar metadata requests are capped', /CountCalendarTrackedSeries\(\) >= 24/],
     ['Calendar metadata concurrency is capped', /pending >= 4/],
     ['Calendar entries are trimmed', /sub TrimCalendarEntries\(\)/],
@@ -51,6 +48,14 @@ const requiredMainPatterns = [
     ['Channel search request', /v3-channels\.strem\.io\/catalog\/channel\/top\/search=/],
     ['IMDb ID resolver', /function IsImdbId\(value as string\) as boolean/],
     ['Search dialog copy routes through the localization layer', /dialog\.message = TrText\("dialog\.search\.message"\)/],
+];
+
+const requiredAddonsPatterns = [
+    ['Addons Installed filter action', /AddonChip\(TrText\("addons\.filter\.installed"\),\s*"addonFilterInstalled"/],
+    ['Addons All filter action', /AddonChip\(TrText\("addons\.filter\.all"\),\s*"addonFilterAll"/],
+    ['Reload add-ons survives on the Addons screen', /AddonChip\(TrText\("addons\.reload"\),\s*"reloadAddons"/],
+    ['Addons toolbar is focusable from the card list', /sub FocusChips\(\)/],
+    ['Addons toolbar hands OK to the chip it is on', /ActivateAddonChip\(m\.addonChipIndex\)/],
 ];
 
 const requiredLocalePatterns = [
@@ -105,6 +110,10 @@ const requiredEpisodePatterns = [
 
 for (const [label, pattern] of requiredMainPatterns) {
     if (!pattern.test(mainScene)) failures.push(`${label} is missing from MainScene.brs`);
+}
+
+for (const [label, pattern] of requiredAddonsPatterns) {
+    if (!pattern.test(addons)) failures.push(`${label} is missing from Addons.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsPatterns) {

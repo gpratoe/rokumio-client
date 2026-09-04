@@ -31,19 +31,6 @@ const xmlChecks = [
             { id: 'calendarDetailTitle', label: 'calendar detail title', requireFullSafeArea: true },
             { id: 'calendarDetailDescription', label: 'calendar detail description', requireFullSafeArea: true },
             { id: 'calendarDetailActionPill', label: 'calendar detail action pill', requireFullSafeArea: true },
-            // Addons screen. The toolbar chips run to the right design edge and
-            // the last one is the first thing an overscanning TV clips.
-            { id: 'addonChip0Bg', label: 'addons first chip', requireFullSafeArea: true },
-            { id: 'addonChip2Bg', label: 'addons add-addon chip', requireFullSafeArea: true },
-            { id: 'addonChip4Bg', label: 'addons last chip', requireFullSafeArea: true },
-            { id: 'addonChip4Label', label: 'addons last chip label', requireFullSafeArea: true },
-            { id: 'addonsListPanel', label: 'addons list panel', requireFullSafeArea: true },
-            { id: 'addonList', label: 'addons list', requireFullSafeArea: true },
-            { id: 'addonsDetailPanel', label: 'addons detail panel', requireFullSafeArea: true },
-            { id: 'addonDetailTitle', label: 'addons detail title', requireFullSafeArea: true },
-            { id: 'addonDetailHint', label: 'addons detail hint', requireFullSafeArea: true },
-            { id: 'addonDetailSource', label: 'addons detail source', requireFullSafeArea: true },
-            { id: 'addonDetailActionPill', label: 'addons detail action pill', requireFullSafeArea: true },
             { id: 'heroTitle', label: 'home footer title', requireViewportBounds: true },
             { id: 'heroDescription', label: 'home footer description', requireViewportBounds: true },
             { id: 'noStreamsPoster', label: 'no-streams poster', requireViewportBounds: true },
@@ -74,6 +61,25 @@ const xmlChecks = [
             // sits above the 5% inset by design.
             { id: 'supportChipBg', label: 'top bar support chip', requireViewportBounds: true },
             { id: 'supportChipLabel', label: 'top bar support chip label', requireViewportBounds: true },
+        ],
+    },
+    {
+        file: 'components/Addons.xml',
+        nodes: [
+            // Addons screen. The toolbar chips run to the right design edge and
+            // the last one is the first thing an overscanning TV clips, so
+            // everything in this region has to survive overscan.
+            { id: 'addonChip0Bg', label: 'addons first chip', requireFullSafeArea: true },
+            { id: 'addonChip2Bg', label: 'addons add-addon chip', requireFullSafeArea: true },
+            { id: 'addonChip4Bg', label: 'addons last chip', requireFullSafeArea: true },
+            { id: 'addonChip4Label', label: 'addons last chip label', requireFullSafeArea: true },
+            { id: 'addonsListPanel', label: 'addons list panel', requireFullSafeArea: true },
+            { id: 'addonList', label: 'addons list', requireFullSafeArea: true },
+            { id: 'addonsDetailPanel', label: 'addons detail panel', requireFullSafeArea: true },
+            { id: 'addonDetailTitle', label: 'addons detail title', requireFullSafeArea: true },
+            { id: 'addonDetailHint', label: 'addons detail hint', requireFullSafeArea: true },
+            { id: 'addonDetailSource', label: 'addons detail source', requireFullSafeArea: true },
+            { id: 'addonDetailActionPill', label: 'addons detail action pill', requireFullSafeArea: true },
         ],
     },
     {

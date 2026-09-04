@@ -41,21 +41,7 @@ sub init()
     m.calendarDetailActionPill = m.top.FindNode("calendarDetailActionPill")
     m.calendarDetailAction = m.top.FindNode("calendarDetailAction")
     m.settingsScreen = m.top.FindNode("settingsScreen")
-    m.addonsGroup = m.top.FindNode("addonsGroup")
-    m.addonList = m.top.FindNode("addonList")
-    m.addonDetailEyebrow = m.top.FindNode("addonDetailEyebrow")
-    m.addonDetailTitle = m.top.FindNode("addonDetailTitle")
-    m.addonDetailValue = m.top.FindNode("addonDetailValue")
-    m.addonDetailHint = m.top.FindNode("addonDetailHint")
-    m.addonDetailSource = m.top.FindNode("addonDetailSource")
-    m.addonDetailActionPill = m.top.FindNode("addonDetailActionPill")
-    m.addonDetailAction = m.top.FindNode("addonDetailAction")
-    m.addonChipBgs = []
-    m.addonChipLabels = []
-    for index = 0 to 4
-        m.addonChipBgs.Push(m.top.FindNode("addonChip" + index.ToStr() + "Bg"))
-        m.addonChipLabels.Push(m.top.FindNode("addonChip" + index.ToStr() + "Label"))
-    end for
+    m.addonsScreen = m.top.FindNode("addonsScreen")
     m.heroTitle = m.top.FindNode("heroTitle")
     m.heroDescription = m.top.FindNode("heroDescription")
     m.homeGroup = m.top.FindNode("homeGroup")
@@ -102,11 +88,7 @@ sub init()
     m.addonCatalog = []
     m.addonCatalogLoaded = false
     m.addonCatalogRequestActive = false
-    m.addonEntries = []
     m.addonSearchQuery = ""
-    m.addonFocusIndex = 0
-    ' -1 when the card list owns focus; otherwise the focused toolbar chip.
-    m.addonChipIndex = -1
     m.calendarEntries = []
     m.calendarLoadedSeries = {}
     m.calendarRequestActive = false
@@ -193,10 +175,12 @@ sub init()
     m.primaryInfoList.ObserveField("itemSelected", "onPrimaryInfoSelected")
     m.settingsScreen.ObserveField("action", "onSettingsScreenAction")
     m.settingsScreen.ObserveField("screenInfo", "onSettingsScreenInfo")
-    ' Addons has its own dispatcher: its rows carry manifest payloads rather than
-    ' the InfoAction shape the shared info list uses.
-    m.addonList.ObserveField("itemSelected", "onAddonCardSelected")
-    m.addonList.ObserveField("itemFocused", "onAddonCardFocused")
+    ' Addons reports its row activations and its focus escapes to the scene
+    ' through the same action/screenInfo pair Settings uses; MainScene dispatches
+    ' the row actions (their rows carry manifest payloads) and mirrors the shared
+    ' chrome the component does not own.
+    m.addonsScreen.ObserveField("action", "onAddonsScreenAction")
+    m.addonsScreen.ObserveField("screenInfo", "onAddonsScreenInfo")
     ' Calendar rows carry the same actionType/payload pair, so they dispatch
     ' through the one selection handler as well.
     m.calendarList.ObserveField("itemSelected", "onPrimaryInfoSelected")
@@ -326,7 +310,7 @@ sub FocusTopBar(index as integer)
     m.discoverGrid.SetFocus(false)
     m.settingsScreen.SetFocus(false)
     m.calendarList.SetFocus(false)
-    m.addonList.SetFocus(false)
+    m.addonsScreen.SetFocus(false)
     m.primaryInfoList.SetFocus(false)
     m.top.SetFocus(true)
 end sub
@@ -352,8 +336,8 @@ sub FocusActiveContent()
         RequestSettingsFocus()
     else if m.calendarGroup.visible
         m.calendarList.SetFocus(true)
-    else if m.addonsGroup.visible
-        FocusAddonList()
+    else if m.addonsScreen.visible
+        RequestAddonsFocus()
     else if m.primaryInfoGroup.visible
         m.primaryInfoList.SetFocus(true)
     else if m.activeTab = "discover"
@@ -383,8 +367,7 @@ sub RenderActiveTab(focusContent as boolean)
     m.primaryInfoGroup.visible = false
     m.settingsScreen.visible = false
     m.calendarGroup.visible = false
-    m.addonsGroup.visible = false
-    m.addonChipIndex = -1
+    m.addonsScreen.visible = false
     m.primaryActions = []
 
     if m.activeTab = "board"
@@ -685,177 +668,79 @@ sub UpdateCalendarDetail(index as integer)
     end if
 end sub
 
-' Addons is its own screen rather than another info list. Stremio's web app draws
-' a toolbar (Installed / All / Add addon / Search) over a column of add-on cards;
-' this reproduces that with a chip row, a MarkupList of AddonCard, and the same
-' focused-row detail panel Settings uses.
+' Addons is its own screen, fully self-contained in the Addons component. MainScene
+' only shows it, keeps the few data values it is the source of truth for, and
+' dispatches the actions the component reports; all rendering, focus and keys live
+' inside the component.
 sub RenderAddons(focusContent as boolean)
-    m.primaryTitle.text = TrText("addons.title")
-    m.primarySubtitle.text = TrText("addons.footer")
     m.catalogList.visible = false
     m.primaryInfoGroup.visible = false
-    m.addonsGroup.visible = true
+    m.addonsScreen.visible = true
 
     if m.addonFilter = "all" and not m.addonCatalogLoaded and not m.addonCatalogRequestActive
         FetchAddonCatalog()
     end if
 
-    UpdateAddonChips()
-
-    entries = BuildAddonEntries(m.addonSearchQuery)
-    m.addonEntries = entries
-
-    content = CreateObject("roSGNode", "ContentNode")
-    for each entry in entries
-        child = content.CreateChild("AddonCardContent")
-        child.rowKind = entry.kind
-        ' Manifest text: name, version, types and description are passed through
-        ' exactly as the add-on author wrote them.
-        child.title = entry.name
-        child.description = entry.description
-        child.version = entry.version
-        child.types = entry.types
-        child.logoUri = entry.logo
-        child.badge = entry.badge
-        child.badgeKind = entry.badgeKind
-        child.selectable = entry.actionType <> "none"
-    end for
-
-    ' A background collection response re-renders the screen underneath the user,
-    ' so a refresh keeps whatever card was focused.
-    targetIndex = 0
-    if not focusContent then targetIndex = m.addonFocusIndex
-    if entries.Count() = 0
-        targetIndex = 0
-    else if targetIndex >= entries.Count()
-        targetIndex = entries.Count() - 1
-    end if
-    if targetIndex < 0 then targetIndex = 0
-    m.addonFocusIndex = targetIndex
-    m.addonList.content = content
-    m.addonList.JumpToItem = targetIndex
-    UpdateAddonDetail(targetIndex)
-
-    m.heroTitle.text = TrText("addons.title")
-    if m.addonSearchQuery <> ""
-        m.heroDescription.text = TrFormat("addons.searchResult", m.addonSearchQuery)
-    else if m.addonFilter = "all"
-        m.heroDescription.text = TrText("addons.hero.all")
-    else
-        m.heroDescription.text = TrText("addons.hero.installed")
-    end if
-
-    if focusContent then FocusAddonList()
+    PushAddonsState()
+    if focusContent then RequestAddonsFocus()
 end sub
 
-' The toolbar. The two filters and the three actions share one focus ring, which
-' is what makes the row reachable with UP from the card list.
-function AddonChips() as object
-    return [
-        AddonChip(TrText("addons.filter.installed"), "addonFilterInstalled")
-        AddonChip(TrText("addons.filter.all"), "addonFilterAll")
-        AddonChip(TrText("addons.add"), "addAddon")
-        AddonChip(TrText("addons.search"), "addonSearch")
-        ' Reload lived in the removed Streaming settings tab; the Addons screen is
-        ' the only place installed manifests are managed now.
-        AddonChip(TrText("addons.reload"), "reloadAddons")
-    ]
-end function
-
-function AddonChip(label as string, actionType as string) as object
-    return {
-        label: label
-        actionType: actionType
+' MainScene is the source of truth for the data the Addons screen renders (filter,
+' search query, installed manifests and the loaded collection). Push them into the
+' component; the component re-renders on change.
+sub PushAddonsState()
+    m.addonsScreen.state = {
+        addonFilter: m.addonFilter
+        addonSearchQuery: m.addonSearchQuery
+        addons: m.addons
+        catalog: m.addonCatalog
+        catalogLoaded: m.addonCatalogLoaded
+        catalogRequestActive: m.addonCatalogRequestActive
     }
-end function
-
-sub UpdateAddonChips()
-    chips = AddonChips()
-    for index = 0 to m.addonChipBgs.Count() - 1
-        background = m.addonChipBgs[index]
-        label = m.addonChipLabels[index]
-        if background <> invalid and label <> invalid and index < chips.Count()
-            chip = chips[index]
-            label.text = chip.label
-            focused = index = m.addonChipIndex
-            selected = false
-            if chip.actionType = "addonFilterInstalled" then selected = m.addonFilter = "installed"
-            if chip.actionType = "addonFilterAll" then selected = m.addonFilter = "all"
-
-            if chip.actionType = "addAddon"
-                ' Stremio reserves one green primary action for adding an add-on.
-                if focused
-                    background.color = "0x3FCB96FF"
-                else
-                    background.color = "0x2E9E76FF"
-                end if
-                label.color = "0xFFFFFFFF"
-            else if focused
-                background.color = "0x7657FFFF"
-                label.color = "0xFFFFFFFF"
-            else if selected
-                background.color = "0x2A2450FF"
-                label.color = "0xC7BCFFFF"
-            else
-                background.color = "0x1B1934FF"
-                label.color = "0xA9A6B8FF"
-            end if
-        end if
-    end for
 end sub
 
-' The chip row is driven by onKeyEvent, so the card list has to be blurred before
-' the scene takes focus or it keeps swallowing OK and the arrows.
-sub FocusAddonChips()
-    if m.activeTab <> "addons" then return
-    if m.addonChipIndex < 0 then m.addonChipIndex = 0
-    UpdateAddonChips()
-    m.addonList.SetFocus(false)
-    m.top.SetFocus(true)
+' Ask the Addons component to take focus (it routes to its inner list).
+sub RequestAddonsFocus()
+    m.addonsScreen.focusRequest = not m.addonsScreen.focusRequest
 end sub
 
-sub BlurAddonChips()
-    m.addonChipIndex = -1
-    UpdateAddonChips()
+' An addon row or chip was activated, or the component needs to escape focus to
+' scene-owned chrome. The focus escapes are handled here; the rest dispatches
+' through the shared addon action handler, which pushes fresh state back so the
+' rows reflect any change.
+sub onAddonsScreenAction(event as object)
+    action = event.GetData()
+    if action = invalid then return
+    if action.type = "focusTopBar"
+        FocusTopBar(0)
+    else if action.type = "focusNavRail"
+        m.navList.SetFocus(true)
+    else
+        DispatchAddonAction(action.type, action.payload)
+    end if
 end sub
 
-sub FocusAddonList()
-    BlurAddonChips()
-    m.addonList.SetFocus(true)
-end sub
-
-sub ActivateAddonChip(index as integer)
-    chips = AddonChips()
-    if index < 0 or index >= chips.Count() then return
-    DispatchAddonAction(chips[index].actionType, invalid)
-end sub
-
-sub onAddonCardFocused(event as object)
-    index = event.GetData()
-    if index < 0 or index >= m.addonEntries.Count() then return
-    m.addonFocusIndex = index
-    UpdateAddonDetail(index)
-end sub
-
-sub onAddonCardSelected(event as object)
-    index = event.GetData()
-    if index < 0 or index >= m.addonEntries.Count() then return
-    entry = m.addonEntries[index]
-    DispatchAddonAction(entry.actionType, entry.payload)
+' The Addons component finished rendering; update the shared chrome (header and
+' hero) it does not own.
+sub onAddonsScreenInfo(event as object)
+    info = event.GetData()
+    if info = invalid then return
+    m.primaryTitle.text = info.title
+    m.primarySubtitle.text = info.subtitle
+    m.heroTitle.text = info.heroTitle
+    m.heroDescription.text = info.heroDescription
 end sub
 
 sub DispatchAddonAction(actionType as string, payload as dynamic)
     if actionType = "addonFilterInstalled"
         m.addonFilter = "installed"
         m.addonSearchQuery = ""
-        m.addonFocusIndex = 0
         ' Activating a chip must not steal focus away from the chip row.
-        RenderAddons(m.addonChipIndex < 0)
+        RenderAddons(false)
     else if actionType = "addonFilterAll"
         m.addonFilter = "all"
         m.addonSearchQuery = ""
-        m.addonFocusIndex = 0
-        RenderAddons(m.addonChipIndex < 0)
+        RenderAddons(false)
     else if actionType = "addAddon"
         OpenAddonConfiguration()
     else if actionType = "addonSearch"
@@ -868,57 +753,6 @@ sub DispatchAddonAction(actionType as string, payload as dynamic)
         ShowAddonDetails(payload)
     end if
 end sub
-
-sub UpdateAddonDetail(index as integer)
-    if m.addonFilter = "all"
-        m.addonDetailEyebrow.text = UCase(TrText("addons.filter.all"))
-    else
-        m.addonDetailEyebrow.text = UCase(TrText("addons.filter.installed"))
-    end if
-
-    if index < 0 or index >= m.addonEntries.Count()
-        ClearAddonDetail()
-        return
-    end if
-
-    entry = m.addonEntries[index]
-    if entry.kind = "message"
-        ClearAddonDetail()
-        m.addonDetailHint.text = entry.description
-        return
-    end if
-
-    m.addonDetailTitle.text = entry.name
-    value = entry.version
-    if entry.types <> ""
-        if value <> "" then value = value + "    "
-        value = value + entry.types
-    end if
-    m.addonDetailValue.text = value
-    m.addonDetailHint.text = entry.description
-    m.addonDetailSource.text = entry.source
-    m.addonDetailAction.text = AddonDetailActionLabel(entry)
-    m.addonDetailActionPill.visible = true
-end sub
-
-sub ClearAddonDetail()
-    m.addonDetailTitle.text = ""
-    m.addonDetailValue.text = ""
-    m.addonDetailHint.text = ""
-    m.addonDetailSource.text = ""
-    m.addonDetailAction.text = ""
-    m.addonDetailActionPill.visible = false
-end sub
-
-' What OK does on the focused card. Stremio puts Uninstall and Share on the card
-' itself; a remote cannot move sideways inside a list row, so the panel advertises
-' them and OK opens the dialog that carries them.
-function AddonDetailActionLabel(entry as object) as string
-    if entry.actionType = "installedAddon"
-        return "OK    " + UCase(TrText("common.share")) + "  /  " + UCase(TrText("common.uninstall"))
-    end if
-    return "OK    " + UCase(TrText("common.install"))
-end function
 
 sub RenderSettings(focusContent as boolean)
     m.catalogList.visible = false
@@ -1100,165 +934,6 @@ sub ActivateAction(actionType as string, payload as dynamic)
     end if
 end sub
 
-function DefaultAddonCatalog() as object
-    return [
-        AddonCatalogEntry("https://v3-cinemeta.strem.io/manifest.json", "com.linvo.cinemeta", "Cinemeta", "3.0.14", "Movie & Series", "The official addon for movie and series catalogs")
-        AddonCatalogEntry("https://v3-channels.strem.io/manifest.json", "org.stremio.youtube", "YouTube", "1.30.7", "Channel", "Watch your favourite YouTube channels ad-free")
-        AddonCatalogEntry("https://watchhub.strem.io/manifest.json", "com.stremio.watchhub", "WatchHub", "1.15.0", "Movie & Series", "Find where to stream movies and shows")
-        AddonCatalogEntry("https://caching.stremio.net/publicdomainmovies.now.sh/manifest.json", "org.publicdomainmovies", "Public Domain Movies", "1.0.0", "Movie", "Torrents for public domain movies")
-        AddonCatalogEntry("https://opensubtitles-v3.strem.io/manifest.json", "org.stremio.opensubtitlesv3", "OpenSubtitles v3", "1.0.0", "Movie & Series", "OpenSubtitles v3 Addon for Stremio")
-        AddonCatalogEntry("", "com.stremio.localfiles", "Local Files (without catalog support)", "1.10.0", "Movie, Series & Other", "Finds playable local files on devices that support local file access")
-    ]
-end function
-
-function AddonCatalogEntry(url as string, id as string, name as string, version as string, types as string, description as string) as object
-    return {
-        url: url
-        manifest: {
-            id: id
-            name: name
-            version: version
-            description: description
-            types: types.Split(" & ")
-            resources: []
-            catalogs: []
-        }
-        summaryTypes: types
-    }
-end function
-
-' One row of the Addons list. The Installed filter lists configured manifests;
-' the All filter lists the built-in catalog followed by whatever the Stremio
-' collection returned.
-function BuildAddonEntries(query as string) as object
-    entries = []
-
-    if m.addonFilter = "installed"
-        if m.addons.Count() = 0
-            entries.Push(AddonMessageEntry(TrText("addons.empty"), "addAddon"))
-            return entries
-        end if
-        for index = 0 to m.addons.Count() - 1
-            entry = InstalledAddonEntry(index)
-            if AddonEntryMatches(entry, query) then entries.Push(entry)
-        end for
-        if entries.Count() = 0 then entries.Push(AddonMessageEntry(TrText("addons.empty"), "addAddon"))
-        return entries
-    end if
-
-    for each addon in DefaultAddonCatalog()
-        entry = CatalogAddonEntry(addon, "builtinAddon")
-        if AddonEntryMatches(entry, query) then entries.Push(entry)
-    end for
-
-    if m.addonCatalogLoaded
-        for index = 0 to m.addonCatalog.Count() - 1
-            entry = CatalogAddonEntry(m.addonCatalog[index], "remoteAddon")
-            if AddonEntryMatches(entry, query) then entries.Push(entry)
-            ' Unfiltered browsing is capped so the list stays navigable; a search
-            ' is allowed to reach the whole collection.
-            if query = "" and index >= 24 then exit for
-        end for
-    else if m.addonCatalogRequestActive
-        entries.Push(AddonMessageEntry(TrText("addons.loadingCollection"), "none"))
-    else
-        entries.Push(AddonMessageEntry(TrText("addons.loadCollection"), "addonFilterAll"))
-    end if
-
-    return entries
-end function
-
-function AddonEntry(kind as string, actionType as string, payload as dynamic) as object
-    return {
-        kind: kind
-        actionType: actionType
-        payload: payload
-        name: ""
-        version: ""
-        types: ""
-        description: ""
-        logo: ""
-        badge: ""
-        badgeKind: "available"
-        source: ""
-    }
-end function
-
-' The empty, loading and "load the collection" rows share the card slot so the
-' screen never falls back to a bare label.
-function AddonMessageEntry(text as string, actionType as string) as object
-    entry = AddonEntry("message", actionType, invalid)
-    entry.description = text
-    return entry
-end function
-
-function InstalledAddonEntry(index as integer) as object
-    addon = m.addons[index]
-    manifest = addon.manifest
-    entry = AddonEntry("addon", "installedAddon", index)
-    entry.name = SafeString(manifest, "name")
-    entry.version = AddonVersionLabel(manifest)
-    entry.types = AddonTypesLabel(manifest)
-    entry.description = ReplaceNewlines(SafeString(manifest, "description"))
-    entry.logo = SafeString(manifest, "logo")
-    entry.badge = TrText("addons.filter.installed")
-    entry.badgeKind = "installed"
-    entry.source = AddonSourceLabel(SafeString(addon, "url"))
-    return entry
-end function
-
-function CatalogAddonEntry(addon as object, actionType as string) as object
-    manifest = addon.manifest
-    entry = AddonEntry("addon", actionType, addon)
-    entry.name = SafeString(manifest, "name")
-    entry.version = AddonVersionLabel(manifest)
-    entry.types = SafeString(addon, "summaryTypes")
-    if entry.types = "" then entry.types = AddonTypesLabel(manifest)
-    entry.description = ReplaceNewlines(SafeString(manifest, "description"))
-    entry.logo = SafeString(manifest, "logo")
-    entry.source = AddonSourceLabel(SafeString(addon, "url"))
-    if IsAddonInstalled(SafeString(manifest, "id"))
-        entry.badge = TrText("addons.filter.installed")
-        entry.badgeKind = "installed"
-    else
-        entry.badge = TrText("common.install")
-        entry.badgeKind = "available"
-    end if
-    return entry
-end function
-
-function IsAddonInstalled(addonId as string) as boolean
-    if addonId = "" then return false
-    for each installed in m.addons
-        if SafeString(installed.manifest, "id") = addonId then return true
-    end for
-    return false
-end function
-
-function AddonVersionLabel(manifest as object) as string
-    version = SafeString(manifest, "version")
-    if version = "" then return ""
-    return "v." + version
-end function
-
-' Only the host is ever put on screen: a configured manifest URL can carry a
-' private debrid token, and the full value stays in the registry.
-function AddonSourceLabel(url as string) as string
-    if url = "" then return ""
-    rest = url
-    position = Instr(1, rest, "://")
-    if position > 0 then rest = Mid(rest, position + 3)
-    slash = Instr(1, rest, "/")
-    if slash > 0 then rest = Left(rest, slash - 1)
-    return rest
-end function
-
-function AddonEntryMatches(entry as object, query as string) as boolean
-    if query = "" then return true
-    haystack = LCase(entry.name + " " + entry.types + " " + entry.description)
-    return Instr(1, haystack, query) > 0
-end function
-
 sub FetchAddonCatalog()
     m.addonCatalogRequestActive = true
     StartRequest("https://api.strem.io/addonscollection.json", "addonCatalog|all")
@@ -1338,30 +1013,6 @@ sub onInstalledAddonDetailsButton(event as object)
         UninstallAddon(index)
     end if
 end sub
-
-function AddonResourcesLabel(manifest as object) as string
-    if manifest = invalid or not manifest.DoesExist("resources") or manifest.resources = invalid then return "Addon"
-    labels = []
-    for each resource in manifest.resources
-        if Type(resource) = "roAssociativeArray"
-            labels.Push(SafeString(resource, "name"))
-        else
-            labels.Push(resource.ToStr())
-        end if
-    end for
-    if labels.Count() = 0 then return "Addon"
-    return JoinStrings(labels, ", ")
-end function
-
-function AddonTypesLabel(manifest as object) as string
-    if manifest = invalid or not manifest.DoesExist("types") or manifest.types = invalid then return "Addon"
-    labels = []
-    for each value in manifest.types
-        labels.Push(value.ToStr())
-    end for
-    if labels.Count() = 0 then return "Addon"
-    return JoinStrings(labels, " & ")
-end function
 
 ' The signed-out screen keeps Stremio's own messaging, rendered as inert copy
 ' rows plus the one focusable Log in button.
@@ -1634,7 +1285,7 @@ sub onAddonSearchButton(event as object)
     query = LCase(m.addonSearchDialog.text.Trim())
     m.addonSearchDialog.close = true
     ' The query is a filter over the same card list, not a separate results
-    ' screen: BuildAddonEntries applies it and the hero line reports it.
+    ' screen: the Addons component applies it and its hero line reports it.
     m.addonSearchQuery = query
     RenderAddons(true)
 end sub
@@ -4394,36 +4045,6 @@ function onKeyEvent(key as string, press as boolean) as boolean
                 FocusTopBar(0)
                 return true
             end if
-        else if m.activeTab = "addons" and m.addonChipIndex >= 0
-            ' The chip row is not a focusable node: it is drawn by UpdateAddonChips
-            ' and driven from here while the scene holds focus, the same way the
-            ' Discover filter row above works.
-            if key = "left" and m.addonChipIndex > 0
-                m.addonChipIndex = m.addonChipIndex - 1
-                UpdateAddonChips()
-                return true
-            else if key = "left"
-                ' Leftmost chip: fall out of the toolbar to the nav rail.
-                BlurAddonChips()
-                m.navList.SetFocus(true)
-                return true
-            else if key = "right" and m.addonChipIndex < AddonChips().Count() - 1
-                m.addonChipIndex = m.addonChipIndex + 1
-                UpdateAddonChips()
-                return true
-            else if key = "OK"
-                ActivateAddonChip(m.addonChipIndex)
-                return true
-            else if key = "down" or key = "back"
-                FocusAddonList()
-                return true
-            else if key = "up"
-                ' Same ladder as every other screen: the row above the toolbar is
-                ' the top bar.
-                BlurAddonChips()
-                FocusTopBar(0)
-                return true
-            end if
         else if key = "left" and not m.navList.HasFocus()
             m.navList.SetFocus(true)
             return true
@@ -4432,10 +4053,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
                 RequestSettingsFocus()
             else if m.calendarGroup.visible
                 m.calendarList.SetFocus(true)
-            else if m.addonsGroup.visible
-                ' Without this the Addons screen handed focus to the hidden
-                ' catalog list and the remote stopped responding.
-                FocusAddonList()
+            else if m.addonsScreen.visible
+                ' RequestAddonsFocus routes to the component's inner list, keeping
+                ' the Addons chip row and card list inside the component.
+                RequestAddonsFocus()
             else if m.primaryInfoGroup.visible
                 m.primaryInfoList.SetFocus(true)
             else if m.activeTab = "discover"
@@ -4449,8 +4070,8 @@ function onKeyEvent(key as string, press as boolean) as boolean
                 FocusDiscoverFilters()
                 return true
             end if
-            if m.activeTab = "addons" and m.addonsGroup.visible
-                FocusAddonChips()
+            if m.activeTab = "addons" and m.addonsScreen.visible
+                m.addonsScreen.callFunc("FocusChips")
                 return true
             end if
             FocusTopBar(0)
@@ -4569,13 +4190,6 @@ function onKeyEvent(key as string, press as boolean) as boolean
     return false
 end function
 
-function SafeString(value as object, key as string) as string
-    if value <> invalid and value.DoesExist(key) and value[key] <> invalid
-        return value[key].ToStr()
-    end if
-    return ""
-end function
-
 function StreamLabels() as object
     labels = []
     for each stream in m.streams
@@ -4667,20 +4281,6 @@ function EpisodeNumber(episode as object) as integer
     if episode <> invalid and episode.DoesExist("episode") then return episode.episode
     if episode <> invalid and episode.DoesExist("number") then return episode.number
     return 0
-end function
-
-function JoinStrings(values as object, separator as string) as string
-    result = ""
-    for each value in values
-        if result <> "" then result = result + separator
-        result = result + value.ToStr()
-    end for
-    return result
-end function
-
-function ReplaceNewlines(value as string) as string
-    result = value.Replace(Chr(13), " ")
-    return result.Replace(Chr(10), " ")
 end function
 
 function StreamListLabel(stream as object) as string

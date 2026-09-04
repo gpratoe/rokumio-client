@@ -10,6 +10,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/UiScale.brs" />
     <script type="text/brightscript" uri="pkg:/components/Locale.brs" />
+    <script type="text/brightscript" uri="pkg:/components/Helpers.brs" />
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 
     <children>
@@ -355,150 +356,12 @@
                  the component's internals stay out of MainScene's onKeyEvent. -->
             <Settings id="settingsScreen" translation="[0, 0]" />
 
-            <!-- Addons is its own screen, built on the same panel idiom as
-                 Settings: a chip row of filters and actions, a card list, and a
-                 detail panel that describes whatever card is focused. Stremio's
-                 web app puts the same controls in a single toolbar row, which is
-                 what the chips reproduce. -->
-            <Group id="addonsGroup" visible="false">
-                <Rectangle id="addonChip0Bg" translation="[260, 150]" width="220" height="56" color="0x2A2450FF" />
-                <Label
-                    id="addonChip0Label"
-                    translation="[260, 150]"
-                    width="220"
-                    height="56"
-                    text="Installed"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xC7BCFFFF" />
-                <Rectangle id="addonChip1Bg" translation="[492, 150]" width="220" height="56" color="0x1B1934FF" />
-                <Label
-                    id="addonChip1Label"
-                    translation="[492, 150]"
-                    width="220"
-                    height="56"
-                    text="All"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xA9A6B8FF" />
-
-                <!-- The primary action keeps Stremio's green, which is the one
-                     colour the web app reserves for it. -->
-                <Rectangle id="addonChip2Bg" translation="[1046, 150]" width="280" height="56" color="0x2E9E76FF" />
-                <Label
-                    id="addonChip2Label"
-                    translation="[1046, 150]"
-                    width="280"
-                    height="56"
-                    text="+ Add addon"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xFFFFFFFF" />
-                <Rectangle id="addonChip3Bg" translation="[1338, 150]" width="250" height="56" color="0x1B1934FF" />
-                <Label
-                    id="addonChip3Label"
-                    translation="[1338, 150]"
-                    width="250"
-                    height="56"
-                    text="Search addons"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xA9A6B8FF" />
-                <Rectangle id="addonChip4Bg" translation="[1600, 150]" width="220" height="56" color="0x1B1934FF" />
-                <Label
-                    id="addonChip4Label"
-                    translation="[1600, 150]"
-                    width="220"
-                    height="56"
-                    text="Reload addons"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xA9A6B8FF" />
-
-                <Rectangle id="addonsListPanel" translation="[260, 228]" width="1000" height="612" color="0x131226FF" />
-                <MarkupList
-                    id="addonList"
-                    translation="[276, 244]"
-                    width="968"
-                    height="580"
-                    itemSize="[968, 134]"
-                    itemSpacing="[0, 8]"
-                    numRows="4"
-                    itemComponentName="AddonCard"
-                    drawFocusFeedback="false"
-                    vertFocusAnimationStyle="fixedFocus" />
-
-                <Rectangle id="addonsDetailPanel" translation="[1300, 228]" width="520" height="612" color="0x161529FF" />
-                <Rectangle translation="[1300, 228]" width="6" height="612" color="0x7657FFFF" />
-                <Label
-                    id="addonDetailEyebrow"
-                    translation="[1336, 258]"
-                    width="448"
-                    height="32"
-                    text=""
-                    font="font:SmallSystemFont"
-                    color="0x9D86FFFF" />
-                <Label
-                    id="addonDetailTitle"
-                    translation="[1336, 300]"
-                    width="448"
-                    height="92"
-                    text=""
-                    wrap="true"
-                    maxLines="2"
-                    font="font:MediumBoldSystemFont"
-                    color="0xFFFFFFFF" />
-                <Label
-                    id="addonDetailValue"
-                    translation="[1336, 402]"
-                    width="448"
-                    height="42"
-                    text=""
-                    font="font:MediumSystemFont"
-                    color="0xD0C9FFFF" />
-                <Label
-                    id="addonDetailHint"
-                    translation="[1336, 462]"
-                    width="448"
-                    height="230"
-                    text=""
-                    wrap="true"
-                    maxLines="6"
-                    font="font:SmallSystemFont"
-                    color="0xB4B0C1FF" />
-                <!-- Host only. A configured manifest URL can carry a private
-                     debrid token, so the full URL is never drawn. -->
-                <Label
-                    id="addonDetailSource"
-                    translation="[1336, 704]"
-                    width="448"
-                    height="30"
-                    text=""
-                    font="font:SmallSystemFont"
-                    color="0x6F6A8AFF" />
-                <Rectangle
-                    id="addonDetailActionPill"
-                    translation="[1336, 752]"
-                    width="448"
-                    height="56"
-                    color="0x2A2450FF"
-                    visible="false" />
-                <Label
-                    id="addonDetailAction"
-                    translation="[1336, 752]"
-                    width="448"
-                    height="56"
-                    text=""
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xC7BCFFFF" />
-            </Group>
+            <!-- Addons is its own screen, fully self-contained in a component
+                 that owns its chip row, card list, detail panel, focus, and keys,
+                 the same way Settings does. MainScene only shows it, pushes the
+                 current data, and dispatches the actions it emits; the component's
+                 internals stay out of MainScene's onKeyEvent. -->
+            <Addons id="addonsScreen" translation="[0, 0]" />
 
             <Rectangle translation="[228, 940]" width="1692" height="140" color="0x0D0C1DFF" />
             <Label
