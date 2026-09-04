@@ -86,6 +86,7 @@ sub init()
     m.discoverRequestActive = false
     m.addonStore = CreateAddonStore()
     m.libraryStore = CreateLibraryStore()
+    m.authStore = CreateAuthStore()
     m.calendarEntries = []
     m.calendarLoadedSeries = {}
     m.calendarRequestActive = false
@@ -102,9 +103,6 @@ sub init()
     m.libraryRows = [[]]
     m.catalogRows = m.boardRows
     m.catalogNames = m.boardNames
-    m.stremioAuthKey = ""
-    m.linkCode = ""
-    m.linkUrl = ""
     m.selectedItem = invalid
     m.episodes = []
     m.visibleEpisodes = []
@@ -397,7 +395,7 @@ end sub
 sub RenderLibrary(focusContent as boolean)
     m.primaryTitle.text = TrText("nav.library")
     m.primarySubtitle.text = TrText("library.subtitle")
-    if m.stremioAuthKey = ""
+    if not m.authStore.isSignedIn()
         RenderInfoList([
             InfoAction(TrText("library.signedOut.title"), "none", invalid)
             InfoAction(TrText("library.signedOut.benefit1"), "none", invalid)
@@ -448,7 +446,7 @@ sub RenderCalendar(focusContent as boolean)
     m.calendarGroup.visible = true
 
     m.heroTitle.text = TrText("calendar.title")
-    if m.stremioAuthKey = ""
+    if not m.authStore.isSignedIn()
         m.heroDescription.text = TrText("calendar.hero.signedOut")
         RenderCalendarRows(BuildCalendarSignedOutRows(), focusContent)
         return
@@ -749,7 +747,7 @@ sub PushSettingsState()
     state = m.settingsStore.getState()
     ' Stremio auth is not a settings preference (separate domain), so its signed-in
     ' flag is added here by MainScene rather than living in the settings store.
-    state.authSignedIn = m.stremioAuthKey <> ""
+    state.authSignedIn = m.authStore.isSignedIn()
     m.settingsScreen.state = state
 end sub
 
@@ -1523,9 +1521,7 @@ sub CloseUiScaleSlider(save as boolean)
 end sub
 
 sub LoadStremioAccount()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    if section.Exists("stremioAuthKey")
-        m.stremioAuthKey = section.Read("stremioAuthKey")
+    if m.authStore.load() <> ""
         FetchLibrary()
     end if
 end sub
@@ -2954,7 +2950,7 @@ sub OpenSettings()
     if m.addonStore.manifestUrlCount() > 0
         addonLabel = TrFormat("dialog.quickActions.addAddonCount", m.addonStore.manifestUrlCount())
     end if
-    if m.stremioAuthKey = ""
+    if not m.authStore.isSignedIn()
         dialog.message = TrText("dialog.quickActions.messageSignedOut")
         dialog.buttons = [TrText("dialog.quickActions.connect"), addonLabel, TrText("dialog.subtitle.title"), TrText("common.cancel")]
     else
@@ -2968,7 +2964,7 @@ end sub
 
 sub onSettingsButton(event as object)
     button = event.GetData()
-    authenticated = m.stremioAuthKey <> ""
+    authenticated = m.authStore.isSignedIn()
     m.settingsDialog.close = true
 
     if not authenticated
@@ -3139,20 +3135,14 @@ end sub
 
 sub BeginStremioLink()
     ShowStatus(TrText("status.link.creating"), true)
-    StartRequest("https://link.stremio.com/api/v2/create?type=Create", "linkCreate|stremio")
+    req = m.authStore.buildLinkCreate()
+    StartRequest(req.url, req.id)
 end sub
 
 sub HandleLinkCreateResponse(data as object)
-    if data = invalid or data.DoesExist("error") or not data.DoesExist("result")
-        ShowStatus(TrText("status.link.createFailed"), false)
-        return
-    end if
-
-    result = data.result
-    m.linkCode = SafeString(result, "code")
-    m.linkUrl = SafeString(result, "link")
-    if m.linkCode = "" or m.linkUrl = ""
-        ShowStatus(TrText("status.link.incomplete"), false)
+    result = m.authStore.handleLinkCreateResponse(data)
+    if not result.success
+        ShowStatus(result.message, false)
         return
     end if
 
@@ -3162,7 +3152,7 @@ sub HandleLinkCreateResponse(data as object)
     ' One key per line, each carrying its own {0}, so a language can put the URL
     ' or the code wherever its word order needs it. The line break travels with
     ' the URL so the address keeps a line of its own.
-    dialog.message = TrFormat("dialog.connect.openUrl", Chr(10) + m.linkUrl) + Chr(10) + Chr(10) + TrFormat("dialog.connect.code", m.linkCode) + Chr(10) + TrText("dialog.connect.waiting")
+    dialog.message = TrFormat("dialog.connect.openUrl", Chr(10) + m.authStore.getLinkUrl()) + Chr(10) + Chr(10) + TrFormat("dialog.connect.code", m.authStore.getLinkCode()) + Chr(10) + TrText("dialog.connect.waiting")
     dialog.buttons = [TrText("common.cancel")]
     dialog.ObserveField("buttonSelected", "onLinkDialogButton")
     m.linkDialog = dialog
@@ -3172,38 +3162,28 @@ end sub
 
 sub onLinkDialogButton(event as object)
     m.linkPollTimer.control = "stop"
-    m.linkCode = ""
+    m.authStore.cancelLink()
     m.linkDialog.close = true
 end sub
 
 sub onLinkPollTimer()
-    if m.linkCode = "" then return
-    url = "https://link.stremio.com/api/v2/read?type=Read&code=" + m.linkCode
-    StartRequest(url, "linkRead|stremio")
+    if not m.authStore.hasActiveLink() then return
+    req = m.authStore.buildLinkRead()
+    StartRequest(req.url, req.id)
 end sub
 
 sub HandleLinkReadResponse(data as object)
-    if data = invalid or data.DoesExist("error") or not data.DoesExist("result") then return
-    authKey = SafeString(data.result, "authKey")
+    authKey = m.authStore.handleLinkReadResponse(data)
     if authKey = "" then return
 
     m.linkPollTimer.control = "stop"
-    m.linkCode = ""
     if m.linkDialog <> invalid then m.linkDialog.close = true
-
-    section = CreateObject("roRegistrySection", "Rokumio")
-    section.Write("stremioAuthKey", authKey)
-    section.Flush()
-    m.stremioAuthKey = authKey
     ShowStatus(TrText("status.link.connected"), true)
     FetchLibrary()
 end sub
 
 sub DisconnectStremio()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    section.Delete("stremioAuthKey")
-    section.Flush()
-    m.stremioAuthKey = ""
+    m.authStore.disconnect()
     m.libraryStore.clear()
     m.libraryRows = [[]]
     RenderActiveTab(true)
@@ -3211,8 +3191,8 @@ sub DisconnectStremio()
 end sub
 
 sub FetchLibrary()
-    if m.stremioAuthKey = "" then return
-    req = m.libraryStore.fetch(m.stremioAuthKey)
+    if not m.authStore.isSignedIn() then return
+    req = m.libraryStore.fetch(m.authStore.getAuthKey())
     StartPostRequest(req.url, req.id, req.body)
 end sub
 
@@ -3429,7 +3409,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
 
     if key = "options" and m.screenMode <> "video"
         if m.screenMode = "episodes" or (m.screenMode = "choices" and m.choiceMode = "streams")
-            result = m.libraryStore.toggle(m.selectedItem, m.stremioAuthKey)
+            result = m.libraryStore.toggle(m.selectedItem, m.authStore.getAuthKey())
             if result.mode = "login"
                 BeginStremioLink()
             else if result.mode = "put"
@@ -4129,7 +4109,7 @@ sub onVideoPositionChanged(event as object)
 end sub
 
 sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinished as boolean)
-    if m.stremioAuthKey = "" then return
+    if not m.authStore.isSignedIn() then return
     if m.playbackContentId = "" then return
 
     seriesOrMovieId = m.playbackContentId
@@ -4231,7 +4211,7 @@ sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinis
     libraryItem._mtime = now
     m.libraryStore.upsertById(seriesOrMovieId, libraryItem)
 
-    req = m.libraryStore.buildProgressPut(m.stremioAuthKey, seriesOrMovieId, libraryItem)
+    req = m.libraryStore.buildProgressPut(m.authStore.getAuthKey(), seriesOrMovieId, libraryItem)
     StartPostRequest(req.url, req.id, req.body)
 end sub
 

@@ -14,6 +14,7 @@
     <script type="text/brightscript" uri="pkg:/components/AddonStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/SettingsStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/LibraryStore.brs" />
+    <script type="text/brightscript" uri="pkg:/components/AuthStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 
     <children>

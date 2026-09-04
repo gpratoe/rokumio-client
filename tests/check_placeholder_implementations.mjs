@@ -15,6 +15,7 @@ const addons = fs.readFileSync(path.join(root, 'components/Addons.brs'), 'utf8')
 const settingsStore = fs.readFileSync(path.join(root, 'components/SettingsStore.brs'), 'utf8');
 const addonStore = fs.readFileSync(path.join(root, 'components/AddonStore.brs'), 'utf8');
 const libraryStore = fs.readFileSync(path.join(root, 'components/LibraryStore.brs'), 'utf8');
+const authStore = fs.readFileSync(path.join(root, 'components/AuthStore.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -91,6 +92,19 @@ const requiredLibraryStorePatterns = [
     ['Library store owns the derived watched list', /store\.getWatchedItems = function[\s\S]*?m\.HasWatchedActivity/],
 ];
 
+const requiredAuthStorePatterns = [
+    ['Auth store owns the auth key', /store\.getAuthKey = function/],
+    ['Auth store reads auth key from registry', /store\.load = function[\s\S]*?roRegistrySection/],
+    ['Auth store persists auth key to registry', /store\.save = function[\s\S]*?section\.Write/],
+    ['Auth store clears registry on disconnect', /store\.clear = function[\s\S]*?section\.Delete/],
+    ['Auth store builds the link create request', /store\.buildLinkCreate = function[\s\S]*?link\.stremio\.com/],
+    ['Auth store handles the create response', /store\.handleLinkCreateResponse = function[\s\S]*?m\._linkCode/],
+    ['Auth store builds the link read request', /store\.buildLinkRead = function[\s\S]*?link\.stremio\.com\/api\/v2\/read/],
+    ['Auth store handles the read response', /store\.handleLinkReadResponse = function[\s\S]*?m\.save/],
+    ['Auth store reports signed-in state', /store\.isSignedIn = function[\s\S]*?m\._authKey <> ""/],
+    ['Auth store cancels an in-progress link', /store\.cancelLink = function[\s\S]*?m\._linkCode = ""/],
+];
+
 const requiredLocalePatterns = [
     ['Search copy does not overpromise TVDB', /"dialog\.search\.message":\s*"Search movies, series, and channels/],
 ];
@@ -108,6 +122,7 @@ const forbiddenMainPatterns = [
     ['Settings left/right still routed through the scene onKeyEvent', /key = "left" and m\.activeTab = "settings" and m\.settingsList\.HasFocus\(\)/],
     ['Settings focus echo suppression moved back into the scene', /m\.settingsSuppressIndex/],
     ['Library state still mutated directly in the scene', /m\.libraryById\[.*?\]\s*=/],
+    ['Auth key still written to registry directly in the scene', /section\.Write\("stremioAuthKey"/],
 ];
 
 const requiredSettingsPatterns = [
@@ -164,6 +179,10 @@ for (const [label, pattern] of requiredAddonStorePatterns) {
 
 for (const [label, pattern] of requiredLibraryStorePatterns) {
     if (!pattern.test(libraryStore)) failures.push(`${label} is missing from LibraryStore.brs`);
+}
+
+for (const [label, pattern] of requiredAuthStorePatterns) {
+    if (!pattern.test(authStore)) failures.push(`${label} is missing from AuthStore.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsXmlPatterns) {
