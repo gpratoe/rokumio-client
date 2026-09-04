@@ -84,11 +84,7 @@ sub init()
     m.discoverCatalogs = ["Popular", "Featured", "New"]
     m.discoverGenres = ["None", "Action", "Adventure", "Animation", "Biography", "Comedy", "Crime", "Drama", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller"]
     m.discoverRequestActive = false
-    m.addonFilter = "installed"
-    m.addonCatalog = []
-    m.addonCatalogLoaded = false
-    m.addonCatalogRequestActive = false
-    m.addonSearchQuery = ""
+    m.addonStore = CreateAddonStore()
     m.calendarEntries = []
     m.calendarLoadedSeries = {}
     m.calendarRequestActive = false
@@ -149,9 +145,10 @@ sub init()
     m.episodeReturnMode = "home"
     m.episodeRequestActive = false
     m.screenMode = "home"
-    m.addons = []
-    m.addonManifestUrls = []
+    m.addonLoadPending = 0
     m.pendingAddonUrl = ""
+    m.pendingAddonDetails = invalid
+    m.installedAddonDetailsIndex = -1
     m.interfaceLanguage = "English"
     m.blurUnwatchedEpisodes = true
     m.uiScalePercent = UiScaleDefaultPercent()
@@ -677,7 +674,7 @@ sub RenderAddons(focusContent as boolean)
     m.primaryInfoGroup.visible = false
     m.addonsScreen.visible = true
 
-    if m.addonFilter = "all" and not m.addonCatalogLoaded and not m.addonCatalogRequestActive
+    if m.addonStore.getFilter() = "all" and not m.addonStore.catalogLoaded() and not m.addonStore.catalogRequestActive()
         FetchAddonCatalog()
     end if
 
@@ -686,17 +683,10 @@ sub RenderAddons(focusContent as boolean)
 end sub
 
 ' MainScene is the source of truth for the data the Addons screen renders (filter,
-' search query, installed manifests and the loaded collection). Push them into the
-' component; the component re-renders on change.
+' search query, installed manifests and the loaded collection). The AddonStore
+' holds that data; push a snapshot into the component on every change.
 sub PushAddonsState()
-    m.addonsScreen.state = {
-        addonFilter: m.addonFilter
-        addonSearchQuery: m.addonSearchQuery
-        addons: m.addons
-        catalog: m.addonCatalog
-        catalogLoaded: m.addonCatalogLoaded
-        catalogRequestActive: m.addonCatalogRequestActive
-    }
+    m.addonsScreen.state = m.addonStore.getState()
 end sub
 
 ' Ask the Addons component to take focus (it routes to its inner list).
@@ -733,13 +723,13 @@ end sub
 
 sub DispatchAddonAction(actionType as string, payload as dynamic)
     if actionType = "addonFilterInstalled"
-        m.addonFilter = "installed"
-        m.addonSearchQuery = ""
+        m.addonStore.setFilter("installed")
+        m.addonStore.clearSearchQuery()
         ' Activating a chip must not steal focus away from the chip row.
         RenderAddons(false)
     else if actionType = "addonFilterAll"
-        m.addonFilter = "all"
-        m.addonSearchQuery = ""
+        m.addonStore.setFilter("all")
+        m.addonStore.clearSearchQuery()
         RenderAddons(false)
     else if actionType = "addAddon"
         OpenAddonConfiguration()
@@ -935,27 +925,28 @@ sub ActivateAction(actionType as string, payload as dynamic)
 end sub
 
 sub FetchAddonCatalog()
-    m.addonCatalogRequestActive = true
+    m.addonStore.setCatalogRequestActive(true)
     StartRequest("https://api.strem.io/addonscollection.json", "addonCatalog|all")
 end sub
 
 sub HandleAddonCatalogResponse(data as object)
-    m.addonCatalogRequestActive = false
-    m.addonCatalogLoaded = true
-    m.addonCatalog = []
+    m.addonStore.setCatalogRequestActive(false)
+    m.addonStore.setCatalogLoaded(true)
+    catalog = []
     if data <> invalid
         for each item in data
             if item <> invalid and item.DoesExist("manifest") and item.manifest <> invalid
                 url = SafeString(item, "transportUrl")
-                m.addonCatalog.Push({
+                catalog.Push({
                     url: url
                     manifest: item.manifest
                     summaryTypes: AddonTypesLabel(item.manifest)
                 })
             end if
-            if m.addonCatalog.Count() >= 80 then exit for
+            if catalog.Count() >= 80 then exit for
         end for
     end if
+    m.addonStore.setCatalog(catalog)
     if m.activeTab = "addons" then RenderAddons(false)
 end sub
 
@@ -989,8 +980,9 @@ sub onAddonDetailsButton(event as object)
 end sub
 
 sub ShowInstalledAddonDetails(index as integer)
-    if index < 0 or index >= m.addons.Count() then return
-    addon = m.addons[index]
+    installed = m.addonStore.getInstalled()
+    if index < 0 or index >= installed.Count() then return
+    addon = installed[index]
     manifest = addon.manifest
     dialog = CreateObject("roSGNode", "Dialog")
     dialog.title = SafeString(manifest, "name")
@@ -1263,9 +1255,9 @@ end sub
 sub OpenAddonSearch()
     dialog = CreateObject("roSGNode", "KeyboardDialog")
     dialog.title = TrText("dialog.addonSearch.title")
-    if m.addonFilter = "all"
+    if m.addonStore.getFilter() = "all"
         dialog.message = TrText("dialog.addonSearch.messageAll")
-        if not m.addonCatalogLoaded and not m.addonCatalogRequestActive then FetchAddonCatalog()
+        if not m.addonStore.catalogLoaded() and not m.addonStore.catalogRequestActive() then FetchAddonCatalog()
     else
         dialog.message = TrText("dialog.addonSearch.messageInstalled")
     end if
@@ -1286,34 +1278,30 @@ sub onAddonSearchButton(event as object)
     m.addonSearchDialog.close = true
     ' The query is a filter over the same card list, not a separate results
     ' screen: the Addons component applies it and its hero line reports it.
-    m.addonSearchQuery = query
+    m.addonStore.setSearchQuery(query)
     RenderAddons(true)
 end sub
 
 sub UninstallAddon(index as integer)
-    if index < 0 or index >= m.addons.Count() then return
-    addonName = SafeString(m.addons[index].manifest, "name")
-    addonUrl = m.addons[index].url
-    m.addons.Delete(index)
-    for urlIndex = m.addonManifestUrls.Count() - 1 to 0 step -1
-        if m.addonManifestUrls[urlIndex] = addonUrl
-            m.addonManifestUrls.Delete(urlIndex)
-        end if
-    end for
+    installed = m.addonStore.getInstalled()
+    if index < 0 or index >= installed.Count() then return
+    addonName = SafeString(installed[index].manifest, "name")
+    m.addonStore.removeByIndex(index)
     StoreAddonUrls()
     RenderAddons(true)
     ShowStatus(addonName + " was removed.", false)
 end sub
 
 sub ShareAddon(index as integer)
-    if index < 0 or index >= m.addons.Count() then return
-    url = m.addons[index].url
+    installed = m.addonStore.getInstalled()
+    if index < 0 or index >= installed.Count() then return
+    url = installed[index].url
     dialog = CreateObject("roSGNode", "Dialog")
     dialog.title = TrText("dialog.shareAddon.title")
     ' Sharing is the one place the full URL is the point, so it is shown -- unless
     ' the URL carries a debrid key, in which case putting it on a TV screen hands
     ' the account to anyone watching or to whoever the user reads it out to.
-    if AddonUrlLooksPrivate(url)
+    if m.addonStore.AddonUrlLooksPrivate(url)
         dialog.message = TrText("dialog.shareAddon.privateHidden") + Chr(10) + Chr(10) + AddonSourceLabel(url)
     else
         dialog.message = TrText("dialog.shareAddon.manifestUrl") + Chr(10) + url + Chr(10) + Chr(10) + TrText("dialog.shareAddon.warning")
@@ -1322,41 +1310,11 @@ sub ShareAddon(index as integer)
     m.top.dialog = dialog
 end sub
 
-' A configured add-on URL can embed a debrid key, usually as a long opaque path
-' segment or a credential-looking query parameter. Heuristic on purpose: the cost
-' of a false positive is a hidden URL, the cost of a false negative is a leaked
-' account, so this errs toward hiding.
-function AddonUrlLooksPrivate(url as string) as boolean
-    if url = "" then return false
-    lowered = LCase(url)
-    for each marker in ["token", "apikey", "api_key", "password", "secret", "rdkey", "premiumize", "realdebrid", "alldebrid"]
-        if Instr(1, lowered, marker) > 0 then return true
-    end for
-
-    ' Long opaque path segment: strip the scheme, then look for a run of 20+
-    ' characters that is all letters and digits.
-    rest = url
-    position = Instr(1, rest, "://")
-    if position > 0 then rest = Mid(rest, position + 3)
-    runLength = 0
-    for charIndex = 1 to Len(rest)
-        character = Mid(rest, charIndex, 1)
-        isAlphaNumeric = (character >= "a" and character <= "z") or (character >= "A" and character <= "Z") or (character >= "0" and character <= "9")
-        if isAlphaNumeric
-            runLength = runLength + 1
-            if runLength >= 20 then return true
-        else
-            runLength = 0
-        end if
-    end for
-    return false
-end function
-
 ' The Reload chip re-fetches every configured manifest. The spinner it raises is
 ' cleared by CompleteAddonLoad once the last response lands; without a request to
 ' wait for there would be nothing to clear it, so that case reports instead.
 sub ReloadAddons()
-    m.addons = []
+    m.addonStore.clearInstalled()
     m.addonReloadActive = false
     LoadAddonConfiguration()
     if m.addonLoadPending <= 0
@@ -1732,17 +1690,12 @@ sub LoadAddonConfiguration()
         if storedUrls <> invalid then urls = storedUrls
     end if
 
-    m.addonManifestUrls = urls
+    m.addonStore.setManifestUrls(urls)
     m.addonLoadPending = urls.Count()
     for index = 0 to urls.Count() - 1
         StartRequest(urls[index], "addonLoad|" + index.ToStr())
     end for
 end sub
-
-function AddonBaseUrl(url as string) as string
-    suffix = "/manifest.json"
-    return Left(url, Len(url) - Len(suffix))
-end function
 
 sub FetchCatalog(contentType as string, rowIndex as integer)
     url = "https://v3-cinemeta.strem.io/catalog/" + contentType + "/top.json"
@@ -1914,7 +1867,7 @@ sub onHttpResponse(event as object)
             CompleteAddonLoad()
             return
         else if requestType = "addonCatalog"
-            m.addonCatalogRequestActive = false
+            m.addonStore.setCatalogRequestActive(false)
             if m.activeTab = "addons" then RenderAddons(false)
             ShowStatus(TrFormat("status.addon.collectionFailed", response.error), false)
         else if requestType = "calendarMeta"
@@ -2548,8 +2501,9 @@ sub FindStreams(contentType as string, id as string, title as string, returnMode
     end if
 
     matchingAddons = []
-    for index = 0 to m.addons.Count() - 1
-        if AddonSupports(m.addons[index].manifest, "stream", contentType, id)
+    installed = m.addonStore.getInstalled()
+    for index = 0 to installed.Count() - 1
+        if m.addonStore.AddonSupports(installed[index].manifest, "stream", contentType, id)
             matchingAddons.Push(index)
         end if
     end for
@@ -2569,7 +2523,7 @@ sub FindStreams(contentType as string, id as string, title as string, returnMode
     m.streams = []
 
     for each addonIndex in matchingAddons
-        addon = m.addons[addonIndex]
+        addon = installed[addonIndex]
         url = addon.baseUrl + "/stream/" + contentType + "/" + id + ".json"
         requestId = m.activeStreamRequestId + "|" + addonIndex.ToStr()
         StartStreamRequest(url, requestId)
@@ -2586,8 +2540,9 @@ end sub
 sub HandleStreamsResponse(data as object, addonIndex as integer)
     if not m.streamRequestActive then return
     addonName = "Unknown add-on"
-    if addonIndex >= 0 and addonIndex < m.addons.Count()
-        addonName = SafeString(m.addons[addonIndex].manifest, "name")
+    installed = m.addonStore.getInstalled()
+    if addonIndex >= 0 and addonIndex < installed.Count()
+        addonName = SafeString(installed[addonIndex].manifest, "name")
     end if
 
     if data <> invalid and data.DoesExist("streams") and data.streams <> invalid
@@ -2727,8 +2682,9 @@ end sub
 
 sub FindSubtitles(stream as object)
     matchingAddons = []
-    for index = 0 to m.addons.Count() - 1
-        if AddonSupports(m.addons[index].manifest, "subtitles", m.playbackContentType, m.playbackContentId)
+    installed = m.addonStore.getInstalled()
+    for index = 0 to installed.Count() - 1
+        if m.addonStore.AddonSupports(installed[index].manifest, "subtitles", m.playbackContentType, m.playbackContentId)
             matchingAddons.Push(index)
         end if
     end for
@@ -2749,7 +2705,7 @@ sub FindSubtitles(stream as object)
     m.subtitleRequestErrors = []
 
     for each addonIndex in matchingAddons
-        addon = m.addons[addonIndex]
+        addon = installed[addonIndex]
         url = addon.baseUrl + "/subtitles/" + m.playbackContentType + "/" + m.playbackContentId + ".json"
         requestId = m.activeSubtitleRequestId + "|" + addonIndex.ToStr()
         StartRequest(url, requestId)
@@ -2766,8 +2722,9 @@ end sub
 sub HandleSubtitlesResponse(data as object, addonIndex as integer)
     if not m.subtitleRequestActive then return
     addonName = "Unknown add-on"
-    if addonIndex >= 0 and addonIndex < m.addons.Count()
-        addonName = SafeString(m.addons[addonIndex].manifest, "name")
+    installed = m.addonStore.getInstalled()
+    if addonIndex >= 0 and addonIndex < installed.Count()
+        addonName = SafeString(installed[addonIndex].manifest, "name")
     end if
 
     if data.DoesExist("subtitles") and data.subtitles <> invalid
@@ -3145,8 +3102,8 @@ sub OpenSettings()
     dialog = CreateObject("roSGNode", "Dialog")
     dialog.title = TrText("dialog.quickActions.title")
     addonLabel = TrText("dialog.quickActions.addAddon")
-    if m.addonManifestUrls.Count() > 0
-        addonLabel = TrFormat("dialog.quickActions.addAddonCount", m.addonManifestUrls.Count())
+    if m.addonStore.manifestUrlCount() > 0
+        addonLabel = TrFormat("dialog.quickActions.addAddonCount", m.addonStore.manifestUrlCount())
     end if
     if m.stremioAuthKey = ""
         dialog.message = TrText("dialog.quickActions.messageSignedOut")
@@ -3776,76 +3733,6 @@ function IsValidAddonManifest(manifest as dynamic) as boolean
     return false
 end function
 
-function AddonSupports(manifest as object, resourceName as string, contentType as string, id as string) as boolean
-    if not manifest.DoesExist("resources") or manifest.resources = invalid then return false
-    for each resource in manifest.resources
-        if Type(resource) = "roString" or Type(resource) = "String"
-            if resource = resourceName
-                return MatchesAddonFilters(manifest, contentType, id)
-            end if
-        else if Type(resource) = "roAssociativeArray"
-            if SafeString(resource, "name") = resourceName
-                return MatchesAddonFilters(manifest, contentType, id) and MatchesAddonFilters(resource, contentType, id)
-            end if
-        end if
-    end for
-    return false
-end function
-
-function AddonSupportsResource(manifest as object, resourceName as string) as boolean
-    if manifest = invalid or not manifest.DoesExist("resources") or manifest.resources = invalid then return false
-    for each resource in manifest.resources
-        if Type(resource) = "roString" or Type(resource) = "String"
-            if resource = resourceName then return true
-        else if Type(resource) = "roAssociativeArray"
-            if SafeString(resource, "name") = resourceName then return true
-        end if
-    end for
-    return false
-end function
-
-function MatchesAddonFilters(filters as object, contentType as string, id as string) as boolean
-    if filters.DoesExist("types") and filters.types <> invalid
-        if not FilterContains(filters.types, contentType) then return false
-    end if
-
-    if filters.DoesExist("idPrefixes") and filters.idPrefixes <> invalid and FilterCount(filters.idPrefixes) > 0
-        prefixMatched = false
-        for each prefix in filters.idPrefixes
-            prefixText = prefix.ToStr()
-            if LCase(Left(id, Len(prefixText))) = LCase(prefixText)
-                prefixMatched = true
-                exit for
-            end if
-        end for
-        if not prefixMatched then return false
-    end if
-    return true
-end function
-
-function FilterContains(values as dynamic, expected as string) as boolean
-    if Type(values) = "roString" or Type(values) = "String"
-        return LCase(values) = LCase(expected)
-    end if
-    for each value in values
-        if LCase(value.ToStr()) = LCase(expected) then return true
-    end for
-    return false
-end function
-
-function FilterCount(values as dynamic) as integer
-    if Type(values) = "roString" or Type(values) = "String" then return 1
-    return values.Count()
-end function
-
-function ArrayContains(values as object, expected as dynamic) as boolean
-    if values = invalid then return false
-    for each value in values
-        if value = expected then return true
-    end for
-    return false
-end function
-
 sub VerifyAddonConfiguration(url as string, message as string)
     m.pendingAddonUrl = url
     ShowStatus(message, true)
@@ -3859,8 +3746,8 @@ sub SaveAddonConfiguration(manifest as object)
         return
     end if
 
-    addon = BuildAddon(m.pendingAddonUrl, manifest)
-    ReplaceOrAddAddon(addon)
+    addon = m.addonStore.BuildAddon(m.pendingAddonUrl, manifest)
+    m.addonStore.addOrReplace(addon)
     StoreAddonUrls()
     m.pendingAddonUrl = ""
     HideStatus()
@@ -3869,8 +3756,9 @@ sub SaveAddonConfiguration(manifest as object)
 end sub
 
 sub HandleLoadedAddon(manifest as object, urlIndex as integer)
-    if urlIndex >= 0 and urlIndex < m.addonManifestUrls.Count() and IsValidAddonManifest(manifest)
-        ReplaceOrAddAddon(BuildAddon(m.addonManifestUrls[urlIndex], manifest))
+    manifestUrls = m.addonStore.getManifestUrls()
+    if urlIndex >= 0 and urlIndex < manifestUrls.Count() and IsValidAddonManifest(manifest)
+        m.addonStore.addOrReplace(m.addonStore.BuildAddon(manifestUrls[urlIndex], manifest))
         if m.activeTab = "addons" then RenderAddons(false)
     end if
     CompleteAddonLoad()
@@ -3894,43 +3782,9 @@ sub CompleteAddonLoad()
     FindStreams(lookup.contentType, lookup.id, lookup.title, lookup.returnMode)
 end sub
 
-function BuildAddon(url as string, manifest as object) as object
-    return {
-        url: url
-        baseUrl: AddonBaseUrl(url)
-        manifest: manifest
-    }
-end function
-
-sub ReplaceOrAddAddon(addon as object)
-    addonId = SafeString(addon.manifest, "id")
-    for index = 0 to m.addons.Count() - 1
-        if SafeString(m.addons[index].manifest, "id") = addonId
-            oldUrl = m.addons[index].url
-            m.addons[index] = addon
-            ReplaceStoredAddonUrl(oldUrl, addon.url)
-            return
-        end if
-    end for
-    m.addons.Push(addon)
-    if not ArrayContains(m.addonManifestUrls, addon.url)
-        m.addonManifestUrls.Push(addon.url)
-    end if
-end sub
-
-sub ReplaceStoredAddonUrl(oldUrl as string, newUrl as string)
-    for index = 0 to m.addonManifestUrls.Count() - 1
-        if m.addonManifestUrls[index] = oldUrl
-            m.addonManifestUrls[index] = newUrl
-            return
-        end if
-    end for
-    if not ArrayContains(m.addonManifestUrls, newUrl) then m.addonManifestUrls.Push(newUrl)
-end sub
-
 sub StoreAddonUrls()
     section = CreateObject("roRegistrySection", "Rokumio")
-    section.Write("addonManifestUrls", FormatJson(m.addonManifestUrls))
+    section.Write("addonManifestUrls", FormatJson(m.addonStore.getManifestUrls()))
     section.Flush()
 end sub
 
