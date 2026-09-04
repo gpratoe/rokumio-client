@@ -85,6 +85,7 @@ sub init()
     m.discoverGenres = ["None", "Action", "Adventure", "Animation", "Biography", "Comedy", "Crime", "Drama", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller"]
     m.discoverRequestActive = false
     m.addonStore = CreateAddonStore()
+    m.libraryStore = CreateLibraryStore()
     m.calendarEntries = []
     m.calendarLoadedSeries = {}
     m.calendarRequestActive = false
@@ -101,9 +102,6 @@ sub init()
     m.libraryRows = [[]]
     m.catalogRows = m.boardRows
     m.catalogNames = m.boardNames
-    m.libraryItems = []
-    m.watchedItems = []
-    m.libraryById = {}
     m.stremioAuthKey = ""
     m.linkCode = ""
     m.linkUrl = ""
@@ -413,23 +411,25 @@ sub RenderLibrary(focusContent as boolean)
 
     m.libraryRows = []
     m.catalogNames = []
-    if m.libraryItems.Count() > 0
-        m.libraryRows.Push(m.libraryItems)
+    libraryItems = m.libraryStore.getLibraryItems()
+    watchedItems = m.libraryStore.getWatchedItems()
+    if libraryItems.Count() > 0
+        m.libraryRows.Push(libraryItems)
         m.catalogNames.Push(TrText("library.catalog.lastWatched"))
     end if
-    if m.watchedItems.Count() > 0
-        m.libraryRows.Push(m.watchedItems)
+    if watchedItems.Count() > 0
+        m.libraryRows.Push(watchedItems)
         m.catalogNames.Push(TrText("library.catalog.previouslyWatched"))
     end if
     m.catalogRows = m.libraryRows
     m.catalogList.visible = true
     m.heroTitle.text = TrText("nav.library")
-    if m.libraryItems.Count() = 0 and m.watchedItems.Count() = 0
+    if libraryItems.Count() = 0 and watchedItems.Count() = 0
         m.heroDescription.text = TrText("library.hero.empty")
     else
         counts = TrText("library.hero.counts")
-        counts = LocaleReplace(counts, "{saved}", m.libraryItems.Count().ToStr())
-        counts = LocaleReplace(counts, "{watched}", m.watchedItems.Count().ToStr())
+        counts = LocaleReplace(counts, "{saved}", libraryItems.Count().ToStr())
+        counts = LocaleReplace(counts, "{watched}", watchedItems.Count().ToStr())
         m.heroDescription.text = counts
     end if
     RebuildCatalog()
@@ -979,7 +979,7 @@ end function
 
 function BuildCalendarActions() as object
     actions = []
-    if m.libraryItems.Count() = 0
+    if m.libraryStore.getLibraryItems().Count() = 0
         actions.Push(CalendarMessageRow(TrText("calendar.empty.noSeries")))
         actions.Push(CalendarMessageRow(TrText("calendar.empty.addSeries")))
         return actions
@@ -1095,7 +1095,8 @@ end function
 sub LoadCalendarEntries()
     if CountCalendarTrackedSeries() >= 24 then return
     pending = CountPendingCalendarRequests()
-    for each item in m.libraryItems
+    libraryItems = m.libraryStore.getLibraryItems()
+    for each item in libraryItems
         if SafeString(item, "type") = "series"
             id = SafeString(item, "id")
             if id <> "" and not m.calendarLoadedSeries.DoesExist(id)
@@ -1112,7 +1113,7 @@ end sub
 sub HandleCalendarMetaResponse(data as object, seriesId as string)
     if data <> invalid and data.DoesExist("meta") and data.meta <> invalid and data.meta.DoesExist("videos")
         seriesItem = invalid
-        for each item in m.libraryItems
+        for each item in m.libraryStore.getLibraryItems()
             if SafeString(item, "id") = seriesId
                 seriesItem = item
                 exit for
@@ -1924,8 +1925,8 @@ sub RebuildCatalog()
             ' Check if we have progress for this item
             id = SafeString(item, "id")
             progress = 0.0
-            if m.libraryById.DoesExist(id)
-                libraryItem = m.libraryById[id]
+            if m.libraryStore.hasById(id)
+                libraryItem = m.libraryStore.getById(id)
                 if libraryItem.DoesExist("state") and libraryItem.state <> invalid
                     state = libraryItem.state
                     if state.DoesExist("timeOffset") and state.DoesExist("duration")
@@ -1960,8 +1961,8 @@ sub RebuildDiscoverGrid()
                 itemNode.SDPosterUrl = SafeString(item, "poster")
                 id = SafeString(item, "id")
                 progress = 0.0
-                if m.libraryById.DoesExist(id)
-                    libraryItem = m.libraryById[id]
+                if m.libraryStore.hasById(id)
+                    libraryItem = m.libraryStore.getById(id)
                     if libraryItem.DoesExist("state") and libraryItem.state <> invalid
                         state = libraryItem.state
                         if state.DoesExist("timeOffset") and state.DoesExist("duration")
@@ -2228,8 +2229,8 @@ sub RebuildEpisodeList()
     currentDuration = 0
 
     seriesId = SafeString(m.selectedItem, "id")
-    if m.libraryById.DoesExist(seriesId)
-        libraryItem = m.libraryById[seriesId]
+    if m.libraryStore.hasById(seriesId)
+        libraryItem = m.libraryStore.getById(seriesId)
         if libraryItem.DoesExist("state") and libraryItem.state <> invalid
             state = libraryItem.state
             if state.DoesExist("watched") and state.watched <> invalid and state.watched <> ""
@@ -2608,8 +2609,8 @@ sub PlayStream(stream as object, title as string, subtitles as object)
         libraryItemId = parts[0]
     end if
 
-    if m.libraryById.DoesExist(libraryItemId)
-        libraryItem = m.libraryById[libraryItemId]
+    if m.libraryStore.hasById(libraryItemId)
+        libraryItem = m.libraryStore.getById(libraryItemId)
         if libraryItem.DoesExist("state") and libraryItem.state <> invalid
             state = libraryItem.state
             if state.DoesExist("video_id") and state.video_id = m.playbackContentId
@@ -3203,9 +3204,7 @@ sub DisconnectStremio()
     section.Delete("stremioAuthKey")
     section.Flush()
     m.stremioAuthKey = ""
-    m.libraryItems = []
-    m.watchedItems = []
-    m.libraryById = {}
+    m.libraryStore.clear()
     m.libraryRows = [[]]
     RenderActiveTab(true)
     ShowStatus(TrText("status.link.disconnected"), false)
@@ -3213,30 +3212,16 @@ end sub
 
 sub FetchLibrary()
     if m.stremioAuthKey = "" then return
-    body = {
-        authKey: m.stremioAuthKey
-        collection: "libraryItem"
-        ids: []
-        all: true
-    }
-    StartPostRequest("https://api.strem.io/api/datastoreGet", "libraryGet|all", body)
+    req = m.libraryStore.fetch(m.stremioAuthKey)
+    StartPostRequest(req.url, req.id, req.body)
 end sub
 
 sub HandleLibraryResponse(data as object)
-    if data = invalid or data.DoesExist("error") or not data.DoesExist("result")
+    if not m.libraryStore.handleGetResponse(data)
         ShowStatus(TrText("status.library.rejected"), false)
         return
     end if
 
-    m.libraryById = {}
-    for each libraryItem in data.result
-        id = SafeString(libraryItem, "_id")
-        if id <> ""
-            m.libraryById[id] = libraryItem
-        end if
-    end for
-
-    RebuildLibraryCatalogItemsFromMap()
     if m.activeTab = "library"
         RenderLibrary(false)
     else
@@ -3248,162 +3233,8 @@ sub HandleLibraryResponse(data as object)
     end if
 end sub
 
-function LibraryCatalogItem(libraryItem as object) as object
-    return {
-        id: SafeString(libraryItem, "_id")
-        name: SafeString(libraryItem, "name")
-        type: SafeString(libraryItem, "type")
-        poster: SafeString(libraryItem, "poster")
-        description: TrText("library.savedDescription")
-        libraryItem: libraryItem
-    }
-end function
-
-sub RebuildLibraryCatalogItemsFromMap()
-    m.libraryItems = []
-    m.watchedItems = []
-
-    for each id in m.libraryById
-        libraryItem = m.libraryById[id]
-        removed = false
-        if libraryItem.DoesExist("removed") then removed = libraryItem.removed
-        if not removed
-            catalogItem = LibraryCatalogItem(libraryItem)
-            temp = false
-            if libraryItem.DoesExist("temp") then temp = libraryItem.temp
-            if not temp
-                m.libraryItems.Push(catalogItem)
-            end if
-            if HasWatchedActivity(libraryItem)
-                m.watchedItems.Push(catalogItem)
-            end if
-        end if
-    end for
-
-    SortLibraryCatalogItemsByLastWatched(m.libraryItems)
-    SortLibraryCatalogItemsByLastWatched(m.watchedItems)
-    m.libraryRows = [m.libraryItems, m.watchedItems]
-end sub
-
-function HasWatchedActivity(libraryItem as object) as boolean
-    if libraryItem = invalid then return false
-    if not libraryItem.DoesExist("state") or libraryItem.state = invalid then return false
-
-    state = libraryItem.state
-    if SafeString(state, "lastWatched") <> "" then return true
-    if state.DoesExist("timeOffset") and state.timeOffset > 0 then return true
-    if state.DoesExist("timesWatched") and state.timesWatched > 0 then return true
-    return false
-end function
-
-sub SortLibraryCatalogItemsByLastWatched(items as object)
-    if items = invalid or items.Count() < 2 then return
-
-    for i = 0 to items.Count() - 2
-        for j = i + 1 to items.Count() - 1
-            if LibraryLastWatchedSortKey(items[j]) > LibraryLastWatchedSortKey(items[i])
-                swap = items[i]
-                items[i] = items[j]
-                items[j] = swap
-            end if
-        end for
-    end for
-end sub
-
-function LibraryLastWatchedSortKey(item as object) as string
-    if item = invalid or not item.DoesExist("libraryItem") or item.libraryItem = invalid then return ""
-
-    libraryItem = item.libraryItem
-    if libraryItem.DoesExist("state") and libraryItem.state <> invalid
-        lastWatched = SafeString(libraryItem.state, "lastWatched")
-        if lastWatched <> "" then return lastWatched
-    end if
-
-    return SafeString(libraryItem, "_mtime")
-end function
-
-function LibraryActionLabel(item as dynamic) as string
-    if m.stremioAuthKey = "" then return TrText("library.action.connect")
-    if item <> invalid
-        id = SafeString(item, "id")
-        if m.libraryById.DoesExist(id)
-            libraryItem = m.libraryById[id]
-            if not libraryItem.DoesExist("removed") or not libraryItem.removed
-                return TrText("library.action.remove")
-            end if
-        end if
-    end if
-    return TrText("library.action.add")
-end function
-
-sub ToggleSelectedLibraryItem()
-    if m.selectedItem = invalid then return
-    if m.stremioAuthKey = ""
-        BeginStremioLink()
-        return
-    end if
-
-    id = SafeString(m.selectedItem, "id")
-    removeItem = false
-    if m.libraryById.DoesExist(id)
-        existing = m.libraryById[id]
-        removeItem = not existing.DoesExist("removed") or not existing.removed
-    end if
-
-    change = BuildLibraryChange(m.selectedItem, removeItem)
-    action = "Adding"
-    if removeItem then action = "Removing"
-    ShowStatus(action + " " + SafeString(m.selectedItem, "name") + "...", true)
-    StartPostRequest("https://api.strem.io/api/datastorePut", "libraryPut|" + id, {
-        authKey: m.stremioAuthKey
-        collection: "libraryItem"
-        changes: [change]
-    })
-end sub
-
-function BuildLibraryChange(item as object, removed as boolean) as object
-    id = SafeString(item, "id")
-    now = CreateObject("roDateTime").ToISOString()
-    if m.libraryById.DoesExist(id)
-        change = m.libraryById[id]
-        change.removed = removed
-        change.temp = false
-        change._mtime = now
-        return change
-    end if
-
-    return {
-        _id: id
-        name: SafeString(item, "name")
-        type: SafeString(item, "type")
-        poster: SafeString(item, "poster")
-        posterShape: "poster"
-        removed: removed
-        temp: false
-        _ctime: now
-        _mtime: now
-        state: {
-            lastWatched: invalid
-            timeWatched: 0
-            timeOffset: 0
-            overallTimeWatched: 0
-            timesWatched: 0
-            flaggedWatched: 0
-            duration: 0
-            video_id: invalid
-            watched: invalid
-            noNotif: false
-        }
-        behaviorHints: {
-            defaultVideoId: invalid
-            featuredVideoId: invalid
-            hasScheduledVideos: false
-        }
-    }
-end function
-
 sub HandleLibraryPutResponse(data as object)
-    if data = invalid or data.DoesExist("error") or not data.DoesExist("result")
+    if not m.libraryStore.handlePutResponse(data)
         ShowStatus(TrText("status.library.updateFailed"), false)
         return
     end if
@@ -3598,7 +3429,13 @@ function onKeyEvent(key as string, press as boolean) as boolean
 
     if key = "options" and m.screenMode <> "video"
         if m.screenMode = "episodes" or (m.screenMode = "choices" and m.choiceMode = "streams")
-            ToggleSelectedLibraryItem()
+            result = m.libraryStore.toggle(m.selectedItem, m.stremioAuthKey)
+            if result.mode = "login"
+                BeginStremioLink()
+            else if result.mode = "put"
+                ShowStatus(result.message, true)
+                StartPostRequest(result.request.url, result.request.id, result.request.body)
+            end if
         else if m.screenMode = "noStreams"
             OpenAddonConfiguration()
         else if m.activeTab = "discover"
@@ -4302,10 +4139,10 @@ sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinis
     end if
 
     libraryItem = invalid
-    if m.libraryById.DoesExist(seriesOrMovieId)
-        libraryItem = m.libraryById[seriesOrMovieId]
+    if m.libraryStore.hasById(seriesOrMovieId)
+        libraryItem = m.libraryStore.getById(seriesOrMovieId)
     else if m.selectedItem <> invalid
-        libraryItem = BuildLibraryChange(m.selectedItem, false)
+        libraryItem = m.libraryStore.buildLibraryChange(m.selectedItem, false)
         libraryItem.temp = true
     end if
 
@@ -4392,14 +4229,10 @@ sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinis
     end if
 
     libraryItem._mtime = now
-    m.libraryById[seriesOrMovieId] = libraryItem
-    RebuildLibraryCatalogItemsFromMap()
+    m.libraryStore.upsertById(seriesOrMovieId, libraryItem)
 
-    StartPostRequest("https://api.strem.io/api/datastorePut", "libraryPutSilent|" + seriesOrMovieId, {
-        authKey: m.stremioAuthKey
-        collection: "libraryItem"
-        changes: [libraryItem]
-    })
+    req = m.libraryStore.buildProgressPut(m.stremioAuthKey, seriesOrMovieId, libraryItem)
+    StartPostRequest(req.url, req.id, req.body)
 end sub
 
 function CreateBitReader(bytes as object) as object

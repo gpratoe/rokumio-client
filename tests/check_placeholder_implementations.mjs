@@ -14,6 +14,7 @@ const settingsXml = fs.readFileSync(path.join(root, 'components/Settings.xml'), 
 const addons = fs.readFileSync(path.join(root, 'components/Addons.brs'), 'utf8');
 const settingsStore = fs.readFileSync(path.join(root, 'components/SettingsStore.brs'), 'utf8');
 const addonStore = fs.readFileSync(path.join(root, 'components/AddonStore.brs'), 'utf8');
+const libraryStore = fs.readFileSync(path.join(root, 'components/LibraryStore.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -78,6 +79,18 @@ const requiredAddonStorePatterns = [
     ['Addon store processes a loaded manifest', /store\.handleManifestLoadResponse = function\(/],
 ];
 
+const requiredLibraryStorePatterns = [
+    ['Library store fetches the library via datastoreGet', /store\.fetch = function\(authKey as string\)[\s\S]*?datastoreGet/],
+    ['Library store processes datastoreGet responses', /store\.handleGetResponse = function\(data[\s\S]*?m\._libraryById = \{\}/],
+    ['Library store toggles library membership', /store\.toggle = function[\s\S]*?mode: "put"/],
+    ['Library store builds the silent progress put', /store\.buildProgressPut = function[\s\S]*?libraryPutSilent/],
+    ['Library store processes datastorePut responses', /store\.handlePutResponse = function\(data as dynamic\) as boolean/],
+    ['Library store computes the action label', /store\.libraryActionLabel = function\(item as dynamic, authKey as string\) as string/],
+    ['Library store rebuilds the catalog from authoritative state', /store\.rebuildCatalog = function\(\)[\s\S]*?m\._libraryItems = \[\]/],
+    ['Library store exposes catalog accessors', /store\.getLibraryItems = function\(\) as object[\s\S]*?store\.hasById = function\(id as string\) as boolean/],
+    ['Library store owns the derived watched list', /store\.getWatchedItems = function[\s\S]*?m\.HasWatchedActivity/],
+];
+
 const requiredLocalePatterns = [
     ['Search copy does not overpromise TVDB', /"dialog\.search\.message":\s*"Search movies, series, and channels/],
 ];
@@ -94,6 +107,7 @@ const forbiddenMainPatterns = [
     ['Settings up/down still routed through the scene onKeyEvent', /else if \(key = "up" or key = "down"\) and m\.activeTab = "settings" and m\.settings(Screen|List)\.HasFocus\(\)[\s\S]*?return (true|FocusSettings)/],
     ['Settings left/right still routed through the scene onKeyEvent', /key = "left" and m\.activeTab = "settings" and m\.settingsList\.HasFocus\(\)/],
     ['Settings focus echo suppression moved back into the scene', /m\.settingsSuppressIndex/],
+    ['Library state still mutated directly in the scene', /m\.libraryById\[.*?\]\s*=/],
 ];
 
 const requiredSettingsPatterns = [
@@ -146,6 +160,10 @@ for (const [label, pattern] of requiredSettingsStorePatterns) {
 
 for (const [label, pattern] of requiredAddonStorePatterns) {
     if (!pattern.test(addonStore)) failures.push(`${label} is missing from AddonStore.brs`);
+}
+
+for (const [label, pattern] of requiredLibraryStorePatterns) {
+    if (!pattern.test(libraryStore)) failures.push(`${label} is missing from LibraryStore.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsXmlPatterns) {
