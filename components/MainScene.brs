@@ -371,10 +371,10 @@ sub RenderActiveTab(focusContent as boolean)
 end sub
 
 sub RenderBoard(focusContent as boolean)
-    m.primaryTitle.text = "Board"
-    m.primarySubtitle.text = "Popular, featured, YouTube, and public-domain catalogs"
-    m.heroTitle.text = "Board"
-    m.heroDescription.text = "Browse Stremio catalogs from the default web app layout."
+    m.primaryTitle.text = TrText("nav.board")
+    m.primarySubtitle.text = TrText("board.subtitle")
+    m.heroTitle.text = TrText("nav.board")
+    m.heroDescription.text = TrText("board.hero")
     m.catalogRows = m.boardRows
     m.catalogNames = m.boardNames
     m.catalogList.visible = true
@@ -383,10 +383,10 @@ sub RenderBoard(focusContent as boolean)
 end sub
 
 sub RenderDiscover(focusContent as boolean)
-    m.primaryTitle.text = "Discover"
-    m.primarySubtitle.text = "UP  FILTERS    OK  CHANGE    *  MORE"
-    m.heroTitle.text = "Discover"
-    m.heroDescription.text = "Browse by type, catalog, and genre."
+    m.primaryTitle.text = TrText("nav.discover")
+    m.primarySubtitle.text = TrText("discover.subtitle")
+    m.heroTitle.text = TrText("nav.discover")
+    m.heroDescription.text = TrText("discover.hero")
     m.catalogRows = m.discoverRows
     m.catalogNames = m.discoverNames
     m.discoverFilterGroup.visible = true
@@ -398,17 +398,17 @@ sub RenderDiscover(focusContent as boolean)
 end sub
 
 sub RenderLibrary(focusContent as boolean)
-    m.primaryTitle.text = "Library"
-    m.primarySubtitle.text = "Saved titles and watch history"
+    m.primaryTitle.text = TrText("nav.library")
+    m.primarySubtitle.text = TrText("library.subtitle")
     if m.stremioAuthKey = ""
         RenderInfoList([
-            InfoAction("Library is only available for logged in users", "none", invalid)
-            InfoAction("Access your favorite movies and TV shows anytime, anywhere", "none", invalid)
-            InfoAction("Recommendations tailored to your viewing history", "none", invalid)
-            InfoAction("Log in", "login", invalid)
+            InfoAction(TrText("library.signedOut.title"), "none", invalid)
+            InfoAction(TrText("library.signedOut.benefit1"), "none", invalid)
+            InfoAction(TrText("library.signedOut.benefit2"), "none", invalid)
+            InfoAction(TrText("library.signedOut.login"), "login", invalid)
         ], focusContent)
-        m.heroTitle.text = "Library"
-        m.heroDescription.text = "Sign in to sync your Stremio library on Roku."
+        m.heroTitle.text = TrText("nav.library")
+        m.heroDescription.text = TrText("library.hero.signedOut")
         return
     end if
 
@@ -416,19 +416,22 @@ sub RenderLibrary(focusContent as boolean)
     m.catalogNames = []
     if m.libraryItems.Count() > 0
         m.libraryRows.Push(m.libraryItems)
-        m.catalogNames.Push("Library - Last Watched")
+        m.catalogNames.Push(TrText("library.catalog.lastWatched"))
     end if
     if m.watchedItems.Count() > 0
         m.libraryRows.Push(m.watchedItems)
-        m.catalogNames.Push("Previously Watched - Last Watched")
+        m.catalogNames.Push(TrText("library.catalog.previouslyWatched"))
     end if
     m.catalogRows = m.libraryRows
     m.catalogList.visible = true
-    m.heroTitle.text = "Library"
+    m.heroTitle.text = TrText("nav.library")
     if m.libraryItems.Count() = 0 and m.watchedItems.Count() = 0
-        m.heroDescription.text = "Your Stremio library and watch history are empty."
+        m.heroDescription.text = TrText("library.hero.empty")
     else
-        m.heroDescription.text = m.libraryItems.Count().ToStr() + " saved item(s)    " + m.watchedItems.Count().ToStr() + " watched item(s)"
+        counts = TrText("library.hero.counts")
+        counts = LocaleReplace(counts, "{saved}", m.libraryItems.Count().ToStr())
+        counts = LocaleReplace(counts, "{watched}", m.watchedItems.Count().ToStr())
+        m.heroDescription.text = counts
     end if
     RebuildCatalog()
     if focusContent then m.catalogList.SetFocus(true)
@@ -808,9 +811,9 @@ sub UpdateDiscoverFilterFocus()
 end sub
 
 function DiscoverTypeLabel(value as string) as string
-    if value = "movie" then return "Movie"
-    if value = "series" then return "Series"
-    if value = "channel" then return "Channel"
+    if value = "movie" then return TrText("discover.type.movie")
+    if value = "series" then return TrText("discover.type.series")
+    if value = "channel" then return TrText("discover.type.channel")
     return value
 end function
 
@@ -1875,10 +1878,10 @@ sub HandleCatalogResponse(data as object, rowIndex as integer, target as string)
     if target = "board"
         action = {
             id: "seeall:" + rowIndex.ToStr()
-            name: "See All"
+            name: TrText("board.seeAll")
             type: "action"
             poster: ""
-            description: "Open this catalog in Discover"
+            description: TrText("board.seeAll.description")
             rowIndex: rowIndex
         }
         items.Push(action)
@@ -2105,11 +2108,11 @@ sub OpenSeriesEpisodes(item as object)
     m.choiceReturnMode = "home"
     m.choiceMode = "loading"
     m.episodeRequestActive = true
-    m.choiceTitle.text = "Loading episodes for " + SafeString(item, "name")
+    m.choiceTitle.text = TrFormat("episodes.loadingFor", SafeString(item, "name"))
 
     content = CreateObject("roSGNode", "ContentNode")
     child = content.CreateChild("ContentNode")
-    child.title = "Loading episodes..."
+    child.title = TrText("episodes.loading")
     m.streamList.visible = false
     m.choiceList.visible = true
     m.choiceList.content = content
@@ -2218,9 +2221,9 @@ sub RebuildSeasonGrid()
         child = content.CreateChild("ContentNode")
         season = m.seasons[index]
         if season = 0
-            child.title = "Specials"
+            child.title = TrText("episodes.specials")
         else
-            child.title = "Season " + season.ToStr()
+            child.title = TrFormat("episodes.season", season)
         end if
         if index = m.selectedSeasonIndex
             child.shortDescriptionLine1 = "selected"

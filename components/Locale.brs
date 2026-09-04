@@ -442,6 +442,8 @@ function LocaleStringsEnglish() as object
         "library.signedOut.benefit1": "Access your favorite movies and TV shows anytime, anywhere"
         "library.signedOut.benefit2": "Recommendations tailored to your viewing history"
         "library.signedOut.login": "Log in"
+        "library.catalog.lastWatched": "Library - Last Watched"
+        "library.catalog.previouslyWatched": "Previously Watched - Last Watched"
 
         "episodes.loadingFor": "Loading episodes for {0}"
         "episodes.loading": "Loading episodes..."
@@ -819,6 +821,8 @@ function LocaleStringsSpanish() as object
         "library.signedOut.benefit1": "Accede a tus películas y series favoritas en cualquier momento y lugar"
         "library.signedOut.benefit2": "Recomendaciones adaptadas a tu historial de visionado"
         "library.signedOut.login": "Iniciar sesión"
+        "library.catalog.lastWatched": "Biblioteca - Visto recientemente"
+        "library.catalog.previouslyWatched": "Vistos anteriormente - Visto recientemente"
 
         "episodes.loadingFor": "Cargando los episodios de {0}"
         "episodes.loading": "Cargando episodios..."
@@ -1196,6 +1200,8 @@ function LocaleStringsFrench() as object
         "library.signedOut.benefit1": "Accedez a vos films et series preferes partout et a tout moment"
         "library.signedOut.benefit2": "Des recommandations adaptees a votre historique de visionnage"
         "library.signedOut.login": "Se connecter"
+        "library.catalog.lastWatched": "Bibliotheque - Vues recemment"
+        "library.catalog.previouslyWatched": "Deja vus - Vus recemment"
 
         "episodes.loadingFor": "Chargement des episodes de {0}"
         "episodes.loading": "Chargement des episodes..."
@@ -1573,6 +1579,8 @@ function LocaleStringsGerman() as object
         "library.signedOut.benefit1": "Greife jederzeit und uberall auf deine Lieblingsfilme und -serien zu"
         "library.signedOut.benefit2": "Empfehlungen passend zu deinem Wiedergabeverlauf"
         "library.signedOut.login": "Anmelden"
+        "library.catalog.lastWatched": "Bibliothek - Zuletzt gesehen"
+        "library.catalog.previouslyWatched": "Zuvor gesehen - Zuletzt gesehen"
 
         "episodes.loadingFor": "Folgen von {0} werden geladen"
         "episodes.loading": "Folgen werden geladen..."
@@ -1950,6 +1958,8 @@ function LocaleStringsItalian() as object
         "library.signedOut.benefit1": "Accedi ai tuoi film e alle tue serie preferite sempre e ovunque"
         "library.signedOut.benefit2": "Consigli su misura per la tua cronologia di visione"
         "library.signedOut.login": "Accedi"
+        "library.catalog.lastWatched": "Libreria - Visti di recente"
+        "library.catalog.previouslyWatched": "Visti in precedenza - Visti di recente"
 
         "episodes.loadingFor": "Caricamento degli episodi di {0}"
         "episodes.loading": "Caricamento degli episodi..."
@@ -2327,6 +2337,8 @@ function LocaleStringsPortuguese() as object
         "library.signedOut.benefit1": "Acede aos teus filmes e series favoritos a qualquer hora e em qualquer lugar"
         "library.signedOut.benefit2": "Recomendacoes adaptadas ao teu historico de visualizacao"
         "library.signedOut.login": "Iniciar sessao"
+        "library.catalog.lastWatched": "Biblioteca - Vistos recentemente"
+        "library.catalog.previouslyWatched": "Vistos anteriormente - Vistos recentemente"
 
         "episodes.loadingFor": "A carregar os episodios de {0}"
         "episodes.loading": "A carregar episodios..."
