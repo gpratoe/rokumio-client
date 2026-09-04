@@ -12,6 +12,7 @@ const locale = fs.readFileSync(path.join(root, 'components/Locale.brs'), 'utf8')
 const settings = fs.readFileSync(path.join(root, 'components/Settings.brs'), 'utf8');
 const settingsXml = fs.readFileSync(path.join(root, 'components/Settings.xml'), 'utf8');
 const addons = fs.readFileSync(path.join(root, 'components/Addons.brs'), 'utf8');
+const settingsStore = fs.readFileSync(path.join(root, 'components/SettingsStore.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -25,8 +26,6 @@ const requiredMainPatterns = [
     ['Remote add-on details handler', /sub ShowAddonDetails\(addon as object\)/],
     ['Installed add-on details handler', /sub ShowInstalledAddonDetails\(index as integer\)/],
     ['Settings links handler', /sub OpenSettingsLink\(kind as string\)/],
-    ['Interface preference persistence', /sub SaveInterfacePreferences\(\)/],
-    ['Player preference persistence', /sub SavePlayerPreferences\(\)/],
     ['Blur unwatched episodes writes card field', /blurThumbnail: true/],
     ['Calendar metadata request', /"calendarMeta\|"/],
     ['Calendar entries render dated episodes', /function CalendarEntryTitle\(entry as object\) as string/],
@@ -56,6 +55,14 @@ const requiredAddonsPatterns = [
     ['Reload add-ons survives on the Addons screen', /AddonChip\(TrText\("addons\.reload"\),\s*"reloadAddons"/],
     ['Addons toolbar is focusable from the card list', /sub FocusChips\(\)/],
     ['Addons toolbar hands OK to the chip it is on', /ActivateAddonChip\(m\.addonChipIndex\)/],
+];
+
+const requiredSettingsStorePatterns = [
+    ['Settings store persists interface preferences', /store\.saveInterfacePreferences = function\(\)/],
+    ['Settings store persists player preferences', /store\.savePlayerPreferences = function\(\)/],
+    ['Settings store persists subtitle preferences', /store\.saveSubtitlePreferences = function\(\)/],
+    ['Settings store persists streaming server config', /store\.saveStreamingServerConfig = function\(\)/],
+    ['Settings store loads all stored preferences', /store\.load = function\(\)/],
 ];
 
 const requiredLocalePatterns = [
@@ -118,6 +125,10 @@ for (const [label, pattern] of requiredAddonsPatterns) {
 
 for (const [label, pattern] of requiredSettingsPatterns) {
     if (!pattern.test(settings)) failures.push(`${label} is missing from Settings.brs`);
+}
+
+for (const [label, pattern] of requiredSettingsStorePatterns) {
+    if (!pattern.test(settingsStore)) failures.push(`${label} is missing from SettingsStore.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsXmlPatterns) {

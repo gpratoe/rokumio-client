@@ -76,8 +76,8 @@ for (const match of settingsSource.matchAll(/TrOption\("([^"]+)"/g)) {
 // change, and a regression to English literals here would be invisible.
 const wiringChecks = [
     ['Locale.brs registered in the scene', /Locale\.brs/, fs.readFileSync(path.join(root, 'components/MainScene.xml'), 'utf8')],
-    ['Stored language applied on startup', /SetLocaleLanguage\(m\.interfaceLanguage\)/, mainScene],
-    ['Language change republishes and re-renders nav', /SetLocaleLanguage\(m\.interfaceLanguage\)\s*\n\s*UpdateNavContent\(\)/, mainScene],
+    ['Stored language applied on startup', /SetLocaleLanguage\(m\.settingsStore\.getInterfaceLanguage\(\)\)/, mainScene],
+    ['Language change republishes and re-renders nav', /SetLocaleLanguage\(m\.settingsStore\.getInterfaceLanguage\(\)\)\s*\n\s*UpdateNavContent\(\)/, mainScene],
     ['Nav labels route through TrText', /child\.title = TrText\("nav\." \+ id\)/, mainScene],
     ['Nav identity kept separate from nav labels', /m\.navIds = \[/, mainScene],
     ['Settings tab chips route through TrText', /label\.text = TrText\("settings\.tab\./, settingsSource],

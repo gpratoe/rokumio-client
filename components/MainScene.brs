@@ -105,7 +105,6 @@ sub init()
     m.watchedItems = []
     m.libraryById = {}
     m.stremioAuthKey = ""
-    m.streamingServerUrl = ""
     m.linkCode = ""
     m.linkUrl = ""
     m.selectedItem = invalid
@@ -149,20 +148,10 @@ sub init()
     m.pendingAddonUrl = ""
     m.pendingAddonDetails = invalid
     m.installedAddonDetailsIndex = -1
-    m.interfaceLanguage = "English"
-    m.blurUnwatchedEpisodes = true
-    m.uiScalePercent = UiScaleDefaultPercent()
-    m.uiScalePendingPercent = m.uiScalePercent
-    m.uiScaleSavedPercent = m.uiScalePercent
-    m.uiScaleReturnMode = "home"
-    m.displayDescription = ""
-    m.defaultSubtitleLanguage = "English"
-    m.subtitleDefaultMode = "Default language"
-    m.lastSubtitleSelection = "off"
-    ' Black by default: the text default is White, so a White outline would only
-    ' thicken the glyphs instead of separating them from a bright backdrop.
-    m.subtitleOutlineColor = "Black"
-    m.defaultAudioTrack = "English"
+    ' Settings data + its registry persistence (interface, player, subtitle
+    ' style, streaming server URL) live in one store. MainScene keeps only the
+    ' scene-glue around them: dialogs, HTTP tasks, video pushes, chrome renders.
+    m.settingsStore = CreateSettingsStore()
     m.tasks = []
     m.exitVideoDialog = invalid
     m.exitAppDialog = invalid
@@ -201,11 +190,11 @@ sub init()
     m.linkPollTimer.ObserveField("fire", "onLinkPollTimer")
 
     LoadAddonConfiguration()
-    LoadStreamingServerConfig()
-    LoadSubtitlePreferences()
-    LoadInterfacePreferences()
+    ' Load every stored preference (interface, player, subtitle style, streaming
+    ' server) in one go; the store owns the registry.
+    m.settingsStore.load()
     ' Must precede the first render: every label below reads the active language.
-    SetLocaleLanguage(m.interfaceLanguage)
+    SetLocaleLanguage(m.settingsStore.getInterfaceLanguage())
     ApplyStaticChromeText()
     ' The player is built with the scene, so its own init() ran before the stored
     ' language existed. Push it now.
@@ -213,7 +202,6 @@ sub init()
     ' Must run before anything renders so the first frame is already laid out for
     ' this TV's design resolution.
     ApplyUiScaleSettings()
-    LoadPlayerPreferences()
     LoadStremioAccount()
     InitializePrimaryShell()
     FetchBoardCatalogs()
@@ -755,21 +743,11 @@ end sub
 ' MainScene is the source of truth for the values the Settings screen renders.
 ' Push them into the component; the component re-renders on change.
 sub PushSettingsState()
-    m.settingsScreen.state = {
-        authSignedIn: m.stremioAuthKey <> ""
-        streamingServerDisplay: StreamingServerDisplay()
-        streamingServerConfigured: StreamingServerConfigured()
-        interfaceLanguage: m.interfaceLanguage
-        uiScalePercent: m.uiScalePercent
-        displayDescription: m.displayDescription
-        blurUnwatched: m.blurUnwatchedEpisodes
-        defaultSubtitleLanguage: m.defaultSubtitleLanguage
-        subtitleTextSize: m.subtitleTextSize
-        subtitleTextColor: m.subtitleTextColor
-        subtitleBackdropOpacity: m.subtitleBackdropOpacity
-        subtitleOutlineColor: m.subtitleOutlineColor
-        defaultAudioTrack: m.defaultAudioTrack
-    }
+    state = m.settingsStore.getState()
+    ' Stremio auth is not a settings preference (separate domain), so its signed-in
+    ' flag is added here by MainScene rather than living in the settings store.
+    state.authSignedIn = m.stremioAuthKey <> ""
+    m.settingsScreen.state = state
 end sub
 
 ' Ask the Settings component to take focus (it routes to its inner list).
@@ -902,8 +880,8 @@ sub ActivateAction(actionType as string, payload as dynamic)
     else if actionType = "uiScale"
         OpenUiScaleSlider()
     else if actionType = "toggleBlurUnwatched"
-        m.blurUnwatchedEpisodes = not m.blurUnwatchedEpisodes
-        SaveInterfacePreferences()
+        m.settingsStore.setBlurUnwatched(not m.settingsStore.getBlurUnwatched())
+        m.settingsStore.saveInterfacePreferences()
     else if actionType = "defaultSubtitleLanguage"
         CycleDefaultSubtitleLanguage()
     else if actionType = "subtitleOutlineColor"
@@ -915,8 +893,8 @@ sub ActivateAction(actionType as string, payload as dynamic)
     else if actionType = "testStreamingServer"
         TestStreamingServer()
     else if actionType = "clearStreamingServer"
-        m.streamingServerUrl = ""
-        SaveStreamingServerConfig()
+        m.settingsStore.setStreamingServerUrl("")
+        m.settingsStore.saveStreamingServerConfig()
         HideStatus()
         ShowStatus(TrText("status.server.cleared"), false)
     else if actionType = "calendarEpisode"
@@ -1380,32 +1358,6 @@ sub CycleDiscoverFilter(filterIndex as integer)
     FetchDiscoverCatalog()
 end sub
 
-sub LoadSubtitlePreferences()
-    m.subtitleRenderMode = "Below video"
-    m.subtitleFont = "Default"
-    m.subtitleTextSize = "Medium"
-    m.subtitleTextColor = "White"
-    m.subtitleBackdropOpacity = "75%"
-    m.subtitlePosition = "Bottom bar"
-    m.subtitlesEnabledByDefault = false
-
-    section = CreateObject("roRegistrySection", "Rokumio")
-    if section.Exists("subtitleRenderMode") then m.subtitleRenderMode = section.Read("subtitleRenderMode")
-    if section.Exists("subtitleFont") then m.subtitleFont = section.Read("subtitleFont")
-    if section.Exists("subtitleTextSize") then m.subtitleTextSize = section.Read("subtitleTextSize")
-    if section.Exists("subtitleTextColor") then m.subtitleTextColor = section.Read("subtitleTextColor")
-    if section.Exists("subtitleBackdropOpacity") then m.subtitleBackdropOpacity = section.Read("subtitleBackdropOpacity")
-    if section.Exists("subtitlePosition") then m.subtitlePosition = section.Read("subtitlePosition")
-    if section.Exists("subtitlesEnabledByDefault")
-        storedDefaultSubtitles = section.Read("subtitlesEnabledByDefault")
-        if storedDefaultSubtitles = "true"
-            m.subtitlesEnabledByDefault = true
-        else
-            m.subtitlesEnabledByDefault = false
-        end if
-    end if
-end sub
-
 ' Maps the 1920x1080 design layout onto whatever design resolution this Roku
 ' reports, then applies the user's manual scale on top of it.
 '
@@ -1415,15 +1367,16 @@ end sub
 ' what makes the UI look zoomed in and cropped on those TVs.
 sub ApplyUiScaleSettings()
     resolution = DisplayDesignResolution()
-    scale = ComputeUiScale(resolution.width, resolution.height, resolution.name, m.uiScalePercent)
+    scale = ComputeUiScale(resolution.width, resolution.height, resolution.name, m.settingsStore.getUiScalePercent())
 
     PublishUiScaleValue("uiScaleGeometry", scale.geometry)
     PublishUiScaleValue("uiScaleFont", scale.font)
     PublishUiScaleValue("uiScaleOffsetX", scale.offsetX)
     PublishUiScaleValue("uiScaleOffsetY", scale.offsetY)
 
-    m.displayDescription = Int(resolution.width).ToStr() + "x" + Int(resolution.height).ToStr()
-    if resolution.name <> "" then m.displayDescription = m.displayDescription + " " + resolution.name
+    displayDescription = Int(resolution.width).ToStr() + "x" + Int(resolution.height).ToStr()
+    if resolution.name <> "" then displayDescription = displayDescription + " " + resolution.name
+    m.settingsStore.setDisplayDescription(displayDescription)
 
     ' Paint the letterbox margins left by a reduced manual scale in the app colour
     ' instead of the Roku default background image.
@@ -1485,12 +1438,12 @@ sub PublishUiScaleValue(fieldName as string, value as float)
 end sub
 
 sub OpenUiScaleSlider()
-    m.uiScaleSavedPercent = m.uiScalePercent
-    m.uiScalePendingPercent = m.uiScalePercent
-    m.uiScaleReturnMode = m.activeTab
+    m.settingsStore.setUiScaleSavedPercent(m.settingsStore.getUiScalePercent())
+    m.settingsStore.setUiScalePendingPercent(m.settingsStore.getUiScalePercent())
+    m.settingsStore.setUiScaleReturnMode(m.activeTab)
     m.uiScaleGroup.visible = true
     m.screenMode = "uiScale"
-    m.uiScaleMessage.text = TrFormat("uiScale.message", m.displayDescription)
+    m.uiScaleMessage.text = TrFormat("uiScale.message", m.settingsStore.getDisplayDescription())
     UpdateUiScaleSlider()
 
     ' The settings screen keeps focus unless it is blurred first, and then it
@@ -1539,7 +1492,8 @@ end sub
 sub UpdateUiScaleSlider()
     minPercent = UiScaleMinPercent()
     maxPercent = UiScaleMaxPercent()
-    fraction = (m.uiScalePendingPercent - minPercent) / (maxPercent - minPercent)
+    pendingPercent = m.settingsStore.getUiScalePendingPercent()
+    fraction = (pendingPercent - minPercent) / (maxPercent - minPercent)
     if fraction < 0.0 then fraction = 0.0
     if fraction > 1.0 then fraction = 1.0
 
@@ -1548,28 +1502,28 @@ sub UpdateUiScaleSlider()
     m.uiScaleFill.width = ScaleUi(fillWidth)
     m.uiScaleHandle.translation = ScaleUiXY(420 + fillWidth - 12, 504)
 
-    label = m.uiScalePendingPercent.ToStr() + "%"
-    if m.uiScalePendingPercent = UiScaleDefaultPercent() then label = label + "    " + TrText("uiScale.automaticFit")
+    label = pendingPercent.ToStr() + "%"
+    if pendingPercent = UiScaleDefaultPercent() then label = label + "    " + TrText("uiScale.automaticFit")
     m.uiScaleValue.text = label
 end sub
 
 sub SetUiScalePercent(percent as integer)
     if percent < UiScaleMinPercent() then percent = UiScaleMinPercent()
     if percent > UiScaleMaxPercent() then percent = UiScaleMaxPercent()
-    if percent = m.uiScalePendingPercent then return
+    if percent = m.settingsStore.getUiScalePendingPercent() then return
 
-    m.uiScalePendingPercent = percent
-    m.uiScalePercent = percent
+    m.settingsStore.setUiScalePendingPercent(percent)
+    m.settingsStore.setUiScalePercent(percent)
     ApplyUiScaleSettings()
     UpdateUiScaleSlider()
 end sub
 
 sub CloseUiScaleSlider(save as boolean)
     if save
-        SaveInterfacePreferences()
-    else if m.uiScalePercent <> m.uiScaleSavedPercent
-        m.uiScalePercent = m.uiScaleSavedPercent
-        m.uiScalePendingPercent = m.uiScaleSavedPercent
+        m.settingsStore.saveInterfacePreferences()
+    else if m.settingsStore.getUiScalePercent() <> m.settingsStore.getUiScaleSavedPercent()
+        m.settingsStore.setUiScalePercent(m.settingsStore.getUiScaleSavedPercent())
+        m.settingsStore.setUiScalePendingPercent(m.settingsStore.getUiScaleSavedPercent())
         ApplyUiScaleSettings()
     end if
 
@@ -1577,56 +1531,9 @@ sub CloseUiScaleSlider(save as boolean)
     m.screenMode = "home"
     ' Re-rendering rebinds every visible list card, which is how recycled item
     ' components pick up a scale that changed after they were created.
-    SetActiveTab(m.uiScaleReturnMode, false)
+    SetActiveTab(m.settingsStore.getUiScaleReturnMode(), false)
     m.top.SetFocus(false)
     FocusActiveContent()
-end sub
-
-sub LoadInterfacePreferences()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    if section.Exists("interfaceLanguage") then m.interfaceLanguage = section.Read("interfaceLanguage")
-    if section.Exists("uiScalePercent")
-        storedScale = Int(Val(section.Read("uiScalePercent")))
-        if storedScale >= UiScaleMinPercent() and storedScale <= UiScaleMaxPercent()
-            m.uiScalePercent = storedScale
-            m.uiScalePendingPercent = storedScale
-            m.uiScaleSavedPercent = storedScale
-        end if
-    end if
-    if section.Exists("blurUnwatchedEpisodes")
-        m.blurUnwatchedEpisodes = section.Read("blurUnwatchedEpisodes") = "true"
-    end if
-end sub
-
-sub SaveInterfacePreferences()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    section.Write("interfaceLanguage", m.interfaceLanguage)
-    section.Write("uiScalePercent", m.uiScalePercent.ToStr())
-    if m.blurUnwatchedEpisodes
-        section.Write("blurUnwatchedEpisodes", "true")
-    else
-        section.Write("blurUnwatchedEpisodes", "false")
-    end if
-    section.Flush()
-end sub
-
-sub LoadPlayerPreferences()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    if section.Exists("defaultSubtitleLanguage") then m.defaultSubtitleLanguage = section.Read("defaultSubtitleLanguage")
-    if section.Exists("subtitleDefaultMode") then m.subtitleDefaultMode = section.Read("subtitleDefaultMode")
-    if section.Exists("lastSubtitleSelection") then m.lastSubtitleSelection = section.Read("lastSubtitleSelection")
-    if section.Exists("subtitleOutlineColor") then m.subtitleOutlineColor = section.Read("subtitleOutlineColor")
-    if section.Exists("defaultAudioTrack") then m.defaultAudioTrack = section.Read("defaultAudioTrack")
-end sub
-
-sub SavePlayerPreferences()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    section.Write("defaultSubtitleLanguage", m.defaultSubtitleLanguage)
-    section.Write("subtitleDefaultMode", m.subtitleDefaultMode)
-    section.Write("lastSubtitleSelection", m.lastSubtitleSelection)
-    section.Write("subtitleOutlineColor", m.subtitleOutlineColor)
-    section.Write("defaultAudioTrack", m.defaultAudioTrack)
-    section.Flush()
 end sub
 
 sub LoadStremioAccount()
@@ -1636,51 +1543,6 @@ sub LoadStremioAccount()
         FetchLibrary()
     end if
 end sub
-
-sub LoadStreamingServerConfig()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    if section.Exists("streamingServerUrl")
-        m.streamingServerUrl = section.Read("streamingServerUrl")
-    end if
-end sub
-
-sub SaveStreamingServerConfig()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    if m.streamingServerUrl = ""
-        section.Delete("streamingServerUrl")
-    else
-        section.Write("streamingServerUrl", m.streamingServerUrl)
-    end if
-    section.Flush()
-end sub
-
-' The dedicated streaming server is optional: without it torrent-only add-ons
-' keep being shown as unplayable, exactly as before this setting existed.
-function StreamingServerConfigured() as boolean
-    return m.streamingServerUrl <> ""
-end function
-
-function StreamingServerDisplay() as string
-    if not StreamingServerConfigured() then return TrText("settings.general.notConfigured")
-    return m.streamingServerUrl
-end function
-
-' Resolve a torrent-only stream to the streaming server's HLS playlist. The
-' server lazily creates the torrent engine on first request and uses the file
-' id (or -1 to auto-guess) to pick the file. Empty when unusable.
-function StreamingServerStreamUrl(stream as object) as string
-    if not StreamingServerConfigured() then return ""
-    if stream = invalid or not stream.DoesExist("infoHash") then return ""
-    infoHash = LCase(stream.infoHash.ToStr()).Trim()
-    if Len(infoHash) <> 40 then return ""
-
-    fileId = "-1"
-    if stream.DoesExist("fileIdx") and stream.fileIdx <> invalid
-        fileId = stream.fileIdx.ToStr()
-    end if
-
-    return m.streamingServerUrl + "/" + infoHash + "/" + fileId + "/hls.m3u8"
-end function
 
 sub LoadAddonConfiguration()
     section = CreateObject("roRegistrySection", "Rokumio")
@@ -2435,7 +2297,7 @@ sub RebuildEpisodeList()
             if progress > 0.0 and progress < 0.9
                 child.progress = progress
             end if
-            if m.blurUnwatchedEpisodes and not isWatched
+            if m.settingsStore.getBlurUnwatched() and not isWatched
                 child.AddFields({ blurThumbnail: true })
             end if
         end if
@@ -2584,7 +2446,7 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
             return
         end if
         if m.streams[streamIndex].rokumioTorrent
-            serverUrl = StreamingServerStreamUrl(m.streams[streamIndex])
+            serverUrl = m.settingsStore.StreamingServerStreamUrl(m.streams[streamIndex])
             if serverUrl <> ""
                 m.streams[streamIndex].url = serverUrl
                 FindSubtitles(m.streams[streamIndex])
@@ -2666,7 +2528,7 @@ sub onChoiceSelected(event as object)
         stream = m.streams[index]
         if DirectStreamUrl(stream) = ""
             if stream.rokumioTorrent
-                serverUrl = StreamingServerStreamUrl(stream)
+                serverUrl = m.settingsStore.StreamingServerStreamUrl(stream)
                 if serverUrl <> ""
                     stream.url = serverUrl
                     FindSubtitles(stream)
@@ -2864,11 +2726,11 @@ sub StartPlayback(stream as object, title as string, subtitles as object, startO
     m.video.globalCaptionMode = "Off"
     m.video.audioTrack = ""
     m.video.selectedSubtitleIndex = -1
-    m.video.subtitlesEnabledByDefault = m.subtitlesEnabledByDefault
-    m.video.subtitleDefaultMode = m.subtitleDefaultMode
-    m.video.defaultSubtitleLanguage = m.defaultSubtitleLanguage
-    m.video.lastSubtitleSelection = m.lastSubtitleSelection
-    m.video.defaultAudioTrack = m.defaultAudioTrack
+    m.video.subtitlesEnabledByDefault = m.settingsStore.getSubtitlesEnabledByDefault()
+    m.video.subtitleDefaultMode = m.settingsStore.getSubtitleDefaultMode()
+    m.video.defaultSubtitleLanguage = m.settingsStore.getDefaultSubtitleLanguage()
+    m.video.lastSubtitleSelection = m.settingsStore.getLastSubtitleSelection()
+    m.video.defaultAudioTrack = m.settingsStore.getDefaultAudioTrack()
     m.video.subtitleSyncOffset = LoadSubtitleSyncOffset()
     m.video.hasNextEpisode = HasNextEpisode()
     ApplySubtitleStyle()
@@ -2911,8 +2773,8 @@ sub onVideoAction(event as object)
         if action.DoesExist("offset") then SaveSubtitleSyncOffset(action.offset)
     else if action.type = "subtitleSelection"
         if action.DoesExist("selection")
-            m.lastSubtitleSelection = action.selection
-            SavePlayerPreferences()
+            m.settingsStore.setLastSubtitleSelection(action.selection)
+            m.settingsStore.savePlayerPreferences()
         end if
     end if
 end sub
@@ -3151,16 +3013,16 @@ sub OpenSubtitleSettings()
     ' Display only. m.subtitle* stay canonical English so the registry and the
     ' NextOption comparisons below never see a translated value.
     defaultSubtitleLabel = TrText("common.off")
-    if m.subtitlesEnabledByDefault then defaultSubtitleLabel = TrText("common.on")
+    if m.settingsStore.getSubtitlesEnabledByDefault() then defaultSubtitleLabel = TrText("common.on")
     dialog.buttons = [
-        TrFormat("dialog.subtitle.defaultChoice", TrOption("subtitle.mode", m.subtitleDefaultMode))
+        TrFormat("dialog.subtitle.defaultChoice", TrOption("subtitle.mode", m.settingsStore.getSubtitleDefaultMode()))
         TrFormat("dialog.subtitle.enableByDefault", defaultSubtitleLabel)
-        TrFormat("dialog.subtitle.preset", TrOption("subtitle.preset", m.subtitleRenderMode))
-        TrFormat("dialog.subtitle.position", TrOption("subtitle.position", m.subtitlePosition))
-        TrFormat("dialog.subtitle.font", TrOption("subtitle.font", m.subtitleFont))
-        TrFormat("dialog.subtitle.textSize", TrOption("subtitle.size", m.subtitleTextSize))
-        TrFormat("dialog.subtitle.textColor", TrOption("subtitle.color", m.subtitleTextColor))
-        TrFormat("dialog.subtitle.backdrop", TrOption("subtitle.backdrop", m.subtitleBackdropOpacity))
+        TrFormat("dialog.subtitle.preset", TrOption("subtitle.preset", m.settingsStore.getSubtitleRenderMode()))
+        TrFormat("dialog.subtitle.position", TrOption("subtitle.position", m.settingsStore.getSubtitlePosition()))
+        TrFormat("dialog.subtitle.font", TrOption("subtitle.font", m.settingsStore.getSubtitleFont()))
+        TrFormat("dialog.subtitle.textSize", TrOption("subtitle.size", m.settingsStore.getSubtitleTextSize()))
+        TrFormat("dialog.subtitle.textColor", TrOption("subtitle.color", m.settingsStore.getSubtitleTextColor()))
+        TrFormat("dialog.subtitle.backdrop", TrOption("subtitle.backdrop", m.settingsStore.getSubtitleBackdropOpacity()))
         TrText("common.done")
     ]
     dialog.ObserveField("buttonSelected", "onSubtitleSettingsButton")
@@ -3172,60 +3034,43 @@ sub onSubtitleSettingsButton(event as object)
     button = event.GetData()
     m.subtitleSettingsDialog.close = true
     if button = 0
-        m.subtitleDefaultMode = NextOption(["Default language", "Last selected"], m.subtitleDefaultMode)
+        m.settingsStore.setSubtitleDefaultMode(NextOption(["Default language", "Last selected"], m.settingsStore.getSubtitleDefaultMode()))
     else if button = 1
-        m.subtitlesEnabledByDefault = not m.subtitlesEnabledByDefault
+        m.settingsStore.setSubtitlesEnabledByDefault(not m.settingsStore.getSubtitlesEnabledByDefault())
     else if button = 2
-        m.subtitleRenderMode = NextOption(["Below video", "Native"], m.subtitleRenderMode)
+        m.settingsStore.setSubtitleRenderMode(NextOption(["Below video", "Native"], m.settingsStore.getSubtitleRenderMode()))
     else if button = 3
-        m.subtitlePosition = NextOption(["Bottom bar", "Low", "Higher"], m.subtitlePosition)
+        m.settingsStore.setSubtitlePosition(NextOption(["Bottom bar", "Low", "Higher"], m.settingsStore.getSubtitlePosition()))
     else if button = 4
-        m.subtitleFont = NextOption(["Default", "Sans Serif Proportional", "Serif Proportional", "Casual", "Small Caps"], m.subtitleFont)
+        m.settingsStore.setSubtitleFont(NextOption(["Default", "Sans Serif Proportional", "Serif Proportional", "Casual", "Small Caps"], m.settingsStore.getSubtitleFont()))
     else if button = 5
-        m.subtitleTextSize = NextOption(["Small", "Medium", "Large"], m.subtitleTextSize)
+        m.settingsStore.setSubtitleTextSize(NextOption(["Small", "Medium", "Large"], m.settingsStore.getSubtitleTextSize()))
     else if button = 6
-        m.subtitleTextColor = NextOption(["White", "Yellow", "Cyan", "Green", "Black"], m.subtitleTextColor)
+        m.settingsStore.setSubtitleTextColor(NextOption(["White", "Yellow", "Cyan", "Green", "Black"], m.settingsStore.getSubtitleTextColor()))
     else if button = 7
-        m.subtitleBackdropOpacity = NextOption(["Off", "25%", "50%", "75%", "100%"], m.subtitleBackdropOpacity)
+        m.settingsStore.setSubtitleBackdropOpacity(NextOption(["Off", "25%", "50%", "75%", "100%"], m.settingsStore.getSubtitleBackdropOpacity()))
     else
         return
     end if
 
-    SaveSubtitlePreferences()
+    m.settingsStore.saveSubtitlePreferences()
     ApplySubtitleStyle()
     OpenSubtitleSettings()
 end sub
 
-sub SaveSubtitlePreferences()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    section.Write("subtitleRenderMode", m.subtitleRenderMode)
-    section.Write("subtitleFont", m.subtitleFont)
-    section.Write("subtitleTextSize", m.subtitleTextSize)
-    section.Write("subtitleTextColor", m.subtitleTextColor)
-    section.Write("subtitleBackdropOpacity", m.subtitleBackdropOpacity)
-    section.Write("subtitlePosition", m.subtitlePosition)
-    section.Write("subtitleDefaultMode", m.subtitleDefaultMode)
-    if m.subtitlesEnabledByDefault
-        section.Write("subtitlesEnabledByDefault", "true")
-    else
-        section.Write("subtitlesEnabledByDefault", "false")
-    end if
-    section.Flush()
-end sub
-
 sub ApplySubtitleStyle()
-    m.video.subtitlesEnabledByDefault = m.subtitlesEnabledByDefault
-    m.video.subtitleDefaultMode = m.subtitleDefaultMode
-    m.video.subtitleRenderMode = m.subtitleRenderMode
-    m.video.customSubtitleTextSize = m.subtitleTextSize
-    m.video.customSubtitleTextColor = m.subtitleTextColor
-    m.video.customSubtitleBackdropOpacity = m.subtitleBackdropOpacity
-    m.video.customSubtitlePosition = m.subtitlePosition
+    m.video.subtitlesEnabledByDefault = m.settingsStore.getSubtitlesEnabledByDefault()
+    m.video.subtitleDefaultMode = m.settingsStore.getSubtitleDefaultMode()
+    m.video.subtitleRenderMode = m.settingsStore.getSubtitleRenderMode()
+    m.video.customSubtitleTextSize = m.settingsStore.getSubtitleTextSize()
+    m.video.customSubtitleTextColor = m.settingsStore.getSubtitleTextColor()
+    m.video.customSubtitleBackdropOpacity = m.settingsStore.getSubtitleBackdropOpacity()
+    m.video.customSubtitlePosition = m.settingsStore.getSubtitlePosition()
     ' Outline colour and font are drawn by the player's own subtitle labels. The
     ' Video node has no settable caption style: Roku owns system captions, so an
     ' assignment here would be silently discarded.
-    m.video.customSubtitleOutlineColor = m.subtitleOutlineColor
-    m.video.customSubtitleFont = m.subtitleFont
+    m.video.customSubtitleOutlineColor = m.settingsStore.getSubtitleOutlineColor()
+    m.video.customSubtitleFont = m.settingsStore.getSubtitleFont()
 end sub
 
 sub OpenSettingsLink(kind as string)
@@ -3257,11 +3102,11 @@ sub OpenSettingsLink(kind as string)
 end sub
 
 sub CycleInterfaceLanguage()
-    m.interfaceLanguage = NextOption(LocaleLanguages(), m.interfaceLanguage)
-    SaveInterfacePreferences()
+    m.settingsStore.setInterfaceLanguage(NextOption(LocaleLanguages(), m.settingsStore.getInterfaceLanguage()))
+    m.settingsStore.saveInterfacePreferences()
     ' Publish before re-rendering, and rebuild the nav too: the language change has
     ' to reach every surface at once, not just the row that triggered it.
-    SetLocaleLanguage(m.interfaceLanguage)
+    SetLocaleLanguage(m.settingsStore.getInterfaceLanguage())
     UpdateNavContent()
     ApplyStaticChromeText()
     ' The playback overlay is a sibling of the nav, not a child of it, so it has
@@ -3287,21 +3132,21 @@ sub ApplyChromeLabel(id as string, text as string)
 end sub
 
 sub CycleDefaultSubtitleLanguage()
-    m.defaultSubtitleLanguage = NextOption(["English", "Spanish", "French", "German", "Italian", "Portuguese", "None"], m.defaultSubtitleLanguage)
-    SavePlayerPreferences()
+    m.settingsStore.setDefaultSubtitleLanguage(NextOption(["English", "Spanish", "French", "German", "Italian", "Portuguese", "None"], m.settingsStore.getDefaultSubtitleLanguage()))
+    m.settingsStore.savePlayerPreferences()
     RenderSettings(true)
 end sub
 
 sub CycleSubtitleOutlineColor()
-    m.subtitleOutlineColor = NextOption(["White", "Black", "Yellow", "Cyan", "Green"], m.subtitleOutlineColor)
-    SavePlayerPreferences()
+    m.settingsStore.setSubtitleOutlineColor(NextOption(["White", "Black", "Yellow", "Cyan", "Green"], m.settingsStore.getSubtitleOutlineColor()))
+    m.settingsStore.savePlayerPreferences()
     ApplySubtitleStyle()
     RenderSettings(true)
 end sub
 
 sub CycleDefaultAudioTrack()
-    m.defaultAudioTrack = NextOption(["English", "Original", "Spanish", "French", "German", "Any"], m.defaultAudioTrack)
-    SavePlayerPreferences()
+    m.settingsStore.setDefaultAudioTrack(NextOption(["English", "Original", "Spanish", "French", "German", "Any"], m.settingsStore.getDefaultAudioTrack()))
+    m.settingsStore.savePlayerPreferences()
     RenderSettings(true)
 end sub
 
@@ -3635,7 +3480,7 @@ sub OpenStreamingServerConfiguration()
     dialog = CreateObject("roSGNode", "KeyboardDialog")
     dialog.title = TrText("dialog.streamingServer.title")
     dialog.message = TrText("dialog.streamingServer.message")
-    dialog.text = m.streamingServerUrl
+    dialog.text = m.settingsStore.getStreamingServerUrl()
     dialog.buttons = ["Save", "Cancel"]
     dialog.ObserveField("buttonSelected", "onStreamingServerButton")
     m.keyboardDialog = dialog
@@ -3656,8 +3501,8 @@ sub onStreamingServerButton(event as object)
     end if
 
     m.keyboardDialog.close = true
-    m.streamingServerUrl = url
-    SaveStreamingServerConfig()
+    m.settingsStore.setStreamingServerUrl(url)
+    m.settingsStore.saveStreamingServerConfig()
     RenderSettings(true)
     TestStreamingServer()
 end sub
@@ -3669,53 +3514,26 @@ sub onStreamingServerUrlChanged(event as object)
         return
     end if
 
-    m.streamingServerUrl = url
-    SaveStreamingServerConfig()
+    m.settingsStore.setStreamingServerUrl(url)
+    m.settingsStore.saveStreamingServerConfig()
     TestStreamingServer()
 end sub
 
 sub TestStreamingServer()
-    if not StreamingServerConfigured() then return
+    if not m.settingsStore.StreamingServerConfigured() then return
     ShowStatus(TrText("status.server.testing"), true)
     StartServerTestRequest()
 end sub
 
 sub StartServerTestRequest()
     task = CreateObject("roSGNode", "HttpTask")
-    task.url = m.streamingServerUrl + "/heartbeat"
+    task.url = m.settingsStore.getStreamingServerUrl() + "/heartbeat"
     task.requestId = "serverTest"
     task.timeoutMs = 8000
     task.ObserveField("response", "onHttpResponse")
     m.tasks.Push(task)
     task.control = "RUN"
 end sub
-
-' The streaming server is reached over plain HTTP on the local network, so the
-' rules are looser than IsValidManifestUrl: the scheme defaults to http, the
-' port is optional, and no /manifest.json suffix is expected.
-function NormalizeStreamingServerUrl(url as string) as string
-    url = url.Trim()
-    while Right(url, 1) = "/"
-        url = Left(url, Len(url) - 1)
-    end while
-    if Instr(1, url, "://") = 0
-        url = "http://" + url
-    end if
-    return url
-end function
-
-function IsValidStreamingServerUrl(url as string) as boolean
-    lower = LCase(url)
-    if Left(lower, 7) <> "http://" and Left(lower, 8) <> "https://" then return false
-
-    host = url
-    marker = "://"
-    schemeEnd = Instr(1, url, marker)
-    if schemeEnd > 0 then host = Mid(url, schemeEnd + Len(marker))
-    if host = "" or Left(host, 1) = "/" then return false
-    if Instr(1, host, "@") > 0 or Instr(1, host, "#") > 0 or Instr(1, host, " ") > 0 then return false
-    return true
-end function
 
 function IsValidAddonManifest(manifest as dynamic) as boolean
     if manifest = invalid or Type(manifest) <> "roAssociativeArray" then return false
@@ -3820,9 +3638,9 @@ function onKeyEvent(key as string, press as boolean) as boolean
 
     if m.screenMode = "uiScale"
         if key = "left"
-            SetUiScalePercent(m.uiScalePendingPercent - UiScaleStepPercent())
+            SetUiScalePercent(m.settingsStore.getUiScalePendingPercent() - UiScaleStepPercent())
         else if key = "right"
-            SetUiScalePercent(m.uiScalePendingPercent + UiScaleStepPercent())
+            SetUiScalePercent(m.settingsStore.getUiScalePendingPercent() + UiScaleStepPercent())
         else if key = "options"
             SetUiScalePercent(UiScaleDefaultPercent())
         else if key = "OK"
