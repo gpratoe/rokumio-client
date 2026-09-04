@@ -8,8 +8,11 @@
 ' It is a plain associative-array "class" in Roku's documented style: each
 ' instance captures its own fields through m, and MainScene owns one instance
 ' (m.addonStore) that it asks for data and hands operations to. It deliberately
-' owns no I/O -- no dialogs, no HTTP tasks, no registry, no scene chrome. Those
-' stay in MainScene, which calls into this store and reads data back out.
+' owns no dialogs, no HTTP tasks, and no scene chrome -- those stay in MainScene,
+' which calls into this store and reads data back out. It DOES own its registry
+' persistence (load()/saveUrls()) because roRegistrySection access is synchronous
+' and global -- no nodes, no callbacks, no scene coupling -- so it stays
+' self-contained without pulling in any MainScene glue.
 
 function CreateAddonStore() as object
     store = {
@@ -20,6 +23,7 @@ function CreateAddonStore() as object
         _catalogLoaded: false
         _catalogRequestActive: false
         _manifestUrls: []
+        _pendingAddonUrl: ""
     }
 
     ' --- state accessors -----------------------------------------------------
@@ -101,6 +105,138 @@ function CreateAddonStore() as object
 
     store.setManifestUrls = function(urls as object)
         m._manifestUrls = urls
+    end function
+
+    ' --- persistence (synchronous registry, safe to own here) ------------------
+
+    store.load = function()
+        section = CreateObject("roRegistrySection", "Rokumio")
+        urls = []
+        if section.Exists("addonManifestUrls")
+            storedUrls = ParseJson(section.Read("addonManifestUrls"))
+            if storedUrls <> invalid then urls = storedUrls
+        end if
+        m._manifestUrls = urls
+    end function
+
+    store.saveUrls = function()
+        section = CreateObject("roRegistrySection", "Rokumio")
+        section.Write("addonManifestUrls", FormatJson(m._manifestUrls))
+        section.Flush()
+    end function
+
+    ' --- discovery catalog (the public Stremio collection) ----------------------
+
+    ' Return the request to fire for the add-on collection. The store sets its
+    ' in-flight flag here; MainScene owns the HTTP task itself, so the caller
+    ' starts the returned request and later hands the response back via
+    ' handleCatalogResponse.
+    store.requestCatalog = function() as object
+        m._catalogRequestActive = true
+        return {
+            url: "https://api.strem.io/addonscollection.json"
+            id: "addonCatalog|all"
+        }
+    end function
+
+    ' Process a loaded collection: clear the in-flight flag, mark the catalog
+    ' loaded, and rebuild the discovery list (capped at 80 entries).
+    store.handleCatalogResponse = function(data as dynamic)
+        m._catalogRequestActive = false
+        m._catalogLoaded = true
+        catalog = []
+        if data <> invalid
+            for each item in data
+                if item <> invalid and item.DoesExist("manifest") and item.manifest <> invalid
+                    url = SafeString(item, "transportUrl")
+                    catalog.Push({
+                        url: url
+                        manifest: item.manifest
+                        summaryTypes: AddonTypesLabel(item.manifest)
+                    })
+                end if
+                if catalog.Count() >= 80 then exit for
+            end for
+        end if
+        m._catalog = catalog
+    end function
+
+    ' --- manual configuration (verify a candidate manifest URL) -----------------
+
+    ' Return the request to fire to verify a manifest URL, stashing the URL as
+    ' the pending candidate for handleVerifyResponse.
+    store.verify = function(url as string) as object
+        m._pendingAddonUrl = url
+        return {
+            url: url
+            id: "config|addon"
+        }
+    end function
+
+    store.getPendingAddonUrl = function() as string
+        return m._pendingAddonUrl
+    end function
+
+    store.clearPendingAddonUrl = function()
+        m._pendingAddonUrl = ""
+    end function
+
+    ' Process a verified manifest. Returns an assoc-array the caller (MainScene)
+    ' uses for scene glue: { valid:true, name } on success, { valid:false } when
+    ' the add-on is rejected (no saved state, pending URL cleared).
+    store.handleVerifyResponse = function(manifest as dynamic) as object
+        if not m.IsValidAddonManifest(manifest)
+            m._pendingAddonUrl = ""
+            return {
+                valid: false
+            }
+        end if
+        addon = m.BuildAddon(m._pendingAddonUrl, manifest)
+        m.addOrReplace(addon)
+        m.saveUrls()
+        m._pendingAddonUrl = ""
+        return {
+            valid: true
+            name: SafeString(manifest, "name")
+        }
+    end function
+
+    ' Whether a loaded manifest is worth keeping: it must carry an id/name and
+    ' expose a usable stream or subtitles resource.
+    store.IsValidAddonManifest = function(manifest as dynamic) as boolean
+        if manifest = invalid or Type(manifest) <> "roAssociativeArray" then return false
+        if SafeString(manifest, "id") = "" or SafeString(manifest, "name") = "" then return false
+        if not manifest.DoesExist("resources") or manifest.resources = invalid then return false
+
+        for each resource in manifest.resources
+            if Type(resource) = "roString" or Type(resource) = "String"
+                if resource = "stream" or resource = "subtitles" then return true
+            else if Type(resource) = "roAssociativeArray"
+                resourceName = SafeString(resource, "name")
+                if resourceName = "stream" or resourceName = "subtitles" then return true
+            end if
+        end for
+        return false
+    end function
+
+    ' --- startup / reload manifest loading -------------------------------------
+
+    ' Clear the installed list and return the configured manifest URLs to
+    ' re-fetch. The caller fires the load requests and tracks the pending count;
+    ' each response is handed back via handleManifestLoadResponse.
+    store.reload = function() as object
+        m.clearInstalled()
+        return m._manifestUrls
+    end function
+
+    ' Process one loaded manifest from a startup/reload fetch. Loads are fan-out
+    ' fan-in: the pending count lives in MainScene (it also gates a deferred
+    ' stream lookup), so this only touches add-on state.
+    store.handleManifestLoadResponse = function(data as dynamic, urlIndex as integer)
+        manifestUrls = m._manifestUrls
+        if urlIndex >= 0 and urlIndex < manifestUrls.Count() and m.IsValidAddonManifest(data)
+            m.addOrReplace(m.BuildAddon(manifestUrls[urlIndex], data))
+        end if
     end function
 
     ' --- installed-manifest maintenance ---------------------------------------

@@ -145,7 +145,6 @@ sub init()
     m.episodeRequestActive = false
     m.screenMode = "home"
     m.addonLoadPending = 0
-    m.pendingAddonUrl = ""
     m.pendingAddonDetails = invalid
     m.installedAddonDetailsIndex = -1
     ' Settings data + its registry persistence (interface, player, subtitle
@@ -666,7 +665,8 @@ sub RenderAddons(focusContent as boolean)
     m.addonsScreen.visible = true
 
     if m.addonStore.getFilter() = "all" and not m.addonStore.catalogLoaded() and not m.addonStore.catalogRequestActive()
-        FetchAddonCatalog()
+        spec = m.addonStore.requestCatalog()
+        StartRequest(spec.url, spec.id)
     end if
 
     PushAddonsState()
@@ -905,29 +905,8 @@ sub ActivateAction(actionType as string, payload as dynamic)
     end if
 end sub
 
-sub FetchAddonCatalog()
-    m.addonStore.setCatalogRequestActive(true)
-    StartRequest("https://api.strem.io/addonscollection.json", "addonCatalog|all")
-end sub
-
 sub HandleAddonCatalogResponse(data as object)
-    m.addonStore.setCatalogRequestActive(false)
-    m.addonStore.setCatalogLoaded(true)
-    catalog = []
-    if data <> invalid
-        for each item in data
-            if item <> invalid and item.DoesExist("manifest") and item.manifest <> invalid
-                url = SafeString(item, "transportUrl")
-                catalog.Push({
-                    url: url
-                    manifest: item.manifest
-                    summaryTypes: AddonTypesLabel(item.manifest)
-                })
-            end if
-            if catalog.Count() >= 80 then exit for
-        end for
-    end if
-    m.addonStore.setCatalog(catalog)
+    m.addonStore.handleCatalogResponse(data)
     if m.activeTab = "addons" then RenderAddons(false)
 end sub
 
@@ -1238,7 +1217,10 @@ sub OpenAddonSearch()
     dialog.title = TrText("dialog.addonSearch.title")
     if m.addonStore.getFilter() = "all"
         dialog.message = TrText("dialog.addonSearch.messageAll")
-        if not m.addonStore.catalogLoaded() and not m.addonStore.catalogRequestActive() then FetchAddonCatalog()
+        if not m.addonStore.catalogLoaded() and not m.addonStore.catalogRequestActive()
+            spec = m.addonStore.requestCatalog()
+            StartRequest(spec.url, spec.id)
+        end if
     else
         dialog.message = TrText("dialog.addonSearch.messageInstalled")
     end if
@@ -1268,7 +1250,7 @@ sub UninstallAddon(index as integer)
     if index < 0 or index >= installed.Count() then return
     addonName = SafeString(installed[index].manifest, "name")
     m.addonStore.removeByIndex(index)
-    StoreAddonUrls()
+    m.addonStore.saveUrls()
     RenderAddons(true)
     ShowStatus(addonName + " was removed.", false)
 end sub
@@ -1295,7 +1277,7 @@ end sub
 ' cleared by CompleteAddonLoad once the last response lands; without a request to
 ' wait for there would be nothing to clear it, so that case reports instead.
 sub ReloadAddons()
-    m.addonStore.clearInstalled()
+    m.addonStore.reload()
     m.addonReloadActive = false
     LoadAddonConfiguration()
     if m.addonLoadPending <= 0
@@ -1548,14 +1530,8 @@ sub LoadStremioAccount()
 end sub
 
 sub LoadAddonConfiguration()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    urls = []
-    if section.Exists("addonManifestUrls")
-        storedUrls = ParseJson(section.Read("addonManifestUrls"))
-        if storedUrls <> invalid then urls = storedUrls
-    end if
-
-    m.addonStore.setManifestUrls(urls)
+    m.addonStore.load()
+    urls = m.addonStore.getManifestUrls()
     m.addonLoadPending = urls.Count()
     for index = 0 to urls.Count() - 1
         StartRequest(urls[index], "addonLoad|" + index.ToStr())
@@ -1726,7 +1702,7 @@ sub onHttpResponse(event as object)
             if requestType = "discoverCatalog" then m.discoverRequestActive = false
             ShowStatus(response.error, false)
         else if requestType = "config"
-            m.pendingAddonUrl = ""
+            m.addonStore.clearPendingAddonUrl()
             ShowStatus(TrFormat("status.addon.verifyFailed", response.error), false)
         else if requestType = "addonLoad"
             CompleteAddonLoad()
@@ -1780,7 +1756,14 @@ sub onHttpResponse(event as object)
     else if requestType = "subtitles"
         HandleSubtitlesResponse(response.data, Val(parts[2]))
     else if requestType = "config"
-        SaveAddonConfiguration(response.data)
+        result = m.addonStore.handleVerifyResponse(response.data)
+        if result.valid
+            HideStatus()
+            if m.activeTab = "addons" then RenderAddons(true)
+            ShowStatus(result.name + " was added and verified.", false)
+        else
+            ShowStatus(TrText("status.addon.unsupportedResource"), false)
+        end if
     else if requestType = "addonLoad"
         HandleLoadedAddon(response.data, Val(parts[1]))
     else if requestType = "addonCatalog"
@@ -3538,50 +3521,15 @@ sub StartServerTestRequest()
     task.control = "RUN"
 end sub
 
-function IsValidAddonManifest(manifest as dynamic) as boolean
-    if manifest = invalid or Type(manifest) <> "roAssociativeArray" then return false
-    if SafeString(manifest, "id") = "" or SafeString(manifest, "name") = "" then return false
-    if not manifest.DoesExist("resources") or manifest.resources = invalid then return false
-
-    for each resource in manifest.resources
-        if Type(resource) = "roString" or Type(resource) = "String"
-            if resource = "stream" or resource = "subtitles" then return true
-        else if Type(resource) = "roAssociativeArray"
-            resourceName = SafeString(resource, "name")
-            if resourceName = "stream" or resourceName = "subtitles" then return true
-        end if
-    end for
-    return false
-end function
-
 sub VerifyAddonConfiguration(url as string, message as string)
-    m.pendingAddonUrl = url
+    spec = m.addonStore.verify(url)
     ShowStatus(message, true)
-    StartRequest(url, "config|addon")
-end sub
-
-sub SaveAddonConfiguration(manifest as object)
-    if not IsValidAddonManifest(manifest)
-        m.pendingAddonUrl = ""
-        ShowStatus(TrText("status.addon.unsupportedResource"), false)
-        return
-    end if
-
-    addon = m.addonStore.BuildAddon(m.pendingAddonUrl, manifest)
-    m.addonStore.addOrReplace(addon)
-    StoreAddonUrls()
-    m.pendingAddonUrl = ""
-    HideStatus()
-    if m.activeTab = "addons" then RenderAddons(true)
-    ShowStatus(SafeString(manifest, "name") + " was added and verified.", false)
+    StartRequest(spec.url, spec.id)
 end sub
 
 sub HandleLoadedAddon(manifest as object, urlIndex as integer)
-    manifestUrls = m.addonStore.getManifestUrls()
-    if urlIndex >= 0 and urlIndex < manifestUrls.Count() and IsValidAddonManifest(manifest)
-        m.addonStore.addOrReplace(m.addonStore.BuildAddon(manifestUrls[urlIndex], manifest))
-        if m.activeTab = "addons" then RenderAddons(false)
-    end if
+    m.addonStore.handleManifestLoadResponse(manifest, urlIndex)
+    if m.activeTab = "addons" then RenderAddons(false)
     CompleteAddonLoad()
 end sub
 
@@ -3601,12 +3549,6 @@ sub CompleteAddonLoad()
     lookup = m.pendingStreamLookup
     m.pendingStreamLookup = invalid
     FindStreams(lookup.contentType, lookup.id, lookup.title, lookup.returnMode)
-end sub
-
-sub StoreAddonUrls()
-    section = CreateObject("roRegistrySection", "Rokumio")
-    section.Write("addonManifestUrls", FormatJson(m.addonStore.getManifestUrls()))
-    section.Flush()
 end sub
 
 sub ShowStatus(message as string, spinning as boolean)

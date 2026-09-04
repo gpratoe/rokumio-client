@@ -13,6 +13,7 @@ const settings = fs.readFileSync(path.join(root, 'components/Settings.brs'), 'ut
 const settingsXml = fs.readFileSync(path.join(root, 'components/Settings.xml'), 'utf8');
 const addons = fs.readFileSync(path.join(root, 'components/Addons.brs'), 'utf8');
 const settingsStore = fs.readFileSync(path.join(root, 'components/SettingsStore.brs'), 'utf8');
+const addonStore = fs.readFileSync(path.join(root, 'components/AddonStore.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -22,7 +23,6 @@ const englishTable = (locale.match(/function LocaleStringsEnglish\(\) as object(
 const failures = [];
 
 const requiredMainPatterns = [
-    ['Remote Stremio add-on collection request', /https:\/\/api\.strem\.io\/addonscollection\.json/],
     ['Remote add-on details handler', /sub ShowAddonDetails\(addon as object\)/],
     ['Installed add-on details handler', /sub ShowInstalledAddonDetails\(index as integer\)/],
     ['Settings links handler', /sub OpenSettingsLink\(kind as string\)/],
@@ -63,6 +63,19 @@ const requiredSettingsStorePatterns = [
     ['Settings store persists subtitle preferences', /store\.saveSubtitlePreferences = function\(\)/],
     ['Settings store persists streaming server config', /store\.saveStreamingServerConfig = function\(\)/],
     ['Settings store loads all stored preferences', /store\.load = function\(\)/],
+];
+
+const requiredAddonStorePatterns = [
+    ['Addon store loads configured manifest urls', /store\.load = function\(\)[\s\S]*?addonManifestUrls/],
+    ['Addon store persists configured manifest urls', /store\.saveUrls = function\(\)[\s\S]*?addonManifestUrls/],
+    ['Addon store owns the add-ons collection URL', /store\.requestCatalog = function\(\)[\s\S]*?https:\/\/api\.strem\.io\/addonscollection\.json/],
+    ['Addon store builds the discovery catalog from the collection', /store\.handleCatalogResponse = function\(data[\s\S]*?store\.IsValidAddonManifest|store\.handleCatalogResponse = function\(data[\s\S]*?m\._catalog = catalog/],
+    ['Addon store verifies a candidate manifest URL', /store\.verify = function\(url as string\)[\s\S]*?config\|addon/],
+    ['Addon store saves a verified add-on', /store\.handleVerifyResponse = function\(manifest[\s\S]*?addOrReplace[\s\S]*?saveUrls/],
+    ['Addon store validates manifests', /store\.IsValidAddonManifest = function\(/],
+    ['Addon store clears its pending verification URL', /store\.clearPendingAddonUrl = function\(\)/],
+    ['Addon store reloads configured manifests', /store\.reload = function\(\)[\s\S]*?clearInstalled/],
+    ['Addon store processes a loaded manifest', /store\.handleManifestLoadResponse = function\(/],
 ];
 
 const requiredLocalePatterns = [
@@ -129,6 +142,10 @@ for (const [label, pattern] of requiredSettingsPatterns) {
 
 for (const [label, pattern] of requiredSettingsStorePatterns) {
     if (!pattern.test(settingsStore)) failures.push(`${label} is missing from SettingsStore.brs`);
+}
+
+for (const [label, pattern] of requiredAddonStorePatterns) {
+    if (!pattern.test(addonStore)) failures.push(`${label} is missing from AddonStore.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsXmlPatterns) {
