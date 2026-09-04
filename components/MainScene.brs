@@ -76,17 +76,11 @@ sub init()
     m.settingsTabIndex = 0
     ' m.settingsTabIndex is mirrored from the Settings component's screenInfo so
     ' the scene's * / options handler knows which settings section it is on.
-    m.discoverType = "movie"
-    m.discoverCatalog = "Popular"
-    m.discoverGenre = "None"
     m.discoverFilterFocus = -1
-    m.discoverTypes = ["movie", "series", "channel"]
-    m.discoverCatalogs = ["Popular", "Featured", "New"]
-    m.discoverGenres = ["None", "Action", "Adventure", "Animation", "Biography", "Comedy", "Crime", "Drama", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller"]
-    m.discoverRequestActive = false
     m.addonStore = CreateAddonStore()
     m.libraryStore = CreateLibraryStore()
     m.authStore = CreateAuthStore()
+    m.catalogStore = CreateCatalogStore()
     m.calendarEntries = []
     m.calendarLoadedSeries = {}
     m.calendarRequestActive = false
@@ -96,13 +90,9 @@ sub init()
     ' when the next notification is expected to be a genuine user move.
     m.calendarSuppressIndex = -1
     m.primaryActions = []
-    m.boardRows = [[], [], [], [], [], []]
-    m.boardNames = ["Popular - Movie", "Popular - Series", "Featured - Movie", "Featured - Series", "YouTube - Channel", "Public Domain Movies - Movie"]
-    m.discoverRows = [[]]
-    m.discoverNames = ["Movie - Popular"]
     m.libraryRows = [[]]
-    m.catalogRows = m.boardRows
-    m.catalogNames = m.boardNames
+    m.catalogRows = m.catalogStore.getBoardRows()
+    m.catalogNames = m.catalogStore.getBoardNames()
     m.selectedItem = invalid
     m.episodes = []
     m.visibleEpisodes = []
@@ -251,7 +241,7 @@ sub SetActiveTab(tabName as string, focusContent as boolean)
     end for
     m.navList.JumpToItem = m.navIndex
     RenderActiveTab(focusContent)
-    if tabName = "discover" and IsCatalogRowsEmpty(m.discoverRows) and not m.discoverRequestActive
+    if tabName = "discover" and m.catalogStore.discoverRowsEmpty() and not m.catalogStore.isDiscoverRequestActive()
         FetchDiscoverCatalog()
     end if
 end sub
@@ -370,8 +360,8 @@ sub RenderBoard(focusContent as boolean)
     m.primarySubtitle.text = TrText("board.subtitle")
     m.heroTitle.text = TrText("nav.board")
     m.heroDescription.text = TrText("board.hero")
-    m.catalogRows = m.boardRows
-    m.catalogNames = m.boardNames
+    m.catalogRows = m.catalogStore.getBoardRows()
+    m.catalogNames = m.catalogStore.getBoardNames()
     m.catalogList.visible = true
     RebuildCatalog()
     if focusContent then m.catalogList.SetFocus(true)
@@ -382,8 +372,8 @@ sub RenderDiscover(focusContent as boolean)
     m.primarySubtitle.text = TrText("discover.subtitle")
     m.heroTitle.text = TrText("nav.discover")
     m.heroDescription.text = TrText("discover.hero")
-    m.catalogRows = m.discoverRows
-    m.catalogNames = m.discoverNames
+    m.catalogRows = m.catalogStore.getDiscoverRows()
+    m.catalogNames = m.catalogStore.getDiscoverNames()
     m.discoverFilterGroup.visible = true
     m.catalogList.translation = ScaleUiXY(260, 230)
     UpdateDiscoverFilterLabels()
@@ -785,19 +775,11 @@ function InfoAction(title as string, actionType as string, payload as dynamic) a
     }
 end function
 
-function IsCatalogRowsEmpty(rows as object) as boolean
-    if rows = invalid or rows.Count() = 0 then return true
-    for each row in rows
-        if row <> invalid and row.Count() > 0 then return false
-    end for
-    return true
-end function
-
 sub UpdateDiscoverFilterLabels()
     if m.discoverTypeLabel = invalid then return
-    m.discoverTypeLabel.text = DiscoverTypeLabel(m.discoverType)
-    m.discoverCatalogLabel.text = m.discoverCatalog
-    m.discoverGenreLabel.text = m.discoverGenre
+    m.discoverTypeLabel.text = DiscoverTypeLabel(m.catalogStore.getDiscoverType())
+    m.discoverCatalogLabel.text = m.catalogStore.getDiscoverCatalog()
+    m.discoverGenreLabel.text = m.catalogStore.getDiscoverGenre()
     UpdateDiscoverFilterFocus()
 end sub
 
@@ -1292,12 +1274,12 @@ sub OpenDiscoverFilters()
     dialog = CreateObject("roSGNode", "Dialog")
     dialog.title = TrText("dialog.discoverFilters.title")
     dialog.message = TrText("dialog.discoverFilters.message")
-    ' Display only. m.discoverType / m.discoverCatalog / m.discoverGenre stay
-    ' canonical so NextOption and the catalog requests never see a translation.
+    ' Display only. The CatalogStore's discover filter values stay canonical so
+    ' NextOption and the catalog requests never see a translation.
     dialog.buttons = [
-        TrFormat("dialog.discoverFilters.type", m.discoverType)
-        TrFormat("dialog.discoverFilters.catalog", m.discoverCatalog)
-        TrFormat("dialog.discoverFilters.genre", m.discoverGenre)
+        TrFormat("dialog.discoverFilters.type", m.catalogStore.getDiscoverType())
+        TrFormat("dialog.discoverFilters.catalog", m.catalogStore.getDiscoverCatalog())
+        TrFormat("dialog.discoverFilters.genre", m.catalogStore.getDiscoverGenre())
         TrText("dialog.discoverFilters.apply")
         TrText("common.cancel")
     ]
@@ -1325,17 +1307,17 @@ end sub
 
 sub CycleDiscoverFilter(filterIndex as integer)
     if filterIndex = 0
-        m.discoverType = NextOption(m.discoverTypes, m.discoverType)
-        if m.discoverType = "channel"
-            m.discoverGenre = "None"
+        m.catalogStore.setDiscoverType(NextOption(m.catalogStore.getDiscoverTypes(), m.catalogStore.getDiscoverType()))
+        if m.catalogStore.getDiscoverType() = "channel"
+            m.catalogStore.setDiscoverGenre("None")
         end if
     else if filterIndex = 1
-        m.discoverCatalog = NextOption(m.discoverCatalogs, m.discoverCatalog)
+        m.catalogStore.setDiscoverCatalog(NextOption(m.catalogStore.getDiscoverCatalogs(), m.catalogStore.getDiscoverCatalog()))
     else if filterIndex = 2
-        if m.discoverType = "channel"
-            m.discoverGenre = "None"
+        if m.catalogStore.getDiscoverType() = "channel"
+            m.catalogStore.setDiscoverGenre("None")
         else
-            m.discoverGenre = NextOption(m.discoverGenres, m.discoverGenre)
+            m.catalogStore.setDiscoverGenre(NextOption(m.catalogStore.getDiscoverGenres(), m.catalogStore.getDiscoverGenre()))
         end if
     end if
     UpdateDiscoverFilterLabels()
@@ -1535,60 +1517,23 @@ sub LoadAddonConfiguration()
     end for
 end sub
 
-sub FetchCatalog(contentType as string, rowIndex as integer)
-    url = "https://v3-cinemeta.strem.io/catalog/" + contentType + "/top.json"
-    StartRequest(url, "boardCatalog|" + rowIndex.ToStr())
-end sub
-
 sub FetchBoardCatalogs()
-    urls = [
-        "https://v3-cinemeta.strem.io/catalog/movie/top.json"
-        "https://v3-cinemeta.strem.io/catalog/series/top.json"
-        "https://v3-cinemeta.strem.io/catalog/movie/imdbRating.json"
-        "https://v3-cinemeta.strem.io/catalog/series/imdbRating.json"
-        "https://v3-channels.strem.io/catalog/channel/top.json"
-        "https://caching.stremio.net/publicdomainmovies.now.sh/catalog/movie/publicdomainmovies.json"
-    ]
-    for index = 0 to urls.Count() - 1
-        StartRequest(urls[index], "boardCatalog|" + index.ToStr())
+    reqs = m.catalogStore.fetchBoardCatalogs()
+    for each req in reqs
+        StartRequest(req.url, req.id)
     end for
 end sub
 
 sub FetchDiscoverCatalog()
-    m.discoverRows = [[]]
-    rowTitle = DiscoverTypeLabel(m.discoverType) + " - " + m.discoverCatalog
-    if m.discoverGenre <> "None" and m.discoverGenre <> "Genre"
-        rowTitle = rowTitle + " - " + m.discoverGenre
-    end if
-    m.discoverNames = [rowTitle]
-    m.discoverRequestActive = true
+    req = m.catalogStore.restartDiscoverCatalog()
     if m.activeTab = "discover"
-        m.catalogRows = m.discoverRows
-        m.catalogNames = m.discoverNames
+        m.catalogRows = m.catalogStore.getDiscoverRows()
+        m.catalogNames = m.catalogStore.getDiscoverNames()
         UpdateDiscoverFilterLabels()
         RebuildDiscoverGrid()
     end if
-    StartRequest(DiscoverCatalogUrl(), "discoverCatalog|0")
+    StartRequest(req.url, req.id)
 end sub
-
-function DiscoverCatalogUrl() as string
-    catalogId = "top"
-    if m.discoverCatalog = "Featured"
-        catalogId = "imdbRating"
-    else if m.discoverCatalog = "New"
-        catalogId = "year"
-    end if
-
-    if m.discoverType = "channel"
-        return "https://v3-channels.strem.io/catalog/channel/top.json"
-    end if
-
-    extra = ""
-    if m.discoverGenre <> "None" and m.discoverGenre <> "Genre"
-        extra = "/genre=" + EncodeUrlComponent(m.discoverGenre)
-    end if
-    return "https://v3-cinemeta.strem.io/catalog/" + m.discoverType + "/" + catalogId + extra + ".json"
-end function
 
 sub SearchCatalogs(query as string)
     query = query.Trim()
@@ -1612,34 +1557,26 @@ sub SearchCatalogs(query as string)
         return
     end if
 
-    encodedQuery = EncodeUrlComponent(query)
     if IsImdbId(lowerQuery)
-        m.discoverRows = [[], []]
-        m.discoverNames = ["IMDb ID - Movie", "IMDb ID - Series"]
-        m.discoverRequestActive = true
+        reqs = m.catalogStore.beginSearch(true, lowerQuery)
         m.searchPrompt.text = "Results for " + Chr(34) + query + Chr(34)
         SetActiveTab("discover", true)
         ShowStatus(TrText("status.search.resolvingImdb"), true)
-        StartRequest(CinemetaMetaUrl("movie", lowerQuery), "searchMeta|0")
-        StartRequest(CinemetaMetaUrl("series", lowerQuery), "searchMeta|1")
-        return
+    else
+        reqs = m.catalogStore.beginSearch(false, query)
+        m.searchPrompt.text = "Results for " + Chr(34) + query + Chr(34)
+        SetActiveTab("discover", true)
+        ShowStatus(TrText("status.search.searchingCatalogs"), true)
     end if
-
-    m.discoverRows = [[], [], []]
-    m.discoverNames = ["Search Suggestions - Movie", "Search Suggestions - Series", "Search Suggestions - Channel"]
-    m.discoverRequestActive = true
-    m.searchPrompt.text = "Results for " + Chr(34) + query + Chr(34)
-    SetActiveTab("discover", true)
-    ShowStatus(TrText("status.search.searchingCatalogs"), true)
-    StartRequest("https://v3-cinemeta.strem.io/catalog/movie/top/search=" + encodedQuery + ".json", "search|0")
-    StartRequest("https://v3-cinemeta.strem.io/catalog/series/top/search=" + encodedQuery + ".json", "search|1")
-    StartRequest("https://v3-channels.strem.io/catalog/channel/top/search=" + encodedQuery + ".json", "search|2")
+    for each req in reqs
+        StartRequest(req.url, req.id)
+    end for
 end sub
 
 sub LoadHomeCatalogs()
-    m.boardRows = [[], [], [], [], [], []]
-    m.catalogRows = m.boardRows
-    m.catalogNames = m.boardNames
+    m.catalogStore.resetBoard()
+    m.catalogRows = m.catalogStore.getBoardRows()
+    m.catalogNames = m.catalogStore.getBoardNames()
     m.searchPrompt.text = TrText("dialog.search.title")
     RebuildCatalog()
     FetchBoardCatalogs()
@@ -1696,7 +1633,7 @@ sub onHttpResponse(event as object)
 
     if not response.ok
         if requestType = "catalog" or requestType = "search" or requestType = "boardCatalog" or requestType = "discoverCatalog"
-            if requestType = "discoverCatalog" then m.discoverRequestActive = false
+            if requestType = "discoverCatalog" then m.catalogStore.setDiscoverRequestActive(false)
             ShowStatus(response.error, false)
         else if requestType = "config"
             m.addonStore.clearPendingAddonUrl()
@@ -1848,49 +1785,24 @@ sub onSearchButton(event as object)
 end sub
 
 sub HandleCatalogResponse(data as object, rowIndex as integer, target as string)
-    if data = invalid or not data.DoesExist("metas") or data.metas = invalid then return
-
-    items = []
-    for each item in data.metas
-        items.Push(item)
-    end for
-
+    m.catalogStore.handleCatalogResponse(data, rowIndex, target)
     if target = "board"
-        action = {
-            id: "seeall:" + rowIndex.ToStr()
-            name: TrText("board.seeAll")
-            type: "action"
-            poster: ""
-            description: TrText("board.seeAll.description")
-            rowIndex: rowIndex
-        }
-        items.Push(action)
-        if rowIndex >= 0 and rowIndex < m.boardRows.Count()
-            m.boardRows[rowIndex] = items
-        end if
         if m.activeTab = "board"
-            m.catalogRows = m.boardRows
+            m.catalogRows = m.catalogStore.getBoardRows()
             RebuildCatalog()
         end if
-    else if target = "discover" or target = "search"
-        if target = "discover" or target = "search" then m.discoverRequestActive = false
-        if rowIndex >= 0 and rowIndex < m.discoverRows.Count()
-            m.discoverRows[rowIndex] = items
-        end if
+    else
         if m.activeTab = "discover"
-            m.catalogRows = m.discoverRows
+            m.catalogRows = m.catalogStore.getDiscoverRows()
             RebuildDiscoverGrid()
         end if
     end if
 end sub
 
 sub HandleSearchMetaResponse(data as object, rowIndex as integer)
-    if rowIndex < 0 or rowIndex >= m.discoverRows.Count() then return
-    if data = invalid or not data.DoesExist("meta") or data.meta = invalid then return
-    m.discoverRows[rowIndex] = [data.meta]
-    m.discoverRequestActive = false
+    if not m.catalogStore.handleSearchMetaResponse(data, rowIndex) then return
     if m.activeTab = "discover"
-        m.catalogRows = m.discoverRows
+        m.catalogRows = m.catalogStore.getDiscoverRows()
         RebuildDiscoverGrid()
     end if
 end sub
@@ -1948,8 +1860,9 @@ end sub
 
 sub RebuildDiscoverGrid()
     content = CreateObject("roSGNode", "ContentNode")
-    if m.discoverRows <> invalid and m.discoverRows.Count() > 0
-        for each item in m.discoverRows[0]
+    discoverRows = m.catalogStore.getDiscoverRows()
+    if discoverRows <> invalid and discoverRows.Count() > 0
+        for each item in discoverRows[0]
             if SafeString(item, "type") <> "action"
                 itemNode = content.CreateChild("ContentNode")
                 itemNode.title = SafeString(item, "name")
@@ -1978,9 +1891,10 @@ sub RebuildDiscoverGrid()
 end sub
 
 function GetDiscoverGridItem(index as integer) as dynamic
-    if index < 0 or m.discoverRows = invalid or m.discoverRows.Count() = 0 then return invalid
+    discoverRows = m.catalogStore.getDiscoverRows()
+    if index < 0 or discoverRows = invalid or discoverRows.Count() = 0 then return invalid
     visibleIndex = -1
-    for each item in m.discoverRows[0]
+    for each item in discoverRows[0]
         if SafeString(item, "type") <> "action"
             visibleIndex = visibleIndex + 1
             if visibleIndex = index then return item
@@ -2057,20 +1971,20 @@ sub OpenBoardSeeAll(item as object)
     if item.DoesExist("rowIndex") then rowIndex = item.rowIndex
 
     if rowIndex = 1 or rowIndex = 3
-        m.discoverType = "series"
+        m.catalogStore.setDiscoverType("series")
     else if rowIndex = 4
-        m.discoverType = "channel"
+        m.catalogStore.setDiscoverType("channel")
     else
-        m.discoverType = "movie"
+        m.catalogStore.setDiscoverType("movie")
     end if
 
     if rowIndex = 2 or rowIndex = 3
-        m.discoverCatalog = "Featured"
+        m.catalogStore.setDiscoverCatalog("Featured")
     else
-        m.discoverCatalog = "Popular"
+        m.catalogStore.setDiscoverCatalog("Popular")
     end if
 
-    m.discoverGenre = "Genre"
+    m.catalogStore.setDiscoverGenre("Genre")
     SetActiveTab("discover", true)
     FetchDiscoverCatalog()
 end sub

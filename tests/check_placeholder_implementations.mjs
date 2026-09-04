@@ -16,6 +16,7 @@ const settingsStore = fs.readFileSync(path.join(root, 'components/SettingsStore.
 const addonStore = fs.readFileSync(path.join(root, 'components/AddonStore.brs'), 'utf8');
 const libraryStore = fs.readFileSync(path.join(root, 'components/LibraryStore.brs'), 'utf8');
 const authStore = fs.readFileSync(path.join(root, 'components/AuthStore.brs'), 'utf8');
+const catalogStore = fs.readFileSync(path.join(root, 'components/CatalogStore.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -46,7 +47,6 @@ const requiredMainPatterns = [
     ['Calendar metadata concurrency is capped', /pending >= 4/],
     ['Calendar entries are trimmed', /sub TrimCalendarEntries\(\)/],
     ['Calendar full sort removed from action build', /AddSortedCalendarEntry\(upcoming,\s*entry,\s*true,\s*12\)/],
-    ['Channel search request', /v3-channels\.strem\.io\/catalog\/channel\/top\/search=/],
     ['IMDb ID resolver', /function IsImdbId\(value as string\) as boolean/],
     ['Search dialog copy routes through the localization layer', /dialog\.message = TrText\("dialog\.search\.message"\)/],
 ];
@@ -105,6 +105,19 @@ const requiredAuthStorePatterns = [
     ['Auth store cancels an in-progress link', /store\.cancelLink = function[\s\S]*?m\._linkCode = ""/],
 ];
 
+const requiredCatalogStorePatterns = [
+    ['Catalog store owns the board rows', /store\.getBoardRows = function[\s\S]*?m\._boardRows/],
+    ['Catalog store owns the discover rows', /store\.getDiscoverRows = function[\s\S]*?m\._discoverRows/],
+    ['Catalog store fetches the six board catalogs', /store\.fetchBoardCatalogs = function[\s\S]*?boardCatalog\|0[\s\S]*?caching\.stremio\.net\/publicdomainmovies/],
+    ['Catalog store builds the discover catalog request', /store\.buildDiscoverCatalog = function[\s\S]*?v3-cinemeta\.strem\.io\/catalog/],
+    ['Catalog store resets + restarts discover', /store\.restartDiscoverCatalog = function[\s\S]*?m\._discoverRequestActive = true[\s\S]*?return m\.buildDiscoverCatalog/],
+    ['Catalog store owns the channel search request', /catalog\/channel\/top\/search=/],
+    ['Catalog store processes catalog responses', /store\.handleCatalogResponse = function[\s\S]*?m\._discoverRows\[rowIndex\]/],
+    ['Catalog store processes IMDb-ID meta responses', /store\.handleSearchMetaResponse = function[\s\S]*?return true/],
+    ['Catalog store owns the discover filter values', /store\.getDiscoverType = function[\s\S]*?store\.setDiscoverType = function/],
+    ['Catalog store reports empty discover rows', /store\.discoverRowsEmpty = function/],
+];
+
 const requiredLocalePatterns = [
     ['Search copy does not overpromise TVDB', /"dialog\.search\.message":\s*"Search movies, series, and channels/],
 ];
@@ -123,6 +136,7 @@ const forbiddenMainPatterns = [
     ['Settings focus echo suppression moved back into the scene', /m\.settingsSuppressIndex/],
     ['Library state still mutated directly in the scene', /m\.libraryById\[.*?\]\s*=/],
     ['Auth key still written to registry directly in the scene', /section\.Write\("stremioAuthKey"/],
+    ['Catalog state still mutated directly in the scene', /m\.(boardRows|discoverRows)\[|m\.discover(Type|Catalog|Genre|RequestActive)\s*=/],
 ];
 
 const requiredSettingsPatterns = [
@@ -183,6 +197,10 @@ for (const [label, pattern] of requiredLibraryStorePatterns) {
 
 for (const [label, pattern] of requiredAuthStorePatterns) {
     if (!pattern.test(authStore)) failures.push(`${label} is missing from AuthStore.brs`);
+}
+
+for (const [label, pattern] of requiredCatalogStorePatterns) {
+    if (!pattern.test(catalogStore)) failures.push(`${label} is missing from CatalogStore.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsXmlPatterns) {
