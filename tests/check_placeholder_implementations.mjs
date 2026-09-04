@@ -17,6 +17,7 @@ const addonStore = fs.readFileSync(path.join(root, 'components/AddonStore.brs'),
 const libraryStore = fs.readFileSync(path.join(root, 'components/LibraryStore.brs'), 'utf8');
 const authStore = fs.readFileSync(path.join(root, 'components/AuthStore.brs'), 'utf8');
 const catalogStore = fs.readFileSync(path.join(root, 'components/CatalogStore.brs'), 'utf8');
+const calendarStore = fs.readFileSync(path.join(root, 'components/CalendarStore.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -30,23 +31,12 @@ const requiredMainPatterns = [
     ['Installed add-on details handler', /sub ShowInstalledAddonDetails\(index as integer\)/],
     ['Settings links handler', /sub OpenSettingsLink\(kind as string\)/],
     ['Blur unwatched episodes writes card field', /blurThumbnail: true/],
-    ['Calendar metadata request', /"calendarMeta\|"/],
-    ['Calendar entries render dated episodes', /function CalendarEntryTitle\(entry as object\) as string/],
-    ['Calendar loading row is inert', /CalendarMessageRow\(TrText\("calendar\.loading"\)\)/],
-    ['Calendar upcoming header is inert', /CalendarHeaderRow\(TrText\("calendar\.section\.upcoming"\)\)/],
-    ['Calendar recent header is inert', /CalendarHeaderRow\(TrText\("calendar\.section\.recent"\)\)/],
-    ['Calendar message rows are inert by construction', /function CalendarMessageRow\(title as string\) as object\s*\n\s*return CalendarRow\("message", title, "none"/],
-    ['Calendar header rows are inert by construction', /function CalendarHeaderRow\(title as string\) as object\s*\n\s*return CalendarRow\("header", title, "none"/],
     // The calendar is a card list now, not an info list. This used to match
     // RenderInfoList, which the calendar no longer goes through, so it passed
     // without proving anything about the calendar.
     ['Calendar refresh preserves focused control', /else if not focusContent\s+targetIndex = m\.calendarFocusIndex/],
     ['Calendar chips and cards do not both own the Addons screen', /sub DispatchAddonAction\(actionType as string, payload as dynamic\)/],
     ['Addons toolbar is reachable from the card list', /m\.addonsScreen\.callFunc\("FocusChips"\)/],
-    ['Calendar metadata requests are capped', /CountCalendarTrackedSeries\(\) >= 24/],
-    ['Calendar metadata concurrency is capped', /pending >= 4/],
-    ['Calendar entries are trimmed', /sub TrimCalendarEntries\(\)/],
-    ['Calendar full sort removed from action build', /AddSortedCalendarEntry\(upcoming,\s*entry,\s*true,\s*12\)/],
     ['IMDb ID resolver', /function IsImdbId\(value as string\) as boolean/],
     ['Search dialog copy routes through the localization layer', /dialog\.message = TrText\("dialog\.search\.message"\)/],
 ];
@@ -118,6 +108,26 @@ const requiredCatalogStorePatterns = [
     ['Catalog store reports empty discover rows', /store\.discoverRowsEmpty = function/],
 ];
 
+const requiredCalendarStorePatterns = [
+    ['Calendar store owns the entries', /store\.getEntries = function/],
+    ['Calendar store tracks request activity', /store\.getRequestActive = function/],
+    ['Calendar store clears on sign-out', /store\.reset = function/],
+    ['Calendar metadata requests are capped', /m\.countTrackedSeries\(\) >= 24/],
+    ['Calendar metadata concurrency is capped', /pending >= 4/],
+    ['Calendar metadata request', /"calendarMeta\|"/],
+    ['Calendar store processes metadata responses', /store\.handleMetaResponse = function/],
+    ['Calendar entries are trimmed', /store\.trimEntries = function/],
+    ['Calendar full sort removed from action build', /m\.addSortedEntry\(upcoming,\s*entry,\s*true,\s*12\)/],
+    ['Calendar entries render dated episodes', /store\.entryTitle = function\(entry as object\) as string/],
+    ['Calendar loading row is inert', /m\.messageRow\(TrText\("calendar\.loading"\)\)/],
+    ['Calendar upcoming header is inert', /m\.headerRow\(TrText\("calendar\.section\.upcoming"\)\)/],
+    ['Calendar recent header is inert', /m\.headerRow\(TrText\("calendar\.section\.recent"\)\)/],
+    ['Calendar message rows are inert by construction', /store\.messageRow = function\(title as string\) as object[\s\S]*?m\.row\("message", title, "none"/],
+    ['Calendar header rows are inert by construction', /store\.headerRow = function\(title as string\) as object[\s\S]*?m\.row\("header", title, "none"/],
+    ['Calendar store builds the signed-out rows', /store\.buildSignedOutRows = function/],
+    ['Calendar store builds the action rows', /store\.buildActions = function/],
+];
+
 const requiredLocalePatterns = [
     ['Search copy does not overpromise TVDB', /"dialog\.search\.message":\s*"Search movies, series, and channels/],
 ];
@@ -137,6 +147,7 @@ const forbiddenMainPatterns = [
     ['Library state still mutated directly in the scene', /m\.libraryById\[.*?\]\s*=/],
     ['Auth key still written to registry directly in the scene', /section\.Write\("stremioAuthKey"/],
     ['Catalog state still mutated directly in the scene', /m\.(boardRows|discoverRows)\[|m\.discover(Type|Catalog|Genre|RequestActive)\s*=/],
+    ['Calendar state still mutated directly in the scene', /m\.calendar(Entries|LoadedSeries)[\[\]]+|m\.calendar(Entries|RequestActive|LoadedSeries)\s*=/],
 ];
 
 const requiredSettingsPatterns = [
@@ -201,6 +212,10 @@ for (const [label, pattern] of requiredAuthStorePatterns) {
 
 for (const [label, pattern] of requiredCatalogStorePatterns) {
     if (!pattern.test(catalogStore)) failures.push(`${label} is missing from CatalogStore.brs`);
+}
+
+for (const [label, pattern] of requiredCalendarStorePatterns) {
+    if (!pattern.test(calendarStore)) failures.push(`${label} is missing from CalendarStore.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsXmlPatterns) {

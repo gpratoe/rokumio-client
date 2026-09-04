@@ -81,9 +81,10 @@ sub init()
     m.libraryStore = CreateLibraryStore()
     m.authStore = CreateAuthStore()
     m.catalogStore = CreateCatalogStore()
-    m.calendarEntries = []
-    m.calendarLoadedSeries = {}
-    m.calendarRequestActive = false
+    ' Calendar data, its metadata round-trips, and the rows they produce live
+    ' in one store. MainScene keeps only the calendar view: the list, its
+    ' focus/echo handling, and the detail panel.
+    m.calendarStore = CreateCalendarStore()
     m.calendarRows = []
     m.calendarFocusIndex = 0
     ' Index of a calendar row whose itemFocused notification this code caused; -1
@@ -438,13 +439,13 @@ sub RenderCalendar(focusContent as boolean)
     m.heroTitle.text = TrText("calendar.title")
     if not m.authStore.isSignedIn()
         m.heroDescription.text = TrText("calendar.hero.signedOut")
-        RenderCalendarRows(BuildCalendarSignedOutRows(), focusContent)
+        RenderCalendarRows(m.calendarStore.buildSignedOutRows(), focusContent)
         return
     end if
 
     LoadCalendarEntries()
-    actions = BuildCalendarActions()
-    m.heroDescription.text = TrFormat("calendar.hero.count", m.calendarEntries.Count())
+    actions = m.calendarStore.buildActions(m.libraryStore.getLibraryItems())
+    m.heroDescription.text = TrFormat("calendar.hero.count", m.calendarStore.getEntries().Count())
     RenderCalendarRows(actions, focusContent)
 end sub
 
@@ -498,37 +499,6 @@ sub RenderCalendarRows(rows as object, focusContent as boolean)
     UpdateCalendarDetail(targetIndex)
     if focusContent then m.calendarList.SetFocus(true)
 end sub
-
-' One calendar row. Rows carry the same actionType/payload pair as InfoAction so
-' both lists dispatch through onPrimaryInfoSelected.
-function CalendarRow(kind as string, title as string, actionType as string, payload as dynamic) as object
-    return {
-        kind: kind
-        title: title
-        actionType: actionType
-        payload: payload
-        dayText: ""
-        monthText: ""
-        seriesName: ""
-        episodeLabel: ""
-        metaText: ""
-        dateText: ""
-        thumbnailUrl: ""
-        description: ""
-        statusText: ""
-        accent: false
-    }
-end function
-
-' Section captions and empty-state copy are inert: they occupy a row slot but
-' can never take focus, so OK on the calendar always means "open a series".
-function CalendarHeaderRow(title as string) as object
-    return CalendarRow("header", title, "none", invalid)
-end function
-
-function CalendarMessageRow(title as string) as object
-    return CalendarRow("message", title, "none", invalid)
-end function
 
 function CalendarRowSelectable(row as object) as boolean
     if row = invalid then return false
@@ -623,7 +593,7 @@ sub UpdateCalendarDetail(index as integer)
         m.calendarDetailAction.text = TrText("calendar.action.openSeries")
         m.calendarDetailActionPill.visible = true
         ' The footer bar names whatever is focused, the same as every other screen.
-        m.heroDescription.text = CalendarEntryTitle(row.payload)
+        m.heroDescription.text = m.calendarStore.entryTitle(row.payload)
     else if row.kind = "cta"
         m.calendarDetailEyebrow.text = UCase(TrText("calendar.detail.notSignedIn"))
         m.calendarDetailTitle.text = TrText("calendar.signedOut.title")
@@ -946,245 +916,17 @@ sub onInstalledAddonDetailsButton(event as object)
     end if
 end sub
 
-' The signed-out screen keeps Stremio's own messaging, rendered as inert copy
-' rows plus the one focusable Log in button.
-function BuildCalendarSignedOutRows() as object
-    return [
-        CalendarMessageRow(TrText("calendar.signedOut.title"))
-        CalendarMessageRow(TrText("calendar.signedOut.benefit1"))
-        CalendarMessageRow(TrText("calendar.signedOut.benefit2"))
-        CalendarRow("cta", TrText("calendar.signedOut.login"), "login", invalid)
-    ]
-end function
-
-function BuildCalendarActions() as object
-    actions = []
-    if m.libraryStore.getLibraryItems().Count() = 0
-        actions.Push(CalendarMessageRow(TrText("calendar.empty.noSeries")))
-        actions.Push(CalendarMessageRow(TrText("calendar.empty.addSeries")))
-        return actions
-    end if
-
-    if m.calendarRequestActive and m.calendarEntries.Count() = 0
-        actions.Push(CalendarMessageRow(TrText("calendar.loading")))
-        return actions
-    end if
-
-    if m.calendarEntries.Count() = 0
-        actions.Push(CalendarMessageRow(TrText("calendar.empty.noDates")))
-        return actions
-    end if
-
-    today = Left(CreateObject("roDateTime").ToISOString(), 10)
-    upcoming = []
-    recent = []
-    for each entry in m.calendarEntries
-        dateText = SafeString(entry, "date")
-        if dateText >= today
-            AddSortedCalendarEntry(upcoming, entry, true, 12)
-        else
-            AddSortedCalendarEntry(recent, entry, false, 12)
-        end if
-    end for
-
-    if upcoming.Count() > 0
-        actions.Push(CalendarHeaderRow(TrText("calendar.section.upcoming")))
-        for each entry in upcoming
-            actions.Push(CalendarEpisodeRow(entry, today))
-        end for
-    end if
-
-    if recent.Count() > 0
-        actions.Push(CalendarHeaderRow(TrText("calendar.section.recent")))
-        for each entry in recent
-            actions.Push(CalendarEpisodeRow(entry, today))
-        end for
-    end if
-    return actions
-end function
-
-' Builds the card for one dated episode. Dates, titles, and descriptions belong
-' to the add-on that returned them, so they are shown as they arrived; only the
-' day number and short month are split out for the date chip.
-function CalendarEpisodeRow(entry as object, today as string) as object
-    episode = entry.episode
-    series = entry.series
-    dateText = SafeString(entry, "date")
-
-    title = EpisodeTitle(episode)
-    if title = "" then title = TrText("calendar.untitledEpisode")
-
-    row = CalendarRow("episode", title, "calendarEpisode", entry)
-    row.dateText = dateText
-    row.dayText = CalendarDayNumber(dateText)
-    row.monthText = CalendarMonthLabel(dateText)
-    row.seriesName = SafeString(series, "name")
-    row.episodeLabel = CalendarEpisodeLabel(episode)
-    row.description = EpisodeDescription(episode)
-    row.accent = dateText = today
-    if row.accent
-        row.statusText = TrText("calendar.status.today")
-    else if dateText > today
-        row.statusText = TrText("calendar.status.upcoming")
-    else
-        row.statusText = TrText("calendar.status.aired")
-    end if
-    row.metaText = CalendarEntryMeta(row)
-
-    row.thumbnailUrl = SafeString(episode, "thumbnail")
-    if row.thumbnailUrl = "" then row.thumbnailUrl = SafeString(series, "poster")
-    return row
-end function
-
-function CalendarEntryMeta(row as object) as string
-    parts = []
-    if row.episodeLabel <> "" then parts.Push(row.episodeLabel)
-    if row.dateText <> "" then parts.Push(row.dateText)
-    if row.statusText <> "" then parts.Push(row.statusText)
-    return JoinStrings(parts, "    ")
-end function
-
-function CalendarEpisodeLabel(episode as object) as string
-    season = SafeString(episode, "season")
-    number = SafeString(episode, "episode")
-    if number = "" then number = SafeString(episode, "number")
-    if season = "" and number = "" then return ""
-    if season = "" then return "E" + number
-    if number = "" then return "S" + season
-    return "S" + season + "E" + number
-end function
-
-' "2026-07-26" -> "26". Anything that is not an ISO date is passed through.
-function CalendarDayNumber(dateText as string) as string
-    if Len(dateText) < 10 then return dateText
-    day = Int(Val(Mid(dateText, 9, 2)))
-    if day < 1 or day > 31 then return dateText
-    return day.ToStr()
-end function
-
-' Short month name for the date chip. This is Stroku's own label rather than
-' add-on text, so it follows the interface language.
-function CalendarMonthLabel(dateText as string) as string
-    if Len(dateText) < 10 then return ""
-    month = Int(Val(Mid(dateText, 6, 2)))
-    if month < 1 or month > 12 then return ""
-    keys = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
-    return TrText("calendar.month." + keys[month - 1])
-end function
-
 sub LoadCalendarEntries()
-    if CountCalendarTrackedSeries() >= 24 then return
-    pending = CountPendingCalendarRequests()
-    libraryItems = m.libraryStore.getLibraryItems()
-    for each item in libraryItems
-        if SafeString(item, "type") = "series"
-            id = SafeString(item, "id")
-            if id <> "" and not m.calendarLoadedSeries.DoesExist(id)
-                m.calendarLoadedSeries[id] = "loading"
-                m.calendarRequestActive = true
-                pending = pending + 1
-                StartRequest(CinemetaMetaUrl("series", id), "calendarMeta|" + id)
-            end if
-        end if
-        if CountCalendarTrackedSeries() >= 24 or pending >= 4 then exit for
+    specs = m.calendarStore.load(m.libraryStore.getLibraryItems())
+    for each spec in specs
+        StartRequest(spec.url, spec.id)
     end for
 end sub
 
 sub HandleCalendarMetaResponse(data as object, seriesId as string)
-    if data <> invalid and data.DoesExist("meta") and data.meta <> invalid and data.meta.DoesExist("videos")
-        seriesItem = invalid
-        for each item in m.libraryStore.getLibraryItems()
-            if SafeString(item, "id") = seriesId
-                seriesItem = item
-                exit for
-            end if
-        end for
-        if seriesItem <> invalid
-            for each episode in data.meta.videos
-                released = SafeString(episode, "released")
-                if Len(released) >= 10
-                    m.calendarEntries.Push({
-                        date: Left(released, 10)
-                        series: seriesItem
-                        episode: episode
-                    })
-                end if
-            end for
-        end if
-    end if
-    m.calendarLoadedSeries[seriesId] = "loaded"
-    TrimCalendarEntries()
-    m.calendarRequestActive = HasPendingCalendarRequests()
-    if m.activeTab = "calendar" and m.screenMode = "home" and not m.calendarRequestActive then RenderCalendar(false)
+    m.calendarStore.handleMetaResponse(data, seriesId, m.libraryStore.getLibraryItems())
+    if m.activeTab = "calendar" and m.screenMode = "home" and not m.calendarStore.getRequestActive() then RenderCalendar(false)
 end sub
-
-function HasPendingCalendarRequests() as boolean
-    return CountPendingCalendarRequests() > 0
-end function
-
-function CountPendingCalendarRequests() as integer
-    count = 0
-    for each id in m.calendarLoadedSeries
-        if m.calendarLoadedSeries[id] = "loading" then count = count + 1
-    end for
-    return count
-end function
-
-function CountCalendarTrackedSeries() as integer
-    count = 0
-    for each id in m.calendarLoadedSeries
-        count = count + 1
-    end for
-    return count
-end function
-
-sub TrimCalendarEntries()
-    if m.calendarEntries.Count() <= 48 then return
-    today = Left(CreateObject("roDateTime").ToISOString(), 10)
-    upcoming = []
-    recent = []
-    for each entry in m.calendarEntries
-        dateText = SafeString(entry, "date")
-        if dateText >= today
-            AddSortedCalendarEntry(upcoming, entry, true, 24)
-        else
-            AddSortedCalendarEntry(recent, entry, false, 24)
-        end if
-    end for
-
-    trimmed = []
-    for each entry in upcoming
-        trimmed.Push(entry)
-    end for
-    for each entry in recent
-        trimmed.Push(entry)
-    end for
-    m.calendarEntries = trimmed
-end sub
-
-sub AddSortedCalendarEntry(entries as object, entry as object, ascending as boolean, maxCount as integer)
-    entries.Push(entry)
-    index = entries.Count() - 1
-    while index > 0
-        currentDate = SafeString(entries[index], "date")
-        previousDate = SafeString(entries[index - 1], "date")
-        shouldSwap = (ascending and currentDate < previousDate) or ((not ascending) and currentDate > previousDate)
-        if not shouldSwap then exit while
-        swap = entries[index - 1]
-        entries[index - 1] = entries[index]
-        entries[index] = swap
-        index = index - 1
-    end while
-    if entries.Count() > maxCount then entries.Delete(maxCount)
-end sub
-
-' One-line summary of a dated episode, used for the footer bar under the list.
-function CalendarEntryTitle(entry as object) as string
-    if entry = invalid then return ""
-    episode = entry.episode
-    series = entry.series
-    return SafeString(entry, "date") + "    " + SafeString(series, "name") + "    " + EpisodeTitle(episode)
-end function
 
 sub OpenCalendarEpisode(entry as object)
     if entry = invalid then return
@@ -3099,6 +2841,7 @@ end sub
 sub DisconnectStremio()
     m.authStore.disconnect()
     m.libraryStore.clear()
+    m.calendarStore.reset()
     m.libraryRows = [[]]
     RenderActiveTab(true)
     ShowStatus(TrText("status.link.disconnected"), false)
