@@ -11,6 +11,8 @@
     <script type="text/brightscript" uri="pkg:/components/UiScale.brs" />
     <script type="text/brightscript" uri="pkg:/components/Locale.brs" />
     <script type="text/brightscript" uri="pkg:/components/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/components/Formatters.brs" />
+    <script type="text/brightscript" uri="pkg:/components/Codecs.brs" />
     <script type="text/brightscript" uri="pkg:/components/AddonStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/SettingsStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/LibraryStore.brs" />

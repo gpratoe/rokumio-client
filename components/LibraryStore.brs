@@ -242,6 +242,122 @@ function CreateLibraryStore() as object
         return true
     end function
 
+    ' --- playback progress (datastorePut) --------------------------------------
+
+    ' Record playback progress for the item being watched. Owns the whole write:
+    ' resolve the library item (existing entry, or a temp one built from the
+    ' selected hero item), mutate its state (resume offset / watched bitfield),
+    ' persist locally, and return the datastorePut request spec for MainScene to
+    ' fire through the shared transport. Returns invalid when there is nothing to
+    ' record.
+    store.applyProgress = function(context as object) as object
+        contentId = context.contentId
+        if contentId = "" then return invalid
+        contentType = context.contentType
+
+        seriesOrMovieId = contentId
+        if contentType = "series"
+            parts = seriesOrMovieId.Split(":")
+            seriesOrMovieId = parts[0]
+        end if
+
+        libraryItem = invalid
+        if m._libraryById.DoesExist(seriesOrMovieId)
+            libraryItem = m._libraryById[seriesOrMovieId]
+        else if context.selectedItem <> invalid
+            libraryItem = m.buildLibraryChange(context.selectedItem, false)
+            libraryItem.temp = true
+        end if
+
+        if libraryItem = invalid then return invalid
+
+        if not libraryItem.DoesExist("state") or libraryItem.state = invalid
+            libraryItem.state = {
+                lastWatched: invalid
+                timeWatched: 0
+                timeOffset: 0
+                overallTimeWatched: 0
+                timesWatched: 0
+                flaggedWatched: 0
+                duration: 0
+                video_id: invalid
+                watched: invalid
+                noNotif: false
+            }
+        end if
+        state = libraryItem.state
+
+        now = CreateObject("roDateTime").ToISOString()
+        positionMs = context.positionSec * 1000
+        durationMs = context.durationSec * 1000
+
+        state.lastWatched = now
+        state.video_id = contentId
+        state.duration = durationMs
+
+        completed = context.isFinished
+        if not completed and context.durationSec > 0
+            if context.positionSec > 0.9 * context.durationSec
+                completed = true
+            end if
+        end if
+
+        if completed
+            state.timeOffset = 0
+            if contentType = "movie"
+                state.watched = contentId
+                state.timesWatched = state.timesWatched + 1
+            else if contentType = "series"
+                episodes = context.episodes
+                episodeIndex = -1
+                for i = 0 to episodes.Count() - 1
+                    if episodes[i].id = contentId
+                        episodeIndex = i
+                        exit for
+                    end if
+                end for
+
+                if episodeIndex >= 0
+                    watchedIndices = []
+                    lastSeason = 0
+                    lastEpisode = 0
+
+                    episode = episodes[episodeIndex]
+                    if episode.DoesExist("season") then lastSeason = episode.season
+                    if episode.DoesExist("episode") then lastEpisode = episode.episode
+                    if lastEpisode = 0 and episode.DoesExist("number") then lastEpisode = episode.number
+
+                    if state.DoesExist("watched") and state.watched <> invalid and state.watched <> ""
+                        info = DecodeWatchedBitfield(state.watched)
+                        if info <> invalid and info.watchedIndices <> invalid
+                            watchedIndices = info.watchedIndices
+                        end if
+                    end if
+
+                    found = false
+                    for each idx in watchedIndices
+                        if idx = episodeIndex
+                            found = true
+                            exit for
+                        end if
+                    end for
+                    if not found
+                        watchedIndices.Push(episodeIndex)
+                    end if
+
+                    state.watched = EncodeWatchedBitfield(seriesOrMovieId, lastSeason, lastEpisode, episodes.Count(), watchedIndices)
+                end if
+            end if
+        else
+            state.timeOffset = positionMs
+        end if
+
+        libraryItem._mtime = now
+        m.upsertById(seriesOrMovieId, libraryItem)
+
+        return m.buildProgressPut(context.authKey, seriesOrMovieId, libraryItem)
+    end function
+
     ' --- pure rules -----------------------------------------------------------
 
     ' The toggle label shown on a catalog item: Connect when signed out, Remove
