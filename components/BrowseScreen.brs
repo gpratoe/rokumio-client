@@ -2,10 +2,20 @@ sub init()
     m.catalogList = m.top.FindNode("catalogList")
     m.primaryInfoList = m.top.FindNode("primaryInfoList")
     m.primaryInfoGroup = m.top.FindNode("primaryInfoGroup")
+    m.discoverFilterGroup = m.top.FindNode("discoverFilterGroup")
+    m.discoverGrid = m.top.FindNode("discoverGrid")
+    m.discoverTypeLabel = m.top.FindNode("discoverTypeLabel")
+    m.discoverCatalogLabel = m.top.FindNode("discoverCatalogLabel")
+    m.discoverGenreLabel = m.top.FindNode("discoverGenreLabel")
+    m.discoverTypeFocus = m.top.FindNode("discoverTypeFocus")
+    m.discoverCatalogFocus = m.top.FindNode("discoverCatalogFocus")
+    m.discoverGenreFocus = m.top.FindNode("discoverGenreFocus")
 
     m.catalogList.ObserveField("rowItemFocused", "onCatalogFocused")
     m.catalogList.ObserveField("rowItemSelected", "onCatalogSelected")
     m.primaryInfoList.ObserveField("itemSelected", "onPrimaryInfoSelected")
+    m.discoverGrid.ObserveField("itemFocused", "onDiscoverGridFocused")
+    m.discoverGrid.ObserveField("itemSelected", "onDiscoverGridSelected")
 
     m.catalogRows = []
     m.primaryActions = []
@@ -13,9 +23,12 @@ sub init()
     m.lastCatalogPosition = invalid
     m.lastInfoIndex = 0
     m.lastChromeSignature = ""
+    m.discoverFilterFocus = -1
 
     m.catalogList.visible = false
     m.primaryInfoGroup.visible = false
+    m.discoverFilterGroup.visible = false
+    m.discoverGrid.visible = false
 end sub
 
 ' The stores are plain BrightScript objects with function members; Roku's field
@@ -26,6 +39,7 @@ sub SetStores(stores as object)
 end sub
 
 sub onModeChanged()
+    BlurFocus()
     RenderCurrent(true)
 end sub
 
@@ -34,7 +48,12 @@ sub onRevisionChanged()
 end sub
 
 sub onFocusRequest()
-    if m.top.mode = "library" and not m.stores.auth.isSignedIn()
+    if m.top.mode = "discover"
+        m.catalogList.SetFocus(false)
+        m.primaryInfoList.SetFocus(false)
+        BlurDiscoverFilters()
+        m.discoverGrid.SetFocus(true)
+    else if m.top.mode = "library" and not m.stores.auth.isSignedIn()
         m.catalogList.SetFocus(false)
         m.primaryInfoList.SetFocus(true)
     else if m.top.mode = "board" or m.top.mode = "library"
@@ -43,29 +62,36 @@ sub onFocusRequest()
     else
         m.catalogList.SetFocus(false)
         m.primaryInfoList.SetFocus(false)
+        m.discoverGrid.SetFocus(false)
     end if
 end sub
 
 sub BlurFocus()
     m.catalogList.SetFocus(false)
     m.primaryInfoList.SetFocus(false)
+    m.discoverGrid.SetFocus(false)
+    BlurDiscoverFilters()
 end sub
 
 sub RenderCurrent(needChrome as boolean)
     if m.stores = invalid then return
 
+    m.catalogList.visible = false
+    m.primaryInfoGroup.visible = false
+    m.discoverFilterGroup.visible = false
+    m.discoverGrid.visible = false
+
     if m.top.mode = "board"
         RenderBoardContent()
     else if m.top.mode = "library"
         RenderLibraryContent()
+    else if m.top.mode = "discover"
+        RenderDiscoverContent()
     else
-        m.catalogList.visible = false
-        m.primaryInfoGroup.visible = false
-        m.catalogList.SetFocus(false)
-        m.primaryInfoList.SetFocus(false)
+        BlurFocus()
     end if
 
-    if m.top.mode = "board" or m.top.mode = "library"
+    if m.top.mode = "board" or m.top.mode = "library" or m.top.mode = "discover"
         if needChrome or ChromeSignature() <> m.lastChromeSignature
             EmitChrome()
             m.lastChromeSignature = ChromeSignature()
@@ -244,6 +270,13 @@ sub EmitChrome()
                 heroDescription: hero
             }
         end if
+    else if m.top.mode = "discover"
+        m.top.screenInfo = {
+            title: TrText("nav.discover")
+            subtitle: TrText("discover.subtitle")
+            heroTitle: TrText("nav.discover")
+            heroDescription: TrText("discover.hero")
+        }
     end if
 end sub
 
@@ -253,5 +286,143 @@ function ChromeSignature() as string
         if not m.stores.auth.isSignedIn() then return "library:signedOut"
         return "library:signedIn:" + m.stores.library.getLibraryItems().Count().ToStr() + ":" + m.stores.library.getWatchedItems().Count().ToStr()
     end if
+    if m.top.mode = "discover" then return "discover"
     return ""
+end function
+
+' --- discover ----------------------------------------------------------------
+
+sub RenderDiscoverContent()
+    m.catalogList.visible = false
+    m.primaryInfoGroup.visible = false
+    m.discoverFilterGroup.visible = true
+    m.discoverGrid.visible = true
+    UpdateDiscoverFilterLabels()
+    RebuildDiscoverGrid()
+end sub
+
+sub UpdateDiscoverFilterLabels()
+    m.discoverTypeLabel.text = DiscoverTypeLabel(m.stores.catalog.getDiscoverType())
+    m.discoverCatalogLabel.text = m.stores.catalog.getDiscoverCatalog()
+    m.discoverGenreLabel.text = m.stores.catalog.getDiscoverGenre()
+    UpdateDiscoverFilterFocus()
+end sub
+
+sub UpdateDiscoverFilterFocus()
+    m.discoverTypeFocus.visible = m.discoverFilterFocus = 0
+    m.discoverCatalogFocus.visible = m.discoverFilterFocus = 1
+    m.discoverGenreFocus.visible = m.discoverFilterFocus = 2
+end sub
+
+sub FocusFilters()
+    if m.top.mode <> "discover" then return
+    if m.discoverFilterFocus < 0 then m.discoverFilterFocus = 0
+    UpdateDiscoverFilterFocus()
+    m.discoverGrid.SetFocus(false)
+    m.top.SetFocus(true)
+end sub
+
+sub BlurDiscoverFilters()
+    m.discoverFilterFocus = -1
+    UpdateDiscoverFilterFocus()
+end sub
+
+sub RebuildDiscoverGrid()
+    content = CreateObject("roSGNode", "ContentNode")
+    discoverRows = m.stores.catalog.getDiscoverRows()
+    if discoverRows <> invalid and discoverRows.Count() > 0
+        for each row in discoverRows
+            if row = invalid then continue for
+            for each item in row
+                if item <> invalid and SafeString(item, "type") <> "action"
+                    itemNode = content.CreateChild("ContentNode")
+                    itemNode.title = SafeString(item, "name")
+                    itemNode.HDPosterUrl = SafeString(item, "poster")
+                    itemNode.SDPosterUrl = SafeString(item, "poster")
+                    progress = m.stores.library.progressFor(SafeString(item, "id"))
+                    if progress > 0.0
+                        itemNode.AddFields({ progress: progress })
+                    end if
+                end if
+            end for
+        end for
+    end if
+    m.discoverGrid.content = content
+end sub
+
+function GetDiscoverGridItem(index as integer) as dynamic
+    discoverRows = m.stores.catalog.getDiscoverRows()
+    if index < 0 or discoverRows = invalid or discoverRows.Count() = 0 then return invalid
+    visibleIndex = -1
+    for each row in discoverRows
+        if row = invalid then continue for
+        for each item in row
+            if item <> invalid and SafeString(item, "type") <> "action"
+                visibleIndex = visibleIndex + 1
+                if visibleIndex = index then return item
+            end if
+        end for
+    end for
+    return invalid
+end function
+
+sub onDiscoverGridFocused(event as object)
+    item = GetDiscoverGridItem(event.GetData())
+    if item = invalid then return
+    info = {
+        heroTitle: SafeString(item, "name")
+        heroDescription: HomeHeroDescription(item)
+    }
+    meta = SafeString(item, "type")
+    year = SafeString(item, "releaseInfo")
+    if year = "" then year = SafeString(item, "year")
+    if year <> "" then meta = meta + "  " + year
+    if meta <> "" then info.subtitle = meta
+    m.top.screenInfo = info
+end sub
+
+sub onDiscoverGridSelected(event as object)
+    item = GetDiscoverGridItem(event.GetData())
+    if item = invalid then return
+    if SafeString(item, "type") = "series"
+        m.top.action = { type: "openSeriesEpisodes", item: item }
+    else
+        m.top.action = { type: "openMovieStreams", item: item }
+    end if
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if m.top.mode <> "discover" then return false
+
+    if m.discoverFilterFocus >= 0
+        if key = "left"
+            if m.discoverFilterFocus > 0
+                m.discoverFilterFocus = m.discoverFilterFocus - 1
+                UpdateDiscoverFilterFocus()
+            else
+                m.top.action = { type: "focusNavRail" }
+            end if
+            return true
+        else if key = "right"
+            if m.discoverFilterFocus < 2
+                m.discoverFilterFocus = m.discoverFilterFocus + 1
+                UpdateDiscoverFilterFocus()
+            end if
+            return true
+        else if key = "OK"
+            m.top.action = { type: "cycleDiscoverFilter", filterIndex: m.discoverFilterFocus }
+            return true
+        else if key = "down" or key = "back"
+            BlurDiscoverFilters()
+            m.discoverGrid.SetFocus(true)
+            return true
+        else if key = "up"
+            BlurDiscoverFilters()
+            m.top.action = { type: "focusTopBar" }
+            return true
+        end if
+    end if
+
+    return false
 end function

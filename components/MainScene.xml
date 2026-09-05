@@ -132,122 +132,13 @@
                 font="font:SmallSystemFont"
                 color="0xA9A6B8FF" />
 
-            <Group id="discoverFilterGroup" visible="false">
-                <Rectangle
-                    id="discoverTypeFocus"
-                    translation="[260, 154]"
-                    width="260"
-                    height="58"
-                    color="0x7657FFFF"
-                    visible="false" />
-                <Rectangle
-                    translation="[266, 160]"
-                    width="248"
-                    height="46"
-                    color="0x211F3AFF" />
-                <Label
-                    id="discoverTypeLabel"
-                    translation="[292, 166]"
-                    width="180"
-                    height="34"
-                    text="Movie"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xFFFFFFFF" />
-                <Label
-                    translation="[476, 166]"
-                    width="28"
-                    height="34"
-                    text="v"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallSystemFont"
-                    color="0xA9A6B8FF" />
-
-                <Rectangle
-                    id="discoverCatalogFocus"
-                    translation="[548, 154]"
-                    width="260"
-                    height="58"
-                    color="0x7657FFFF"
-                    visible="false" />
-                <Rectangle
-                    translation="[554, 160]"
-                    width="248"
-                    height="46"
-                    color="0x211F3AFF" />
-                <Label
-                    id="discoverCatalogLabel"
-                    translation="[580, 166]"
-                    width="170"
-                    height="34"
-                    text="Popular"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xFFFFFFFF" />
-                <Label
-                    translation="[764, 166]"
-                    width="28"
-                    height="34"
-                    text="v"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallSystemFont"
-                    color="0xA9A6B8FF" />
-
-                <Rectangle
-                    id="discoverGenreFocus"
-                    translation="[836, 154]"
-                    width="260"
-                    height="58"
-                    color="0x7657FFFF"
-                    visible="false" />
-                <Rectangle
-                    translation="[842, 160]"
-                    width="248"
-                    height="46"
-                    color="0x211F3AFF" />
-                <Label
-                    id="discoverGenreLabel"
-                    translation="[868, 166]"
-                    width="170"
-                    height="34"
-                    text="Genre"
-                    vertAlign="center"
-                    font="font:SmallBoldSystemFont"
-                    color="0xFFFFFFFF" />
-                <Label
-                    translation="[1052, 166]"
-                    width="28"
-                    height="34"
-                    text="v"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:SmallSystemFont"
-                    color="0xA9A6B8FF" />
-            </Group>
-
-            <!-- The board and library tabs are their own screen: a component that
-                 owns the card rows, the signed-out info list, their focus, and the
-                 actions they emit, the same way Settings and Addons do. MainScene
-                 only feeds it the store handles, tells it which tab is active, and
-                 dispatches the actions it reports. The Discover tab's grid and
-                 filter row stay here for now. -->
+            <!-- The board, library and discover tabs are their own screen: a
+                 component that owns the card rows, the signed-out info list, the
+                 discover filter row and grid, their focus, and the actions they
+                 emit, the same way Settings and Addons do. MainScene only feeds
+                 it the store handles, tells it which tab is active, and
+                 dispatches the actions it reports. -->
             <BrowseScreen id="browseScreen" translation="[0, 0]" />
-
-            <MarkupGrid
-                id="discoverGrid"
-                translation="[260, 230]"
-                width="1580"
-                height="700"
-                itemSize="[190, 320]"
-                itemSpacing="[30, 22]"
-                numColumns="7"
-                numRows="2"
-                itemComponentName="CatalogCard"
-                drawFocusFeedback="false"
-                vertFocusAnimationStyle="fixedFocus"
-                visible="false" />
 
             <!-- Calendar is its own screen rather than another info list. It
                  borrows the Settings idiom - a card list beside a detail panel

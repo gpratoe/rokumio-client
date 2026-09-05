@@ -20,7 +20,6 @@ const xmlChecks = [
             { id: 'setupAddress', label: 'setup address', requireViewportBounds: true },
             { id: 'primaryTitle', label: 'home title', requireFullSafeArea: true },
             { id: 'primarySubtitle', label: 'home subtitle', requireViewportBounds: true },
-            { id: 'discoverGrid', label: 'discover grid', requireViewportBounds: true },
             // Calendar screen. The list panel, the detail panel and everything
             // drawn inside them has to survive a 5% overscan, because the
             // detail column sits hard against the right design edge.
@@ -61,6 +60,14 @@ const xmlChecks = [
             // sits above the 5% inset by design.
             { id: 'supportChipBg', label: 'top bar support chip', requireViewportBounds: true },
             { id: 'supportChipLabel', label: 'top bar support chip label', requireViewportBounds: true },
+        ],
+    },
+    {
+        file: 'components/BrowseScreen.xml',
+        nodes: [
+            // Discover grid. The grid sits below the filter row and runs nearly
+            // to the right design edge, so it has to survive a 5% overscan.
+            { id: 'discoverGrid', label: 'discover grid', requireViewportBounds: true },
         ],
     },
     {

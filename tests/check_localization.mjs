@@ -89,7 +89,7 @@ const wiringChecks = [
     ['Language change republishes and re-renders nav', /SetLocaleLanguage\(m\.settingsStore\.getInterfaceLanguage\(\)\)\s*\n\s*UpdateNavContent\(\)/, mainScene],
     ['Nav labels route through TrText', /child\.title = TrText\("nav\." \+ id\)/, mainScene],
     ['Board section chrome routes through TrText', /TrText\("nav\.board"\)[\s\S]*?TrText\("board\.subtitle"\)[\s\S]*?TrText\("nav\.board"\)[\s\S]*?TrText\("board\.hero"\)/, browseScreen],
-    ['Discover section chrome routes through TrText', /TrText\("nav\.discover"\)[\s\S]*?TrText\("discover\.subtitle"\)[\s\S]*?TrText\("nav\.discover"\)[\s\S]*?TrText\("discover\.hero"\)/, mainScene],
+    ['Discover section chrome routes through TrText', /TrText\("nav\.discover"\)[\s\S]*?TrText\("discover\.subtitle"\)[\s\S]*?TrText\("nav\.discover"\)[\s\S]*?TrText\("discover\.hero"\)/, browseScreen],
     ['Library section chrome routes through TrText', /TrText\("nav\.library"\)[\s\S]*?TrText\("library\.subtitle"\)[\s\S]*?TrText\("library\.hero\.signedOut"\)[\s\S]*?TrText\("library\.hero\.empty"\)[\s\S]*?TrText\("library\.hero\.counts"\)/, browseScreen],
     ['Board See All action routes through TrText', /TrText\("board\.seeAll"\)[\s\S]*?TrText\("board\.seeAll\.description"\)/, catalogStore],
     ['Discover type chips route through TrText', /DiscoverTypeLabel[\s\S]*?TrText\("discover\.type\.movie"\)[\s\S]*?TrText\("discover\.type\.series"\)[\s\S]*?TrText\("discover\.type\.channel"\)/, formatters],

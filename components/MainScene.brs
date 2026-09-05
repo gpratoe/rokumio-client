@@ -15,19 +15,11 @@ sub init()
     m.supportChipBg = m.top.FindNode("supportChipBg")
     m.supportChipLabel = m.top.FindNode("supportChipLabel")
     m.topBarFocus = -1
-    m.discoverGrid = m.top.FindNode("discoverGrid")
     m.navList = m.top.FindNode("navList")
     m.searchBar = m.top.FindNode("searchBar")
     m.searchPrompt = m.top.FindNode("searchPrompt")
     m.primaryTitle = m.top.FindNode("primaryTitle")
     m.primarySubtitle = m.top.FindNode("primarySubtitle")
-    m.discoverFilterGroup = m.top.FindNode("discoverFilterGroup")
-    m.discoverTypeLabel = m.top.FindNode("discoverTypeLabel")
-    m.discoverCatalogLabel = m.top.FindNode("discoverCatalogLabel")
-    m.discoverGenreLabel = m.top.FindNode("discoverGenreLabel")
-    m.discoverTypeFocus = m.top.FindNode("discoverTypeFocus")
-    m.discoverCatalogFocus = m.top.FindNode("discoverCatalogFocus")
-    m.discoverGenreFocus = m.top.FindNode("discoverGenreFocus")
     m.calendarGroup = m.top.FindNode("calendarGroup")
     m.calendarList = m.top.FindNode("calendarList")
     m.calendarDetailPoster = m.top.FindNode("calendarDetailPoster")
@@ -74,7 +66,6 @@ sub init()
     m.settingsTabIndex = 0
     ' m.settingsTabIndex is mirrored from the Settings component's screenInfo so
     ' the scene's * / options handler knows which settings section it is on.
-    m.discoverFilterFocus = -1
     m.addonStore = CreateAddonStore()
     m.libraryStore = CreateLibraryStore()
     m.authStore = CreateAuthStore()
@@ -146,8 +137,6 @@ sub init()
     ' through the one selection handler as well.
     m.calendarList.ObserveField("itemSelected", "onPrimaryInfoSelected")
     m.calendarList.ObserveField("itemFocused", "onCalendarRowFocused")
-    m.discoverGrid.ObserveField("itemFocused", "onDiscoverGridFocused")
-    m.discoverGrid.ObserveField("itemSelected", "onDiscoverGridSelected")
     m.choiceList.ObserveField("itemSelected", "onChoiceSelected")
     m.streamList.ObserveField("itemSelected", "onChoiceSelected")
     m.seasonGrid.ObserveField("itemSelected", "onSeasonSelected")
@@ -261,7 +250,6 @@ sub FocusTopBar(index as integer)
     ' Every content list has to be blurred or it swallows OK and the arrows
     ' before onKeyEvent ever sees them.
     m.browseScreen.CallFunc("BlurFocus")
-    m.discoverGrid.SetFocus(false)
     m.settingsScreen.SetFocus(false)
     m.calendarList.SetFocus(false)
     m.addonsScreen.SetFocus(false)
@@ -291,8 +279,6 @@ sub FocusActiveContent()
         m.calendarList.SetFocus(true)
     else if m.addonsScreen.visible
         RequestAddonsFocus()
-    else if m.activeTab = "discover"
-        m.discoverGrid.SetFocus(true)
     else
         RequestBrowseFocus()
     end if
@@ -309,10 +295,6 @@ sub RenderActiveTab(focusContent as boolean)
     m.coffeeGroup.visible = false
     m.topBarFocus = -1
     UpdateTopBar()
-    m.discoverGrid.visible = false
-    m.discoverFilterGroup.visible = false
-    m.discoverFilterFocus = -1
-    UpdateDiscoverFilterFocus()
     m.settingsScreen.visible = false
     m.calendarGroup.visible = false
     m.addonsScreen.visible = false
@@ -322,8 +304,8 @@ sub RenderActiveTab(focusContent as boolean)
         m.browseScreen.mode = "board"
         if focusContent then RequestBrowseFocus()
     else if m.activeTab = "discover"
-        m.browseScreen.mode = "hidden"
-        RenderDiscover(focusContent)
+        m.browseScreen.mode = "discover"
+        if focusContent then RequestBrowseFocus()
     else if m.activeTab = "library"
         m.browseScreen.mode = "library"
         if focusContent then RequestBrowseFocus()
@@ -337,20 +319,6 @@ sub RenderActiveTab(focusContent as boolean)
         m.browseScreen.mode = "hidden"
         RenderSettings(focusContent)
     end if
-end sub
-
-sub RenderDiscover(focusContent as boolean)
-    m.primaryTitle.text = TrText("nav.discover")
-    m.primarySubtitle.text = TrText("discover.subtitle")
-    m.heroTitle.text = TrText("nav.discover")
-    m.heroDescription.text = TrText("discover.hero")
-    m.catalogRows = m.catalogStore.getDiscoverRows()
-    m.catalogNames = m.catalogStore.getDiscoverNames()
-    m.discoverFilterGroup.visible = true
-    UpdateDiscoverFilterLabels()
-    m.discoverGrid.visible = true
-    RebuildDiscoverGrid()
-    if focusContent then m.discoverGrid.SetFocus(true)
 end sub
 
 ' Calendar is its own screen: a list of dated episode cards beside a detail panel
@@ -612,8 +580,14 @@ sub onBrowseScreenAction(event as object)
         OpenSeriesEpisodes(action.item)
     else if action.type = "boardSeeAll"
         OpenBoardSeeAll(action.item)
+    else if action.type = "cycleDiscoverFilter"
+        CycleDiscoverFilter(action.filterIndex)
     else if action.type = "infoAction"
         ActivateAction(action.actionType, action.payload)
+    else if action.type = "focusTopBar"
+        FocusTopBar(0)
+    else if action.type = "focusNavRail"
+        m.navList.SetFocus(true)
     end if
 end sub
 
@@ -691,34 +665,6 @@ sub onSettingsScreenInfo(event as object)
     m.primarySubtitle.text = info.subtitle
     m.heroTitle.text = info.heroTitle
     m.heroDescription.text = info.heroDescription
-end sub
-
-sub UpdateDiscoverFilterLabels()
-    if m.discoverTypeLabel = invalid then return
-    m.discoverTypeLabel.text = DiscoverTypeLabel(m.catalogStore.getDiscoverType())
-    m.discoverCatalogLabel.text = m.catalogStore.getDiscoverCatalog()
-    m.discoverGenreLabel.text = m.catalogStore.getDiscoverGenre()
-    UpdateDiscoverFilterFocus()
-end sub
-
-sub UpdateDiscoverFilterFocus()
-    if m.discoverTypeFocus = invalid then return
-    m.discoverTypeFocus.visible = m.discoverFilterFocus = 0
-    m.discoverCatalogFocus.visible = m.discoverFilterFocus = 1
-    m.discoverGenreFocus.visible = m.discoverFilterFocus = 2
-end sub
-
-sub FocusDiscoverFilters()
-    if m.activeTab <> "discover" then return
-    if m.discoverFilterFocus < 0 then m.discoverFilterFocus = 0
-    UpdateDiscoverFilterFocus()
-    m.discoverGrid.SetFocus(false)
-    m.top.SetFocus(true)
-end sub
-
-sub BlurDiscoverFilters()
-    m.discoverFilterFocus = -1
-    UpdateDiscoverFilterFocus()
 end sub
 
 sub onPrimaryInfoSelected(event as object)
@@ -983,7 +929,6 @@ sub CycleDiscoverFilter(filterIndex as integer)
             m.catalogStore.setDiscoverGenre(NextOption(m.catalogStore.getDiscoverGenres(), m.catalogStore.getDiscoverGenre()))
         end if
     end if
-    UpdateDiscoverFilterLabels()
     FetchDiscoverCatalog()
 end sub
 
@@ -1190,10 +1135,7 @@ end sub
 sub FetchDiscoverCatalog()
     req = m.catalogStore.restartDiscoverCatalog()
     if m.activeTab = "discover"
-        m.catalogRows = m.catalogStore.getDiscoverRows()
-        m.catalogNames = m.catalogStore.getDiscoverNames()
-        UpdateDiscoverFilterLabels()
-        RebuildDiscoverGrid()
+        m.browseScreen.revision = m.browseScreen.revision + 1
     end if
     StartRequest(req.url, req.id)
 end sub
@@ -1440,7 +1382,7 @@ sub HandleCatalogResponse(data as object, rowIndex as integer, target as string)
         end if
     else
         if m.activeTab = "discover"
-            RebuildDiscoverGrid()
+            m.browseScreen.revision = m.browseScreen.revision + 1
         end if
     end if
 end sub
@@ -1448,7 +1390,7 @@ end sub
 sub HandleSearchMetaResponse(data as object, rowIndex as integer)
     if not m.catalogStore.handleSearchMetaResponse(data, rowIndex) then return
     if m.activeTab = "discover"
-        RebuildDiscoverGrid()
+        m.browseScreen.revision = m.browseScreen.revision + 1
     end if
 end sub
 
@@ -1461,69 +1403,6 @@ function IsImdbId(value as string) as boolean
     end for
     return true
 end function
-
-sub RebuildDiscoverGrid()
-    content = CreateObject("roSGNode", "ContentNode")
-    discoverRows = m.catalogStore.getDiscoverRows()
-    if discoverRows <> invalid and discoverRows.Count() > 0
-        for each row in discoverRows
-            if row = invalid then continue for
-            for each item in row
-                if item <> invalid and SafeString(item, "type") <> "action"
-                    itemNode = content.CreateChild("ContentNode")
-                    itemNode.title = SafeString(item, "name")
-                    itemNode.HDPosterUrl = SafeString(item, "poster")
-                    itemNode.SDPosterUrl = SafeString(item, "poster")
-                    progress = m.libraryStore.progressFor(SafeString(item, "id"))
-                    if progress > 0.0
-                        itemNode.AddFields({ progress: progress })
-                    end if
-                end if
-            end for
-        end for
-    end if
-    m.discoverGrid.content = content
-end sub
-
-function GetDiscoverGridItem(index as integer) as dynamic
-    discoverRows = m.catalogStore.getDiscoverRows()
-    if index < 0 or discoverRows = invalid or discoverRows.Count() = 0 then return invalid
-    visibleIndex = -1
-    for each row in discoverRows
-        if row = invalid then continue for
-        for each item in row
-            if item <> invalid and SafeString(item, "type") <> "action"
-                visibleIndex = visibleIndex + 1
-                if visibleIndex = index then return item
-            end if
-        end for
-    end for
-    return invalid
-end function
-
-sub onDiscoverGridFocused(event as object)
-    if m.discoverFilterFocus >= 0 then return
-    item = GetDiscoverGridItem(event.GetData())
-    if item = invalid then return
-    m.heroTitle.text = SafeString(item, "name")
-    m.heroDescription.text = HomeHeroDescription(item)
-    meta = SafeString(item, "type")
-    year = SafeString(item, "releaseInfo")
-    if year = "" then year = SafeString(item, "year")
-    if year <> "" then meta = meta + "  " + year
-    if meta <> "" then m.primarySubtitle.text = meta
-end sub
-
-sub onDiscoverGridSelected(event as object)
-    if m.discoverFilterFocus >= 0 then return
-    item = GetDiscoverGridItem(event.GetData())
-    if item = invalid then return
-    if SafeString(item, "type") = "series"
-        OpenSeriesEpisodes(item)
-    else
-        OpenMovieStreams(item)
-    end if
-end sub
 
 sub OpenMovieStreams(item as object)
     m.playbackStore.clearStreamRequest()
@@ -2699,31 +2578,6 @@ function onKeyEvent(key as string, press as boolean) as boolean
                 FocusActiveContent()
             end if
             return true
-        else if m.activeTab = "discover" and m.discoverFilterFocus >= 0
-            if key = "left" and m.discoverFilterFocus > 0
-                m.discoverFilterFocus = m.discoverFilterFocus - 1
-                UpdateDiscoverFilterFocus()
-                return true
-            else if key = "right" and m.discoverFilterFocus < 2
-                m.discoverFilterFocus = m.discoverFilterFocus + 1
-                UpdateDiscoverFilterFocus()
-                return true
-            else if key = "OK"
-                CycleDiscoverFilter(m.discoverFilterFocus)
-                return true
-            else if key = "down"
-                BlurDiscoverFilters()
-                m.discoverGrid.SetFocus(true)
-                return true
-            else if key = "back"
-                BlurDiscoverFilters()
-                m.discoverGrid.SetFocus(true)
-                return true
-            else if key = "up"
-                BlurDiscoverFilters()
-                FocusTopBar(0)
-                return true
-            end if
         else if key = "left" and not m.navList.HasFocus()
             m.navList.SetFocus(true)
             return true
@@ -2736,15 +2590,13 @@ function onKeyEvent(key as string, press as boolean) as boolean
                 ' RequestAddonsFocus routes to the component's inner list, keeping
                 ' the Addons chip row and card list inside the component.
                 RequestAddonsFocus()
-            else if m.activeTab = "discover"
-                m.discoverGrid.SetFocus(true)
             else
                 RequestBrowseFocus()
             end if
             return true
         else if key = "up" and not m.navList.HasFocus()
             if m.activeTab = "discover"
-                FocusDiscoverFilters()
+                m.browseScreen.CallFunc("FocusFilters")
                 return true
             end if
             if m.activeTab = "addons" and m.addonsScreen.visible

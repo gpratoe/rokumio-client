@@ -39,6 +39,7 @@ const requiredMainPatterns = [
     ['Calendar refresh preserves focused control', /else if not focusContent\s+targetIndex = m\.calendarFocusIndex/],
     ['Calendar chips and cards do not both own the Addons screen', /sub DispatchAddonAction\(actionType as string, payload as dynamic\)/],
     ['Addons toolbar is reachable from the card list', /m\.addonsScreen\.callFunc\("FocusChips"\)/],
+    ['Discover toolbar is reachable from the grid', /m\.browseScreen\.CallFunc\("FocusFilters"\)/],
     ['IMDb ID resolver', /function IsImdbId\(value as string\) as boolean/],
     ['Search dialog copy routes through the localization layer', /dialog\.message = TrText\("dialog\.search\.message"\)/],
 ];
@@ -176,6 +177,8 @@ const forbiddenMainPatterns = [
     ['Calendar state still mutated directly in the scene', /m\.calendar(Entries|LoadedSeries)[\[\]]+|m\.calendar(Entries|RequestActive|LoadedSeries)\s*=/],
     ['Episode state still mutated directly in the scene', /m\.(episodes|visibleEpisodes|seasons|selectedSeasonIndex|selectedEpisodeIndex|seriesMeta|episodeRequestActive)\s*(?:= (?:\[\]|invalid|\{)|\.Push\(|\.Delete\()/],
     ['Playback state still mutated directly in the scene', /m\.(streams|subtitles|pendingStream|streamRequestActive|subtitleRequestActive|pendingStreamRequests|completedStreamRequests|streamRequestErrors|playbackContentType|playbackContentId)\s*(?:= (?:\[\]|invalid|\{)|\.Push\(|\.Delete\()/],
+    ['Discover filter focus handled by the scene', /m\.discoverFilterFocus/],
+    ['Discover grid focus routed by the scene', /m\.discoverGrid/],
 ];
 
 const requiredSettingsPatterns = [
