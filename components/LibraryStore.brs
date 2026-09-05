@@ -43,6 +43,17 @@ function CreateLibraryStore() as object
         return m._libraryById[id]
     end function
 
+    ' Raw entries (with state) for stores that read watch progress. All
+    ' entries are returned (including temp/removed) so auto-added items keep
+    ' their watched-progress data, mirroring the getById() contract.
+    store.getRawLibraryItems = function() as object
+        raw = []
+        for each id in m._libraryById
+            raw.Push(m._libraryById[id])
+        end for
+        return raw
+    end function
+
     ' --- state lifecycle ------------------------------------------------------
 
     ' Wipe all library state (used when the Stremio account is disconnected).

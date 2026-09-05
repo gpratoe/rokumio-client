@@ -95,45 +95,27 @@ sub init()
     m.catalogRows = m.catalogStore.getBoardRows()
     m.catalogNames = m.catalogStore.getBoardNames()
     m.selectedItem = invalid
-    m.episodes = []
-    m.visibleEpisodes = []
-    m.seasons = []
-    m.selectedSeasonIndex = -1
-    m.seriesMeta = invalid
-    m.streams = []
-    m.selectedEpisodeIndex = 0
     m.selectedStreamIndex = 0
     m.streamReturnMode = "home"
     m.streamRequestSequence = 0
-    m.activeStreamRequestId = ""
-    m.streamRequestActive = false
-    m.pendingStreamRequests = 0
-    m.completedStreamRequests = 0
-    m.streamRequestErrors = []
+    m.subtitleRequestSequence = 0
     m.addonLoadPending = 0
     m.addonReloadActive = false
     m.pendingStreamLookup = invalid
-    m.subtitleRequestSequence = 0
-    m.activeSubtitleRequestId = ""
-    m.subtitleRequestActive = false
-    m.pendingSubtitleRequests = 0
-    m.completedSubtitleRequests = 0
-    m.subtitleRequestErrors = []
-    m.playbackContentType = ""
-    m.playbackContentId = ""
-    m.pendingStream = invalid
-    m.subtitles = []
     m.pendingNextEpisode = invalid
     m.suppressVideoReturn = false
     m.playbackReturnMode = "home"
     m.choiceMode = ""
     m.choiceReturnMode = "home"
     m.episodeReturnMode = "home"
-    m.episodeRequestActive = false
     m.screenMode = "home"
     m.addonLoadPending = 0
     m.pendingAddonDetails = invalid
     m.installedAddonDetailsIndex = -1
+    ' Episode and playback state is owned by their stores; MainScene reads
+    ' the accessors and keeps only the view (lists, focus, screens, dialogs).
+    m.episodesStore = CreateEpisodesStore()
+    m.playbackStore = CreatePlaybackStore(m.addonStore, m.libraryStore)
     ' Settings data + its registry persistence (interface, player, subtitle
     ' style, streaming server URL) live in one store. MainScene keeps only the
     ' scene-glue around them: dialogs, HTTP tasks, video pushes, chrome renders.
@@ -319,7 +301,7 @@ sub FocusActiveContent()
 end sub
 
 sub RenderActiveTab(focusContent as boolean)
-    ClearActiveStreamRequest()
+    m.playbackStore.clearStreamRequest()
     m.screenMode = "home"
     m.homeGroup.visible = true
     m.episodeGroup.visible = false
@@ -1362,13 +1344,13 @@ sub onHttpResponse(event as object)
     requestType = parts[0]
 
     if requestType = "streams"
-        activePrefix = m.activeStreamRequestId + "|"
-        if not m.streamRequestActive or Left(response.requestId, Len(activePrefix)) <> activePrefix
+        activePrefix = m.playbackStore.activeStreamRequestId() + "|"
+        if not m.playbackStore.isStreamRequestActive() or Left(response.requestId, Len(activePrefix)) <> activePrefix
             return
         end if
     else if requestType = "subtitles"
-        activePrefix = m.activeSubtitleRequestId + "|"
-        if not m.subtitleRequestActive or Left(response.requestId, Len(activePrefix)) <> activePrefix
+        activePrefix = m.playbackStore.activeSubtitleRequestId() + "|"
+        if not m.playbackStore.isSubtitleRequestActive() or Left(response.requestId, Len(activePrefix)) <> activePrefix
             return
         end if
     end if
@@ -1392,7 +1374,7 @@ sub onHttpResponse(event as object)
         else if requestType = "searchMeta"
             HandleSearchMetaResponse(invalid, Val(parts[1]))
         else if requestType = "meta" and m.episodeReturnMode = "home"
-            m.episodeRequestActive = false
+            m.episodesStore.setEpisodeRequestActive(false)
             ShowEpisodeLoadError("Could not load episodes. " + response.error)
         else if requestType = "linkCreate"
             ShowStatus(TrFormat("status.link.startFailed", response.error), false)
@@ -1466,37 +1448,31 @@ sub onHttpResponse(event as object)
 end sub
 
 sub HandleSubtitleRequestError(message as string)
-    if not m.subtitleRequestActive then return
-    m.subtitleRequestErrors.Push(message)
-    m.completedSubtitleRequests = m.completedSubtitleRequests + 1
-    if m.completedSubtitleRequests < m.pendingSubtitleRequests then return
-
-    ClearActiveSubtitleRequest()
+    result = m.playbackStore.handleSubtitleRequestError(message)
+    if not result.finished then return
+    m.playbackStore.clearSubtitleRequest()
     HideStatus()
     PlayPendingStream()
 end sub
 
 sub HandleStreamRequestError(message as string)
-    if not m.streamRequestActive then return
-    m.streamRequestErrors.Push(message)
-    m.completedStreamRequests = m.completedStreamRequests + 1
-    if m.completedStreamRequests < m.pendingStreamRequests then return
-
-    ClearActiveStreamRequest()
-    if m.streams.Count() > 0
+    result = m.playbackStore.handleStreamRequestError(message)
+    if not result.finished then return
+    m.playbackStore.clearStreamRequest()
+    if m.playbackStore.streams().Count() > 0
         HideStatus()
         if m.pendingNextEpisode <> invalid
             streamIndex = m.selectedStreamIndex
-            if streamIndex < 0 or streamIndex >= m.streams.Count() then streamIndex = 0
+            if streamIndex < 0 or streamIndex >= m.playbackStore.streams().Count() then streamIndex = 0
             m.selectedStreamIndex = streamIndex
-            FindSubtitles(m.streams[streamIndex])
+            FindSubtitles(m.playbackStore.streams()[streamIndex])
             return
         end if
-        ShowChoices("Choose a stream (" + m.streams.Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
-    else
-        RecoverFromNextEpisodeFailure()
-        ShowNoStreamsScreen("No add-on returned a direct playable stream. " + message)
+        ShowChoices("Choose a stream (" + m.playbackStore.streams().Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
+        return
     end if
+    RecoverFromNextEpisodeFailure()
+    ShowNoStreamsScreen("No add-on returned a direct playable stream. " + message)
 end sub
 
 sub OpenSearch()
@@ -1702,9 +1678,8 @@ sub onCatalogSelected(event as object)
 end sub
 
 sub OpenMovieStreams(item as object)
-    ClearActiveStreamRequest()
+    m.playbackStore.clearStreamRequest()
     m.selectedItem = item
-    m.episodes = []
     FindStreams(SafeString(item, "type"), SafeString(item, "id"), SafeString(item, "name"), "home")
 end sub
 
@@ -1732,18 +1707,10 @@ sub OpenBoardSeeAll(item as object)
 end sub
 
 sub OpenSeriesEpisodes(item as object)
-    ClearActiveStreamRequest()
+    req = m.episodesStore.openSeries(item)
+    StartRequest(req.url, req.id)
+    m.playbackStore.clearStreamRequest()
     m.selectedItem = item
-    m.episodes = []
-    m.visibleEpisodes = []
-    m.seasons = []
-    m.selectedSeasonIndex = -1
-    m.seriesMeta = invalid
-    m.selectedEpisodeIndex = 0
-    m.episodeReturnMode = "home"
-    m.choiceReturnMode = "home"
-    m.choiceMode = "loading"
-    m.episodeRequestActive = true
     m.choiceTitle.text = TrFormat("episodes.loadingFor", SafeString(item, "name"))
 
     content = CreateObject("roSGNode", "ContentNode")
@@ -1759,8 +1726,6 @@ sub OpenSeriesEpisodes(item as object)
     m.noStreamsGroup.visible = false
     m.screenMode = "episodeLoading"
     m.top.SetFocus(true)
-
-    StartRequest(CinemetaMetaUrl("series", SafeString(item, "id")), "meta|series")
 end sub
 
 function HomeHeroDescription(item as object) as string
@@ -1787,15 +1752,8 @@ function CinemetaMetaUrl(contentType as string, id as string) as string
 end function
 
 sub HandleMetaResponse(data as object)
-    if not m.episodeRequestActive then return
-    m.episodeRequestActive = false
-
-    if data.DoesExist("meta") and data.meta <> invalid and data.meta.DoesExist("videos")
-        m.seriesMeta = data.meta
-        m.episodes = data.meta.videos
-    end if
-
-    if m.episodes.Count() > 0
+    result = m.episodesStore.handleMetaResponse(data)
+    if result.hasEpisodes
         ShowEpisodeScreen()
     else
         ShowEpisodeLoadError("No episodes were returned.")
@@ -1803,23 +1761,23 @@ sub HandleMetaResponse(data as object)
 end sub
 
 sub ShowEpisodeScreen()
-    BuildSeasons()
+    m.seasons = m.episodesStore.buildSeasons()
     if m.seasons.Count() = 0
         ShowEpisodeLoadError("No episodes were returned.")
         return
     end if
 
-    if m.selectedSeasonIndex < 0 or m.selectedSeasonIndex >= m.seasons.Count()
-        m.selectedSeasonIndex = 0
+    if m.episodesStore.selectedSeasonIndex() < 0 or m.episodesStore.selectedSeasonIndex() >= m.seasons.Count()
+        m.episodesStore.setSelectedSeasonIndex(0)
         for index = 0 to m.seasons.Count() - 1
             if m.seasons[index] = 1
-                m.selectedSeasonIndex = index
+                m.episodesStore.setSelectedSeasonIndex(index)
                 exit for
             end if
         end for
     end if
 
-    meta = m.seriesMeta
+    meta = m.episodesStore.seriesMeta()
     if meta = invalid then meta = m.selectedItem
     m.episodeBackground.uri = SafeString(meta, "background")
     m.episodeSeriesTitle.text = SafeString(meta, "name")
@@ -1837,18 +1795,7 @@ sub ShowEpisodeScreen()
 end sub
 
 sub BuildSeasons()
-    m.seasons = []
-    seen = {}
-    for each episode in m.episodes
-        season = 0
-        if episode.DoesExist("season") then season = episode.season
-        key = season.ToStr()
-        if not seen.DoesExist(key)
-            seen[key] = true
-            m.seasons.Push(season)
-        end if
-    end for
-    m.seasons.Sort()
+    m.seasons = m.episodesStore.buildSeasons()
 end sub
 
 sub RebuildSeasonGrid()
@@ -1861,99 +1808,49 @@ sub RebuildSeasonGrid()
         else
             child.title = TrFormat("episodes.season", season)
         end if
-        if index = m.selectedSeasonIndex
+        if index = m.episodesStore.selectedSeasonIndex()
             child.shortDescriptionLine1 = "selected"
         end if
     end for
     m.seasonGrid.content = content
-    m.seasonGrid.JumpToItem = m.selectedSeasonIndex
+    m.seasonGrid.JumpToItem = m.episodesStore.selectedSeasonIndex()
 end sub
 
 sub RebuildEpisodeList()
-    m.visibleEpisodes = []
+    m.visibleEpisodes = m.episodesStore.buildVisibleEpisodes(SafeString(m.selectedItem, "id"), m.libraryStore.getRawLibraryItems(), m.settingsStore.getBlurUnwatched())
     content = CreateObject("roSGNode", "ContentNode")
-    selectedSeason = m.seasons[m.selectedSeasonIndex]
+    for each episode in m.visibleEpisodes
+        child = content.CreateChild("EpisodeContent")
 
-    ' Look up watched indices and last watched info for the series
-    watchedIndices = []
-    currentVideoId = invalid
-    currentTimeOffset = 0
-    currentDuration = 0
+        title = EpisodeTitle(episode)
+        if episode.IsWatched then title = "✓ " + title
 
-    seriesId = SafeString(m.selectedItem, "id")
-    if m.libraryStore.hasById(seriesId)
-        libraryItem = m.libraryStore.getById(seriesId)
-        if libraryItem.DoesExist("state") and libraryItem.state <> invalid
-            state = libraryItem.state
-            if state.DoesExist("watched") and state.watched <> invalid and state.watched <> ""
-                info = DecodeWatchedBitfield(state.watched)
-                if info <> invalid and info.watchedIndices <> invalid
-                    watchedIndices = info.watchedIndices
-                end if
-            end if
-            if state.DoesExist("video_id") then currentVideoId = state.video_id
-            if state.DoesExist("timeOffset") then currentTimeOffset = state.timeOffset
-            if state.DoesExist("duration") then currentDuration = state.duration
+        child.title = title
+        child.description = EpisodeDescription(episode)
+        child.HDPosterUrl = SafeString(episode, "thumbnail")
+        child.SDPosterUrl = SafeString(episode, "thumbnail")
+        child.episodeLabel = EpisodeNumber(episode).ToStr() + "."
+        released = SafeString(episode, "released")
+        if Len(released) >= 10 then child.shortDescriptionLine1 = Left(released, 10)
+
+        if episode.Progress > 0.0 and episode.Progress < 0.9
+            child.progress = episode.Progress
         end if
-    end if
-
-    episodeFullIndex = -1
-    for each episode in m.episodes
-        episodeFullIndex = episodeFullIndex + 1
-        season = 0
-        if episode.DoesExist("season") then season = episode.season
-        if season = selectedSeason
-            isWatched = false
-            for each idx in watchedIndices
-                if idx = episodeFullIndex
-                    isWatched = true
-                    exit for
-                end if
-            end for
-
-            progress = 0.0
-            episodeId = SafeString(episode, "id")
-            if currentVideoId <> invalid and currentVideoId = episodeId
-                if currentTimeOffset > 0 and currentDuration > 0
-                    progress = currentTimeOffset / currentDuration
-                end if
-            end if
-
-            m.visibleEpisodes.Push(episode)
-            child = content.CreateChild("EpisodeContent")
-            
-            title = EpisodeTitle(episode)
-            if isWatched then title = "✓ " + title
-            
-            child.title = title
-            child.description = EpisodeDescription(episode)
-            child.HDPosterUrl = SafeString(episode, "thumbnail")
-            child.SDPosterUrl = SafeString(episode, "thumbnail")
-            child.episodeLabel = EpisodeNumber(episode).ToStr() + "."
-            released = SafeString(episode, "released")
-            if Len(released) >= 10 then child.shortDescriptionLine1 = Left(released, 10)
-            
-            if progress > 0.0 and progress < 0.9
-                child.progress = progress
-            end if
-            if m.settingsStore.getBlurUnwatched() and not isWatched
-                child.AddFields({ blurThumbnail: true })
-            end if
-        end if
+        if episode.BlurThumbnail then child.AddFields({ blurThumbnail: true })
     end for
 
     m.episodeList.content = content
-    if m.selectedEpisodeIndex < 0 or m.selectedEpisodeIndex >= m.visibleEpisodes.Count()
-        m.selectedEpisodeIndex = 0
+    if m.episodesStore.selectedEpisodeIndex() < 0 or m.episodesStore.selectedEpisodeIndex() >= m.visibleEpisodes.Count()
+        m.episodesStore.setSelectedEpisodeIndex(0)
     end if
-    m.episodeList.JumpToItem = m.selectedEpisodeIndex
+    m.episodeList.JumpToItem = m.episodesStore.selectedEpisodeIndex()
 end sub
 
 sub onSeasonSelected(event as object)
     index = event.GetData()
     if index < 0 or index >= m.seasons.Count() then return
-    m.selectedSeasonIndex = index
-    m.selectedEpisodeIndex = 0
+    m.episodesStore.setSelectedSeasonIndex(index)
+    m.episodesStore.setSelectedEpisodeIndex(0)
     RebuildSeasonGrid()
     RebuildEpisodeList()
     m.episodeList.SetFocus(true)
@@ -1962,9 +1859,26 @@ end sub
 sub onEpisodeSelected(event as object)
     index = event.GetData()
     if index < 0 or index >= m.visibleEpisodes.Count() then return
-    m.selectedEpisodeIndex = index
+    m.episodesStore.setSelectedEpisodeIndex(index)
     episode = m.visibleEpisodes[index]
-    FindStreams("series", SafeString(episode, "id"), EpisodeTitle(episode), "episodes")
+    m.playbackStore.clearStreamRequest()
+    reqs = m.playbackStore.findStreamsForEpisode("series", SafeString(episode, "id"), EpisodeTitle(episode), "episodes", m.addonStore.getInstalled())
+    if m.addonLoadPending > 0
+        m.pendingStreamLookup = { contentType: "series", id: SafeString(episode, "id"), title: EpisodeTitle(episode), returnMode: "episodes" }
+        ShowStatus(TrText("status.streams.loadingAddons"), true)
+        return
+    end if
+    if reqs.Count() = 0
+        ShowNoStreamsScreen("No installed add-on can provide a playable stream for this title. Press * to add or configure a stream add-on, then try again.")
+        return
+    end if
+    ShowStatus(TrFormat("status.streams.finding", reqs.Count()), true)
+    m.streamRequestSequence = m.streamRequestSequence + 1
+    m.playbackStore.setActiveStreamRequestId("streams|" + m.streamRequestSequence.ToStr())
+    m.playbackStore.setStreamRequestActive(true)
+    for each spec in reqs
+        StartStreamRequest(spec.url, m.playbackStore.activeStreamRequestId() + "|" + spec.addonIndex.ToStr())
+    end for
 end sub
 
 sub ShowEpisodeLoadError(message as string)
@@ -1985,92 +1899,34 @@ sub ShowEpisodeLoadError(message as string)
 end sub
 
 sub FindStreams(contentType as string, id as string, title as string, returnMode as string)
-    m.playbackTitle = title
-    m.playbackContentType = contentType
-    m.playbackContentId = id
-    m.streamReturnMode = returnMode
-
+    m.playbackStore.clearStreamRequest()
+    reqs = m.playbackStore.findStreamsForEpisode(contentType, id, title, returnMode, m.addonStore.getInstalled())
     if m.addonLoadPending > 0
-        m.pendingStreamLookup = {
-            contentType: contentType
-            id: id
-            title: title
-            returnMode: returnMode
-        }
+        m.pendingStreamLookup = { contentType: contentType, id: id, title: title, returnMode: returnMode }
         ShowStatus(TrText("status.streams.loadingAddons"), true)
         return
     end if
-
-    matchingAddons = []
-    installed = m.addonStore.getInstalled()
-    for index = 0 to installed.Count() - 1
-        if m.addonStore.AddonSupports(installed[index].manifest, "stream", contentType, id)
-            matchingAddons.Push(index)
-        end if
-    end for
-
-    if matchingAddons.Count() = 0
+    if reqs.Count() = 0
         ShowNoStreamsScreen("No installed add-on can provide a playable stream for this title. Press * to add or configure a stream add-on, then try again.")
         return
     end if
-
-    ShowStatus(TrFormat("status.streams.finding", matchingAddons.Count()), true)
+    ShowStatus(TrFormat("status.streams.finding", reqs.Count()), true)
     m.streamRequestSequence = m.streamRequestSequence + 1
-    m.activeStreamRequestId = "streams|" + m.streamRequestSequence.ToStr()
-    m.streamRequestActive = true
-    m.pendingStreamRequests = matchingAddons.Count()
-    m.completedStreamRequests = 0
-    m.streamRequestErrors = []
-    m.streams = []
-
-    for each addonIndex in matchingAddons
-        addon = installed[addonIndex]
-        url = addon.baseUrl + "/stream/" + contentType + "/" + id + ".json"
-        requestId = m.activeStreamRequestId + "|" + addonIndex.ToStr()
-        StartStreamRequest(url, requestId)
+    m.playbackStore.setActiveStreamRequestId("streams|" + m.streamRequestSequence.ToStr())
+    m.playbackStore.setStreamRequestActive(true)
+    for each spec in reqs
+        StartStreamRequest(spec.url, m.playbackStore.activeStreamRequestId() + "|" + spec.addonIndex.ToStr())
     end for
 end sub
 
-sub ClearActiveStreamRequest()
-    m.streamRequestActive = false
-    m.activeStreamRequestId = ""
-    m.pendingStreamRequests = 0
-    m.completedStreamRequests = 0
-end sub
-
 sub HandleStreamsResponse(data as object, addonIndex as integer)
-    if not m.streamRequestActive then return
-    addonName = "Unknown add-on"
-    installed = m.addonStore.getInstalled()
-    if addonIndex >= 0 and addonIndex < installed.Count()
-        addonName = SafeString(installed[addonIndex].manifest, "name")
-    end if
-
-    if data <> invalid and data.DoesExist("streams") and data.streams <> invalid
-        for each stream in data.streams
-            directUrl = DirectStreamUrl(stream)
-            if directUrl <> ""
-                stream.strokuAddonName = addonName
-                m.streams.Push(stream)
-            else if stream <> invalid and stream.DoesExist("infoHash")
-                ' Torrent-only results have no direct URL. They are listed so the
-                ' user can see them, and played back through the dedicated
-                ' streaming server when one is configured.
-                stream.rokumioTorrent = true
-                stream.strokuAddonName = addonName
-                m.streams.Push(stream)
-            end if
-        end for
-    end if
-
-    m.completedStreamRequests = m.completedStreamRequests + 1
-    if m.completedStreamRequests < m.pendingStreamRequests then return
-
-    ClearActiveStreamRequest()
+    result = m.playbackStore.handleStreamsResponse(data, addonIndex, m.addonStore.getInstalled())
+    if not result.finished then return
+    m.playbackStore.clearStreamRequest()
     HideStatus()
     if m.pendingNextEpisode = invalid then m.selectedStreamIndex = 0
 
-    if m.streams.Count() = 0
+    if m.playbackStore.streams().Count() = 0
         RecoverFromNextEpisodeFailure()
         ShowNoStreamsScreen("The installed add-ons returned no playable streams.")
         return
@@ -2078,23 +1934,23 @@ sub HandleStreamsResponse(data as object, addonIndex as integer)
 
     if m.pendingNextEpisode <> invalid
         streamIndex = m.selectedStreamIndex
-        if streamIndex < 0 or streamIndex >= m.streams.Count() then streamIndex = 0
+        if streamIndex < 0 or streamIndex >= m.playbackStore.streams().Count() then streamIndex = 0
         m.selectedStreamIndex = streamIndex
-        if DirectStreamUrl(m.streams[streamIndex]) <> ""
-            FindSubtitles(m.streams[streamIndex])
+        if DirectStreamUrl(m.playbackStore.streams()[streamIndex]) <> ""
+            FindSubtitles(m.playbackStore.streams()[streamIndex])
             return
         end if
-        if m.streams[streamIndex].rokumioTorrent
-            serverUrl = m.settingsStore.StreamingServerStreamUrl(m.streams[streamIndex])
+        if m.playbackStore.streams()[streamIndex].rokumioTorrent
+            serverUrl = m.settingsStore.StreamingServerStreamUrl(m.playbackStore.streams()[streamIndex])
             if serverUrl <> ""
-                m.streams[streamIndex].url = serverUrl
-                FindSubtitles(m.streams[streamIndex])
+                m.playbackStore.streams()[streamIndex].url = serverUrl
+                FindSubtitles(m.playbackStore.streams()[streamIndex])
                 return
             end if
         end if
     end if
 
-    ShowChoices("Choose a stream (" + m.streams.Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
+    ShowChoices("Choose a stream (" + m.playbackStore.streams().Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
 end sub
 
 function DirectStreamUrl(stream as dynamic) as string
@@ -2153,7 +2009,7 @@ end sub
 
 sub onChoiceFocused(event as object)
     index = event.GetData()
-    if m.choiceMode <> "streams" or index < 0 or index >= m.streams.Count() then return
+    if m.choiceMode <> "streams" or index < 0 or index >= m.playbackStore.streams().Count() then return
 end sub
 
 sub onChoiceSelected(event as object)
@@ -2161,10 +2017,10 @@ sub onChoiceSelected(event as object)
     if index < 0 then return
 
     if m.choiceMode = "streams"
-        if index >= m.streams.Count() then return
+        if index >= m.playbackStore.streams().Count() then return
         m.selectedStreamIndex = index
         m.playbackReturnMode = "streams"
-        stream = m.streams[index]
+        stream = m.playbackStore.streams()[index]
         if DirectStreamUrl(stream) = ""
             if stream.rokumioTorrent
                 serverUrl = m.settingsStore.StreamingServerStreamUrl(stream)
@@ -2182,107 +2038,58 @@ sub onChoiceSelected(event as object)
 end sub
 
 sub FindSubtitles(stream as object)
-    matchingAddons = []
-    installed = m.addonStore.getInstalled()
-    for index = 0 to installed.Count() - 1
-        if m.addonStore.AddonSupports(installed[index].manifest, "subtitles", m.playbackContentType, m.playbackContentId)
-            matchingAddons.Push(index)
-        end if
-    end for
-
-    m.pendingStream = stream
-    m.subtitles = []
-    if matchingAddons.Count() = 0
-        PlayStream(stream, m.playbackTitle, [])
+    m.playbackStore.clearSubtitleRequest()
+    specs = m.playbackStore.findSubtitlesFor(stream, m.addonStore.getInstalled())
+    if specs.Count() = 0
+        PlayStream(stream, m.playbackStore.playbackTitle(), [])
         return
     end if
-
-    ShowStatus(TrFormat("status.subtitles.finding", matchingAddons.Count()), true)
+    ShowStatus(TrFormat("status.subtitles.finding", specs.Count()), true)
     m.subtitleRequestSequence = m.subtitleRequestSequence + 1
-    m.activeSubtitleRequestId = "subtitles|" + m.subtitleRequestSequence.ToStr()
-    m.subtitleRequestActive = true
-    m.pendingSubtitleRequests = matchingAddons.Count()
-    m.completedSubtitleRequests = 0
-    m.subtitleRequestErrors = []
-
-    for each addonIndex in matchingAddons
-        addon = installed[addonIndex]
-        url = addon.baseUrl + "/subtitles/" + m.playbackContentType + "/" + m.playbackContentId + ".json"
-        requestId = m.activeSubtitleRequestId + "|" + addonIndex.ToStr()
-        StartRequest(url, requestId)
+    m.playbackStore.setActiveSubtitleRequestId("subtitles|" + m.subtitleRequestSequence.ToStr())
+    m.playbackStore.setSubtitleRequestActive(true)
+    for each spec in specs
+        StartRequest(spec.url, m.playbackStore.activeSubtitleRequestId() + "|" + spec.addonIndex.ToStr())
     end for
-end sub
-
-sub ClearActiveSubtitleRequest()
-    m.subtitleRequestActive = false
-    m.activeSubtitleRequestId = ""
-    m.pendingSubtitleRequests = 0
-    m.completedSubtitleRequests = 0
 end sub
 
 sub HandleSubtitlesResponse(data as object, addonIndex as integer)
-    if not m.subtitleRequestActive then return
-    addonName = "Unknown add-on"
-    installed = m.addonStore.getInstalled()
-    if addonIndex >= 0 and addonIndex < installed.Count()
-        addonName = SafeString(installed[addonIndex].manifest, "name")
-    end if
-
-    if data.DoesExist("subtitles") and data.subtitles <> invalid
-        for each subtitle in data.subtitles
-            if SafeString(subtitle, "url") <> ""
-                subtitle.strokuAddonName = addonName
-                m.subtitles.Push(subtitle)
-            end if
-        end for
-    end if
-
-    m.completedSubtitleRequests = m.completedSubtitleRequests + 1
-    if m.completedSubtitleRequests < m.pendingSubtitleRequests then return
-
-    ClearActiveSubtitleRequest()
+    result = m.playbackStore.handleSubtitlesResponse(data, addonIndex, m.addonStore.getInstalled())
+    if not result.finished then return
+    m.playbackStore.clearSubtitleRequest()
     HideStatus()
     PlayPendingStream()
 end sub
 
 sub PlayPendingStream()
-    if m.pendingStream = invalid then return
-    stream = m.pendingStream
-    m.pendingStream = invalid
-    PlayStream(stream, m.playbackTitle, m.subtitles)
+    pending = m.playbackStore.playPendingStream()
+    if pending = invalid then return
+    resumeOffsetSec = m.playbackStore.computeResumeOffset(SafeString(pending.stream, "id"), m.libraryStore.getRawLibraryItems())
+    if resumeOffsetSec > 0
+        m.pendingPlayStream = pending.stream
+        m.pendingPlayTitle = pending.title
+        m.pendingPlaySubtitles = pending.subtitles
+        m.pendingPlayOffset = resumeOffsetSec
+        dialog = CreateObject("roSGNode", "Dialog")
+        dialog.title = TrText("dialog.resume.title")
+        dialog.message = TrFormat("dialog.resume.message", FormatPlaybackTime(resumeOffsetSec))
+        dialog.buttons = [TrText("dialog.resume.resume"), TrText("dialog.resume.startOver")]
+        dialog.ObserveField("buttonSelected", "onResumeDialogButton")
+        m.resumeDialog = dialog
+        m.top.dialog = dialog
+    else
+        StartPlayback(pending.stream, pending.title, pending.subtitles, 0)
+    end if
 end sub
 
-sub PlayStream(stream as object, title as string, subtitles as object)
-    ' Check for resume progress
-    resumeOffsetSec = 0
-    libraryItemId = m.playbackContentId
-    if m.playbackContentType = "series"
-        parts = m.playbackContentId.Split(":")
-        libraryItemId = parts[0]
-    end if
-
-    if m.libraryStore.hasById(libraryItemId)
-        libraryItem = m.libraryStore.getById(libraryItemId)
-        if libraryItem.DoesExist("state") and libraryItem.state <> invalid
-            state = libraryItem.state
-            if state.DoesExist("video_id") and state.video_id = m.playbackContentId
-                if state.DoesExist("timeOffset") and state.DoesExist("duration")
-                    offset = state.timeOffset / 1000
-                    dur = state.duration / 1000
-                    if offset > 10 and dur > 0 and offset < 0.9 * dur
-                        resumeOffsetSec = offset
-                    end if
-                end if
-            end if
-        end if
-    end if
+sub PlayStream(stream as object, title as object, subtitles as object)
+    resumeOffsetSec = m.playbackStore.computeResumeOffset(m.playbackStore.playbackContentId(), m.libraryStore.getRawLibraryItems())
 
     if resumeOffsetSec > 0
         m.pendingPlayStream = stream
         m.pendingPlayTitle = title
         m.pendingPlaySubtitles = subtitles
         m.pendingPlayOffset = resumeOffsetSec
-
         dialog = CreateObject("roSGNode", "Dialog")
         dialog.title = TrText("dialog.resume.title")
         dialog.message = TrFormat("dialog.resume.message", FormatPlaybackTime(resumeOffsetSec))
@@ -2419,12 +2226,13 @@ sub onVideoAction(event as object)
 end sub
 
 function SubtitleSyncContentKey() as string
-    if m.playbackContentId = "" then return ""
-    if m.playbackContentType = "series"
-        parts = m.playbackContentId.Split(":")
+    playbackContentId = m.playbackStore.playbackContentId()
+    if playbackContentId = "" then return ""
+    if m.playbackStore.playbackContentType() = "series"
+        parts = playbackContentId.Split(":")
         if parts.Count() > 0 then return parts[0]
     end if
-    return m.playbackContentId
+    return playbackContentId
 end function
 
 function LoadSubtitleSyncOffset() as float
@@ -2488,51 +2296,27 @@ sub onExitVideoDialogButton(event as object)
 end sub
 
 function HasNextEpisode() as boolean
-    return NextEpisodeLocation() <> invalid
+    return m.episodesStore.hasNextEpisode(m.playbackStore.playbackContentId())
 end function
 
 function NextEpisodeLocation() as dynamic
-    if m.playbackContentType <> "series" then return invalid
-    currentId = m.playbackContentId
-    foundCurrent = false
-    for seasonIndex = 0 to m.seasons.Count() - 1
-        season = m.seasons[seasonIndex]
-        episodeIndex = 0
-        for each episode in m.episodes
-            episodeSeason = 0
-            if episode.DoesExist("season") then episodeSeason = episode.season
-            if episodeSeason = season
-                if foundCurrent
-                    return {
-                        episode: episode
-                        seasonIndex: seasonIndex
-                        episodeIndex: episodeIndex
-                    }
-                end if
-                if SafeString(episode, "id") = currentId then foundCurrent = true
-                episodeIndex = episodeIndex + 1
-            end if
-        end for
-    end for
-    return invalid
+    return m.episodesStore.nextEpisodeLocation(m.playbackStore.playbackContentId())
 end function
 
 sub PlayNextEpisode()
-    location = NextEpisodeLocation()
+    location = m.episodesStore.nextEpisodeLocation(m.playbackStore.playbackContentId())
     if location = invalid then return
 
     m.pendingNextEpisode = location
     m.suppressVideoReturn = true
     m.video.control = "stop"
     m.video.visible = false
-    m.selectedSeasonIndex = location.seasonIndex
-    m.selectedEpisodeIndex = location.episodeIndex
-    episode = location.episode
-    FindStreams("series", SafeString(episode, "id"), EpisodeTitle(episode), "episodes")
+    m.episodesStore.setSelectedSeasonIndex(location.seasonIndex)
+    m.episodesStore.setSelectedEpisodeIndex(location.episodeIndex)
+    FindStreams("series", SafeString(location.episode, "id"), EpisodeTitle(location.episode), "episodes")
 end sub
 
 sub RecoverFromNextEpisodeFailure()
-    if m.pendingNextEpisode = invalid then return
     m.pendingNextEpisode = invalid
     ShowEpisodeScreen()
     m.episodeList.SetFocus(true)
@@ -2589,9 +2373,9 @@ sub onVideoStateChanged(event as object)
 end sub
 
 sub ReturnFromVideo()
-    if m.playbackReturnMode = "streams" and m.streams.Count() > 0
-        ShowChoices("Choose a stream (" + m.streams.Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
-        if m.selectedStreamIndex >= 0 and m.selectedStreamIndex < m.streams.Count()
+    if m.playbackReturnMode = "streams" and m.playbackStore.streams().Count() > 0
+        ShowChoices("Choose a stream (" + m.playbackStore.streams().Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
+        if m.selectedStreamIndex >= 0 and m.selectedStreamIndex < m.playbackStore.streams().Count()
             m.streamList.JumpToItem = m.selectedStreamIndex
         end if
     else
@@ -3175,27 +2959,27 @@ function onKeyEvent(key as string, press as boolean) as boolean
         else if key = "up" and m.episodeList.HasFocus()
             m.seasonGrid.SetFocus(true)
             return true
-        else if key = "left" and m.seasonGrid.HasFocus() and m.selectedSeasonIndex > 0
-            m.selectedSeasonIndex = m.selectedSeasonIndex - 1
-            m.selectedEpisodeIndex = 0
+        else if key = "left" and m.seasonGrid.HasFocus() and m.episodesStore.selectedSeasonIndex() > 0
+            m.episodesStore.setSelectedSeasonIndex(m.episodesStore.selectedSeasonIndex() - 1)
+            m.episodesStore.setSelectedEpisodeIndex(0)
             RebuildSeasonGrid()
             RebuildEpisodeList()
             return true
-        else if key = "right" and m.seasonGrid.HasFocus() and m.selectedSeasonIndex < m.seasons.Count() - 1
-            m.selectedSeasonIndex = m.selectedSeasonIndex + 1
-            m.selectedEpisodeIndex = 0
+        else if key = "right" and m.seasonGrid.HasFocus() and m.episodesStore.selectedSeasonIndex() < m.episodesStore.seasons().Count() - 1
+            m.episodesStore.setSelectedSeasonIndex(m.episodesStore.selectedSeasonIndex() + 1)
+            m.episodesStore.setSelectedEpisodeIndex(0)
             RebuildSeasonGrid()
             RebuildEpisodeList()
             return true
-        else if key = "left" and m.episodeList.HasFocus() and m.selectedSeasonIndex > 0
-            m.selectedSeasonIndex = m.selectedSeasonIndex - 1
-            m.selectedEpisodeIndex = 0
+        else if key = "left" and m.episodeList.HasFocus() and m.episodesStore.selectedSeasonIndex() > 0
+            m.episodesStore.setSelectedSeasonIndex(m.episodesStore.selectedSeasonIndex() - 1)
+            m.episodesStore.setSelectedEpisodeIndex(0)
             RebuildSeasonGrid()
             RebuildEpisodeList()
             return true
-        else if key = "right" and m.episodeList.HasFocus() and m.selectedSeasonIndex < m.seasons.Count() - 1
-            m.selectedSeasonIndex = m.selectedSeasonIndex + 1
-            m.selectedEpisodeIndex = 0
+        else if key = "right" and m.episodeList.HasFocus() and m.episodesStore.selectedSeasonIndex() < m.episodesStore.seasons().Count() - 1
+            m.episodesStore.setSelectedSeasonIndex(m.episodesStore.selectedSeasonIndex() + 1)
+            m.episodesStore.setSelectedEpisodeIndex(0)
             RebuildSeasonGrid()
             RebuildEpisodeList()
             return true
@@ -3209,8 +2993,8 @@ function onKeyEvent(key as string, press as boolean) as boolean
             return true
         end if
 
-        if m.streamRequestActive
-            ClearActiveStreamRequest()
+        if m.playbackStore.isStreamRequestActive()
+            m.playbackStore.clearStreamRequest()
             HideStatus()
             if m.screenMode = "episodes"
                 m.episodeList.SetFocus(true)
@@ -3227,10 +3011,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
             return true
         end if
 
-        if m.subtitleRequestActive
-            ClearActiveSubtitleRequest()
+        if m.playbackStore.isSubtitleRequestActive()
+            m.playbackStore.clearSubtitleRequest()
             HideStatus()
-            ShowChoices("Choose a stream (" + m.streams.Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
+            ShowChoices("Choose a stream (" + m.playbackStore.streams().Count().ToStr() + ")", BuildStreamContent(), "streams", m.streamReturnMode)
             m.streamList.JumpToItem = m.selectedStreamIndex
             return true
         end if
@@ -3241,7 +3025,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
         else if m.screenMode = "choices" or m.screenMode = "episodeLoading"
             m.choiceGroup.visible = false
             if m.choiceReturnMode = "home"
-                m.episodeRequestActive = false
+                m.episodesStore.setEpisodeRequestActive(false)
                 HideStatus()
                 RenderActiveTab(true)
             else if m.choiceReturnMode = "episodes"
@@ -3279,14 +3063,6 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
 
     return false
-end function
-
-function StreamLabels() as object
-    labels = []
-    for each stream in m.streams
-        labels.Push(StreamListLabel(stream))
-    end for
-    return labels
 end function
 
 function NextOption(options as object, currentValue as string) as string
@@ -3404,7 +3180,7 @@ end function
 
 function BuildStreamContent() as object
     content = CreateObject("roSGNode", "ContentNode")
-    for each stream in m.streams
+    for each stream in m.playbackStore.streams()
         child = content.CreateChild("ContentNode")
         child.addFields({
             sourceBadge: "",
@@ -3767,11 +3543,11 @@ end sub
 
 sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinished as boolean)
     if not m.authStore.isSignedIn() then return
-    if m.playbackContentId = "" then return
+    if m.playbackStore.playbackContentId() = "" then return
 
-    seriesOrMovieId = m.playbackContentId
-    if m.playbackContentType = "series"
-        parts = m.playbackContentId.Split(":")
+    seriesOrMovieId = m.playbackStore.playbackContentId()
+    if m.playbackStore.playbackContentType() = "series"
+        parts = seriesOrMovieId.Split(":")
         seriesOrMovieId = parts[0]
     end if
 
@@ -3806,7 +3582,7 @@ sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinis
     durationMs = durationSec * 1000
 
     state.lastWatched = now
-    state.video_id = m.playbackContentId
+    state.video_id = m.playbackStore.playbackContentId()
     state.duration = durationMs
 
     completed = isFinished
@@ -3818,13 +3594,14 @@ sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinis
 
     if completed
         state.timeOffset = 0
-        if m.playbackContentType = "movie"
-            state.watched = m.playbackContentId
+        if m.playbackStore.playbackContentType() = "movie"
+            state.watched = m.playbackStore.playbackContentId()
             state.timesWatched = state.timesWatched + 1
-        else if m.playbackContentType = "series"
+        else if m.playbackStore.playbackContentType() = "series"
+            episodes = m.episodesStore.episodes()
             episodeIndex = -1
-            for i = 0 to m.episodes.Count() - 1
-                if m.episodes[i].id = m.playbackContentId
+            for i = 0 to episodes.Count() - 1
+                if episodes[i].id = m.playbackStore.playbackContentId()
                     episodeIndex = i
                     exit for
                 end if
@@ -3835,7 +3612,7 @@ sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinis
                 lastSeason = 0
                 lastEpisode = 0
                 
-                episode = m.episodes[episodeIndex]
+                episode = episodes[episodeIndex]
                 if episode.DoesExist("season") then lastSeason = episode.season
                 if episode.DoesExist("episode") then lastEpisode = episode.episode
                 if lastEpisode = 0 and episode.DoesExist("number") then lastEpisode = episode.number
@@ -3858,7 +3635,7 @@ sub SavePlaybackProgress(positionSec as integer, durationSec as integer, isFinis
                     watchedIndices.Push(episodeIndex)
                 end if
 
-                state.watched = EncodeWatchedBitfield(seriesOrMovieId, lastSeason, lastEpisode, m.episodes.Count(), watchedIndices)
+                state.watched = EncodeWatchedBitfield(seriesOrMovieId, lastSeason, lastEpisode, episodes.Count(), watchedIndices)
             end if
         end if
     else

@@ -18,6 +18,8 @@ const libraryStore = fs.readFileSync(path.join(root, 'components/LibraryStore.br
 const authStore = fs.readFileSync(path.join(root, 'components/AuthStore.brs'), 'utf8');
 const catalogStore = fs.readFileSync(path.join(root, 'components/CatalogStore.brs'), 'utf8');
 const calendarStore = fs.readFileSync(path.join(root, 'components/CalendarStore.brs'), 'utf8');
+const episodesStore = fs.readFileSync(path.join(root, 'components/EpisodesStore.brs'), 'utf8');
+const playbackStore = fs.readFileSync(path.join(root, 'components/PlaybackStore.brs'), 'utf8');
 
 // The search dialog copy now lives in the localization layer, so the
 // "does not overpromise TVDB" guarantee is asserted against the English table
@@ -128,6 +130,30 @@ const requiredCalendarStorePatterns = [
     ['Calendar store builds the action rows', /store\.buildActions = function/],
 ];
 
+const requiredEpisodesStorePatterns = [
+    ['Episodes store opens a series', /store\.openSeries = function\(item as object\) as object/],
+    ['Episodes store processes meta response', /store\.handleMetaResponse = function\(data as object\) as object/],
+    ['Episodes store builds the season list', /store\.buildSeasons = function\(\) as object/],
+    ['Episodes store builds visible episodes', /store\.buildVisibleEpisodes = function\(seriesId as string, libraryItems as object, blurUnwatched as boolean\) as object/],
+    ['Episodes store tracks selected season', /store\.setSelectedSeasonIndex = function\(index as integer\)/],
+    ['Episodes store tracks selected episode', /store\.setSelectedEpisodeIndex = function\(index as integer\)/],
+    ['Episodes store reports next episode', /store\.nextEpisodeLocation = function\(playingContentId as string\) as object/],
+    ['Episodes store reports has next episode', /store\.hasNextEpisode = function\(playingContentId as string\) as boolean/],
+];
+
+const requiredPlaybackStorePatterns = [
+    ['Playback store finds streams', /store\.findStreamsForEpisode = function\(contentType as string, id as string, title as string, returnMode as string, installedAddons as object\) as object/],
+    ['Playback store processes stream responses', /store\.handleStreamsResponse = function\(data as object, addonIndex as integer, installedAddons as object\) as object/],
+    ['Playback store handles stream errors', /store\.handleStreamRequestError = function\(message as string\) as object/],
+    ['Playback store finds subtitles', /store\.findSubtitlesFor = function\(stream as object, installedAddons as object\) as object/],
+    ['Playback store processes subtitle responses', /store\.handleSubtitlesResponse = function\(data as object, addonIndex as integer, installedAddons as object\) as object/],
+    ['Playback store handles subtitle errors', /store\.handleSubtitleRequestError = function\(message as string\) as object/],
+    ['Playback store plays pending stream', /store\.playPendingStream = function\(\) as object/],
+    ['Playback store computes resume offset', /store\.computeResumeOffset = function\(playbackContentId as string, libraryItems as object\) as float/],
+    ['Playback store owns stream request state', /store\.setStreamRequestActive = function\(flag as boolean\)/],
+    ['Playback store owns subtitle request state', /store\.setSubtitleRequestActive = function\(flag as boolean\)/],
+];
+
 const requiredLocalePatterns = [
     ['Search copy does not overpromise TVDB', /"dialog\.search\.message":\s*"Search movies, series, and channels/],
 ];
@@ -148,6 +174,8 @@ const forbiddenMainPatterns = [
     ['Auth key still written to registry directly in the scene', /section\.Write\("stremioAuthKey"/],
     ['Catalog state still mutated directly in the scene', /m\.(boardRows|discoverRows)\[|m\.discover(Type|Catalog|Genre|RequestActive)\s*=/],
     ['Calendar state still mutated directly in the scene', /m\.calendar(Entries|LoadedSeries)[\[\]]+|m\.calendar(Entries|RequestActive|LoadedSeries)\s*=/],
+    ['Episode state still mutated directly in the scene', /m\.(episodes|visibleEpisodes|seasons|selectedSeasonIndex|selectedEpisodeIndex|seriesMeta|episodeRequestActive)\s*(?:= (?:\[\]|invalid|\{)|\.Push\(|\.Delete\()/],
+    ['Playback state still mutated directly in the scene', /m\.(streams|subtitles|pendingStream|streamRequestActive|subtitleRequestActive|pendingStreamRequests|completedStreamRequests|streamRequestErrors|playbackContentType|playbackContentId)\s*(?:= (?:\[\]|invalid|\{)|\.Push\(|\.Delete\()/],
 ];
 
 const requiredSettingsPatterns = [
@@ -216,6 +244,14 @@ for (const [label, pattern] of requiredCatalogStorePatterns) {
 
 for (const [label, pattern] of requiredCalendarStorePatterns) {
     if (!pattern.test(calendarStore)) failures.push(`${label} is missing from CalendarStore.brs`);
+}
+
+for (const [label, pattern] of requiredEpisodesStorePatterns) {
+    if (!pattern.test(episodesStore)) failures.push(`${label} is missing from EpisodesStore.brs`);
+}
+
+for (const [label, pattern] of requiredPlaybackStorePatterns) {
+    if (!pattern.test(playbackStore)) failures.push(`${label} is missing from PlaybackStore.brs`);
 }
 
 for (const [label, pattern] of requiredSettingsXmlPatterns) {

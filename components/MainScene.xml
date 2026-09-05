@@ -17,6 +17,8 @@
     <script type="text/brightscript" uri="pkg:/components/AuthStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/CatalogStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/CalendarStore.brs" />
+    <script type="text/brightscript" uri="pkg:/components/EpisodesStore.brs" />
+    <script type="text/brightscript" uri="pkg:/components/PlaybackStore.brs" />
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 
     <children>
