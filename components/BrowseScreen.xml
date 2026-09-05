@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="BrowseScreen" extends="Group">
+  <interface>
+    <field id="mode" type="string" onchange="onModeChanged" />
+    <field id="revision" type="integer" onchange="onRevisionChanged" />
+    <field id="focusRequest" type="boolean" onchange="onFocusRequest" />
+    <field id="action" type="assocarray" alwaysNotify="true" />
+    <field id="screenInfo" type="assocarray" alwaysNotify="true" />
+    <function name="SetStores" />
+    <function name="BlurFocus" />
+  </interface>
+
+  <script type="text/brightscript" uri="pkg:/components/UiScale.brs" />
+  <script type="text/brightscript" uri="pkg:/components/Locale.brs" />
+  <script type="text/brightscript" uri="pkg:/components/Helpers.brs" />
+  <script type="text/brightscript" uri="pkg:/components/Formatters.brs" />
+  <script type="text/brightscript" uri="pkg:/components/BrowseScreen.brs" />
+
+  <children>
+    <RowList
+        id="catalogList"
+        translation="[260, 164]"
+        itemSize="[1600, 360]"
+        rowItemSize="[[168, 300]]"
+        rowItemSpacing="[[26, 0]]"
+        rowSpacings="[12]"
+        rowLabelOffset="[[0, 0]]"
+        rowLabelFont="font:MediumSystemFont"
+        rowLabelColor="0xF7F5FFFF"
+        itemComponentName="CatalogCard"
+        numRows="6"
+        showRowLabel="[true]"
+        showRowCounter="[false]"
+        drawFocusFeedback="false"
+        rowFocusAnimationStyle="fixedFocus"
+        vertFocusAnimationStyle="fixedFocus" />
+
+    <Group id="primaryInfoGroup" visible="false">
+        <Rectangle translation="[260, 164]" width="1600" height="760" color="0x161529FF" />
+        <Rectangle translation="[260, 164]" width="8" height="760" color="0x7657FFFF" />
+        <LabelList
+            id="primaryInfoList"
+            translation="[316, 208]"
+            width="1480"
+            height="660"
+            itemSize="[1480, 64]"
+            numRows="10"
+            color="0xC9C6D7FF"
+            focusedColor="0xFFFFFFFF"
+            focusBitmapBlendColor="0x7657FFFF" />
+    </Group>
+  </children>
+</component>

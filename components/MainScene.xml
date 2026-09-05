@@ -227,24 +227,13 @@
                     color="0xA9A6B8FF" />
             </Group>
 
-            <RowList
-                id="catalogList"
-                translation="[260, 164]"
-                itemSize="[1600, 360]"
-                rowItemSize="[[168, 300]]"
-                rowItemSpacing="[[26, 0]]"
-                rowSpacings="[12]"
-                rowLabelOffset="[[0, 0]]"
-                rowLabelFont="font:MediumSystemFont"
-                rowLabelColor="0xF7F5FFFF"
-                itemComponentName="CatalogCard"
-                numRows="6"
-                showRowLabel="[true]"
-                showRowCounter="[false]"
-                drawFocusFeedback="false"
-                rowFocusAnimationStyle="fixedFocus"
-                vertFocusAnimationStyle="fixedFocus"
-                visible="true" />
+            <!-- The board and library tabs are their own screen: a component that
+                 owns the card rows, the signed-out info list, their focus, and the
+                 actions they emit, the same way Settings and Addons do. MainScene
+                 only feeds it the store handles, tells it which tab is active, and
+                 dispatches the actions it reports. The Discover tab's grid and
+                 filter row stay here for now. -->
+            <BrowseScreen id="browseScreen" translation="[0, 0]" />
 
             <MarkupGrid
                 id="discoverGrid"
@@ -259,21 +248,6 @@
                 drawFocusFeedback="false"
                 vertFocusAnimationStyle="fixedFocus"
                 visible="false" />
-
-            <Group id="primaryInfoGroup" visible="false">
-                <Rectangle translation="[260, 164]" width="1600" height="760" color="0x161529FF" />
-                <Rectangle translation="[260, 164]" width="8" height="760" color="0x7657FFFF" />
-                <LabelList
-                    id="primaryInfoList"
-                    translation="[316, 208]"
-                    width="1480"
-                    height="660"
-                    itemSize="[1480, 64]"
-                    numRows="10"
-                    color="0xC9C6D7FF"
-                    focusedColor="0xFFFFFFFF"
-                    focusBitmapBlendColor="0x7657FFFF" />
-            </Group>
 
             <!-- Calendar is its own screen rather than another info list. It
                  borrows the Settings idiom - a card list beside a detail panel

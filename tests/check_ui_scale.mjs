@@ -45,14 +45,17 @@ function checkSliderTakesFocus() {
         return;
     }
 
-    const blur = open.indexOf('m.primaryInfoList.SetFocus(false)');
+    // Board/library content now lives in the browse screen; the settings list is
+    // blurred separately. Both have to lose focus before the scene takes it.
+    const blur = open.indexOf('m.browseScreen.CallFunc("BlurFocus")');
+    const settingsBlur = open.indexOf('m.settingsScreen.SetFocus(false)');
     const focus = open.indexOf('m.top.SetFocus(true)');
-    if (blur < 0) {
-        failures.push('OpenUiScaleSlider must blur m.primaryInfoList before the scene takes focus');
+    if (blur < 0 || settingsBlur < 0) {
+        failures.push('OpenUiScaleSlider must blur m.browseScreen and the settings screen before the scene takes focus');
     } else if (focus < 0) {
         failures.push('OpenUiScaleSlider must give focus to the scene so onKeyEvent receives keys');
-    } else if (blur > focus) {
-        failures.push('OpenUiScaleSlider blurs m.primaryInfoList after m.top.SetFocus(true); the list keeps focus');
+    } else if (blur > focus || settingsBlur > focus) {
+        failures.push('OpenUiScaleSlider blurs m.browseScreen/the settings screen after m.top.SetFocus(true); a list keeps focus');
     }
 
     const close = functionBody(mainScene, 'CloseUiScaleSlider');
@@ -162,14 +165,16 @@ function checkEverySelectableSettingsRowHasAHandler() {
     }
 
     // Info rows carry the action type second; settings rows carry a display
-    // value first, so theirs is third. Both dispatch through the same handler.
-    // InfoAction rows live in MainScene; SettingRow rows live in the Settings
-    // component now.
+    // value first, so theirs is third. Both dispatch in MainScene via the same
+    // ActivateAction dispatcher. InfoAction rows live in the browse screen
+    // (library signed-out list); SettingRow rows live in the Settings component.
     const declared = new Set();
-    for (const args of callArguments(mainScene, 'InfoAction')) {
-        const actionType = args[1]?.trim();
-        const literal = actionType?.match(/^"([^"]*)"$/);
-        if (literal) declared.add(literal[1]);
+    for (const { source } of componentSources) {
+        for (const args of callArguments(source, 'InfoAction')) {
+            const actionType = args[1]?.trim();
+            const literal = actionType?.match(/^"([^"]*)"$/);
+            if (literal) declared.add(literal[1]);
+        }
     }
     for (const args of callArguments(settingsSource, 'SettingRow')) {
         const actionType = args[2]?.trim();
@@ -182,7 +187,7 @@ function checkEverySelectableSettingsRowHasAHandler() {
 
     for (const type of [...declared].sort()) {
         if (!handled.has(type)) {
-            failures.push(`settings row action "${type}" has no branch in onPrimaryInfoSelected`);
+            failures.push(`settings row action "${type}" has no branch in ActivateAction`);
         }
     }
 }
