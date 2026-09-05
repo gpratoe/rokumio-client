@@ -103,7 +103,7 @@ const requiredCatalogStorePatterns = [
     ['Catalog store fetches the six board catalogs', /store\.fetchBoardCatalogs = function[\s\S]*?boardCatalog\|0[\s\S]*?caching\.stremio\.net\/publicdomainmovies/],
     ['Catalog store builds the discover catalog request', /store\.buildDiscoverCatalog = function[\s\S]*?v3-cinemeta\.strem\.io\/catalog/],
     ['Catalog store resets + restarts discover', /store\.restartDiscoverCatalog = function[\s\S]*?m\._discoverRequestActive = true[\s\S]*?return m\.buildDiscoverCatalog/],
-    ['Catalog store owns the channel search request', /catalog\/channel\/top\/search=/],
+    ['Catalog store builds the two search requests (movie + series)', /catalog\/movie\/top\/search=[\s\S]*?catalog\/series\/top\/search=/],
     ['Catalog store processes catalog responses', /store\.handleCatalogResponse = function[\s\S]*?m\._discoverRows\[rowIndex\]/],
     ['Catalog store processes IMDb-ID meta responses', /store\.handleSearchMetaResponse = function[\s\S]*?return true/],
     ['Catalog store owns the discover filter values', /store\.getDiscoverType = function[\s\S]*?store\.setDiscoverType = function/],

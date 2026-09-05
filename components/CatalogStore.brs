@@ -179,14 +179,13 @@ function CreateCatalogStore() as object
             ]
         end if
 
-        m._discoverRows = [[], [], []]
-        m._discoverNames = ["Search Suggestions - Movie", "Search Suggestions - Series", "Search Suggestions - Channel"]
+        m._discoverRows = [[], []]
+        m._discoverNames = ["Search Suggestions - Movie", "Search Suggestions - Series"]
         m._discoverRequestActive = true
         encodedQuery = EncodeUrlComponent(query)
         return [
             { url: "https://v3-cinemeta.strem.io/catalog/movie/top/search=" + encodedQuery + ".json", id: "search|0" }
             { url: "https://v3-cinemeta.strem.io/catalog/series/top/search=" + encodedQuery + ".json", id: "search|1" }
-            { url: "https://v3-channels.strem.io/catalog/channel/top/search=" + encodedQuery + ".json", id: "search|2" }
         ]
     end function
 

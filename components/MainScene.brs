@@ -1545,17 +1545,20 @@ sub RebuildDiscoverGrid()
     content = CreateObject("roSGNode", "ContentNode")
     discoverRows = m.catalogStore.getDiscoverRows()
     if discoverRows <> invalid and discoverRows.Count() > 0
-        for each item in discoverRows[0]
-            if SafeString(item, "type") <> "action"
-                itemNode = content.CreateChild("ContentNode")
-                itemNode.title = SafeString(item, "name")
-                itemNode.HDPosterUrl = SafeString(item, "poster")
-                itemNode.SDPosterUrl = SafeString(item, "poster")
-                progress = m.libraryStore.progressFor(SafeString(item, "id"))
-                if progress > 0.0
-                    itemNode.AddFields({ progress: progress })
+        for each row in discoverRows
+            if row = invalid then continue for
+            for each item in row
+                if item <> invalid and SafeString(item, "type") <> "action"
+                    itemNode = content.CreateChild("ContentNode")
+                    itemNode.title = SafeString(item, "name")
+                    itemNode.HDPosterUrl = SafeString(item, "poster")
+                    itemNode.SDPosterUrl = SafeString(item, "poster")
+                    progress = m.libraryStore.progressFor(SafeString(item, "id"))
+                    if progress > 0.0
+                        itemNode.AddFields({ progress: progress })
+                    end if
                 end if
-            end if
+            end for
         end for
     end if
     m.discoverGrid.content = content
@@ -1565,11 +1568,14 @@ function GetDiscoverGridItem(index as integer) as dynamic
     discoverRows = m.catalogStore.getDiscoverRows()
     if index < 0 or discoverRows = invalid or discoverRows.Count() = 0 then return invalid
     visibleIndex = -1
-    for each item in discoverRows[0]
-        if SafeString(item, "type") <> "action"
-            visibleIndex = visibleIndex + 1
-            if visibleIndex = index then return item
-        end if
+    for each row in discoverRows
+        if row = invalid then continue for
+        for each item in row
+            if item <> invalid and SafeString(item, "type") <> "action"
+                visibleIndex = visibleIndex + 1
+                if visibleIndex = index then return item
+            end if
+        end for
     end for
     return invalid
 end function
