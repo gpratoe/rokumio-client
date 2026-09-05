@@ -401,6 +401,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
                 m.discoverFilterFocus = m.discoverFilterFocus - 1
                 UpdateDiscoverFilterFocus()
             else
+                BlurDiscoverFilters()
                 m.top.action = { type: "focusNavRail" }
             end if
             return true
