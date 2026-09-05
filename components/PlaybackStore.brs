@@ -15,7 +15,6 @@ function CreatePlaybackStore(addonStore as object, libraryStore as object) as ob
         _playbackContentType: "",
         _playbackContentId: "",
         _playbackTitle: "",
-        _playbackReturnMode: "home",
         _streamReturnMode: "home",
         _streams: [],
         _subtitles: [],
@@ -46,10 +45,6 @@ function CreatePlaybackStore(addonStore as object, libraryStore as object) as ob
 
     store.playbackTitle = function() as string
         return m._playbackTitle
-    end function
-
-    store.playbackReturnMode = function() as string
-        return m._playbackReturnMode
     end function
 
     store.streamReturnMode = function() as string
@@ -98,6 +93,28 @@ function CreatePlaybackStore(addonStore as object, libraryStore as object) as ob
 
     store.setActiveSubtitleRequestId = function(id as string)
         m._activeSubtitleRequestId = id
+    end function
+
+    ' Wipe the whole playback domain (used when the Stremio account is
+    ' disconnected, mirroring LibraryStore.clear / CalendarStore.reset).
+    store.reset = function()
+        m._playbackContentType = ""
+        m._playbackContentId = ""
+        m._playbackTitle = ""
+        m._streamReturnMode = "home"
+        m._streams = []
+        m._subtitles = []
+        m._pendingStream = invalid
+        m._activeStreamRequestId = ""
+        m._streamRequestActive = false
+        m._pendingStreamRequests = 0
+        m._completedStreamRequests = 0
+        m._streamRequestErrors = []
+        m._activeSubtitleRequestId = ""
+        m._subtitleRequestActive = false
+        m._pendingSubtitleRequests = 0
+        m._completedSubtitleRequests = 0
+        m._subtitleRequestErrors = []
     end function
 
     ' --- stream requests ------------------------------------------------------

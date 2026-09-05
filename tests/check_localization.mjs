@@ -11,6 +11,7 @@ const locale = fs.readFileSync(path.join(root, 'components/Locale.brs'), 'utf8')
 const mainScene = fs.readFileSync(path.join(root, 'components/MainScene.brs'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(root, 'components/Settings.brs'), 'utf8');
 const catalogStore = fs.readFileSync(path.join(root, 'components/CatalogStore.brs'), 'utf8');
+const helpers = fs.readFileSync(path.join(root, 'components/Helpers.brs'), 'utf8');
 
 const failures = [];
 
@@ -84,7 +85,7 @@ const wiringChecks = [
     ['Discover section chrome routes through TrText', /TrText\("nav\.discover"\)[\s\S]*?TrText\("discover\.subtitle"\)[\s\S]*?TrText\("nav\.discover"\)[\s\S]*?TrText\("discover\.hero"\)/, mainScene],
     ['Library section chrome routes through TrText', /TrText\("nav\.library"\)[\s\S]*?TrText\("library\.subtitle"\)[\s\S]*?TrText\("library\.hero\.signedOut"\)[\s\S]*?TrText\("library\.hero\.empty"\)[\s\S]*?TrText\("library\.hero\.counts"\)/, mainScene],
     ['Board See All action routes through TrText', /TrText\("board\.seeAll"\)[\s\S]*?TrText\("board\.seeAll\.description"\)/, catalogStore],
-    ['Discover type chips route through TrText', /DiscoverTypeLabel[\s\S]*?TrText\("discover\.type\.movie"\)[\s\S]*?TrText\("discover\.type\.series"\)[\s\S]*?TrText\("discover\.type\.channel"\)/, mainScene],
+    ['Discover type chips route through TrText', /DiscoverTypeLabel[\s\S]*?TrText\("discover\.type\.movie"\)[\s\S]*?TrText\("discover\.type\.series"\)[\s\S]*?TrText\("discover\.type\.channel"\)/, helpers],
     ['Nav identity kept separate from nav labels', /m\.navIds = \[/, mainScene],
     ['Settings tab chips route through TrText', /label\.text = TrText\("settings\.tab\./, settingsSource],
 ];

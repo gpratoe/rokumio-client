@@ -54,6 +54,24 @@ function CreateLibraryStore() as object
         return raw
     end function
 
+    ' Watch-progress fraction (0..0.9) for a catalog item, or 0.0 when there is
+    ' nothing worth drawing on a card. The single offset/duration -> fraction
+    ' rule for the catalog renders lives here, not inline in MainScene.
+    store.progressFor = function(id as string) as float
+        if not m._libraryById.DoesExist(id) then return 0.0
+        libraryItem = m._libraryById[id]
+        if not libraryItem.DoesExist("state") or libraryItem.state = invalid then return 0.0
+        state = libraryItem.state
+        if not state.DoesExist("timeOffset") or not state.DoesExist("duration") then return 0.0
+        offset = state.timeOffset
+        duration = state.duration
+        if offset > 0 and duration > 0
+            progress = offset / duration
+            if progress > 0.0 and progress < 0.9 then return progress
+        end if
+        return 0.0
+    end function
+
     ' --- state lifecycle ------------------------------------------------------
 
     ' Wipe all library state (used when the Stremio account is disconnected).

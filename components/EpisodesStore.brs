@@ -54,6 +54,18 @@ function CreateEpisodesStore() as object
         m._episodeRequestActive = flag
     end function
 
+    ' Wipe the whole series/episode domain (used when the Stremio account is
+    ' disconnected, mirroring LibraryStore.clear / CalendarStore.reset).
+    store.reset = function()
+        m._selectedItem = invalid
+        m._episodes = []
+        m._seriesMeta = invalid
+        m._seasons = []
+        m._selectedSeasonIndex = -1
+        m._selectedEpisodeIndex = -1
+        m._episodeRequestActive = false
+    end function
+
     ' --- lifecycle ------------------------------------------------------------
 
     ' Prepare the store to load a series. Resets the episode state, marks
