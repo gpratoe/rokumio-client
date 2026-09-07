@@ -3,7 +3,7 @@
 ' MainScene owns exactly three things and nothing else:
 '   1. the ScreenStack,
 '   2. Back routing (top screen first; the stack pops when it declines),
-'   3. later (M2): store instantiation and action dispatch.
+'   3. store instantiation and action dispatch.
 '
 ' Zero business logic lives here. Everything else is in a screen or a store.
 sub init()
@@ -15,6 +15,24 @@ sub init()
     ' closeRequest is how it asks the Scene to dismiss it.
     m.confirmExit = m.top.FindNode("confirmExitDialog")
     m.confirmExit.ObserveField("closeRequest", "onConfirmExitClose")
+
+    ' Stores are constructed once at the Scene and handed to screens later by
+    ' reference. SettingsStore and AddonsStore Load() their persisted state on
+    ' construction.
+    m.transport = Transport()
+    m.settingsStore = SettingsStore(CreateObject("roRegistrySection", "settings"))
+    m.authStore = AuthStore()
+    m.addonsStore = AddonsStore(m.transport, CreateObject("roRegistrySection", "addons"))
+    m.catalogStore = CatalogStore(m.transport)
+    m.episodesStore = EpisodesStore(m.transport)
+    m.stores = {
+        transport: m.transport
+        settings: m.settingsStore
+        auth: m.authStore
+        addons: m.addonsStore
+        catalog: m.catalogStore
+        episodes: m.episodesStore
+    }
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.

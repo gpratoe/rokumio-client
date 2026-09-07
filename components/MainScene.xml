@@ -9,6 +9,12 @@
          subtree, so every screen component sees them. -->
     <script type="text/brightscript" uri="pkg:/source/core/Screen.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/ScreenStack.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/SettingsStore.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/AuthStore.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/AddonsStore.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/CatalogStore.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/EpisodesStore.bs" />
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 
     <children>

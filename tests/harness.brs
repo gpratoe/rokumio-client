@@ -11,6 +11,21 @@
 m.passed = 0
 m.failed = 0
 
+' A safe stringizer for the interpreter — the Roku built-in toJson() is not
+' implemented in @rokucommunity/brs, so Harness_Equal would abort the suite on
+' the first failing assertion. This handles every type our tests compare.
+function ToJson(value as dynamic) as string
+    if value = invalid then return "invalid"
+    vtype = Type(value)
+    if vtype = "String" or vtype = "roString" then return value
+    if vtype = "Integer" or vtype = "roInteger" or vtype = "Float" then return value.ToStr()
+    if vtype = "Boolean" or vtype = "roBoolean"
+        if value then return "true"
+        return "false"
+    end if
+    return vtype
+end function
+
 function Harness_Suite(name as string) as void
     print ""
     print "SUITE: " + name

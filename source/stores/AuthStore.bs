@@ -1,0 +1,32 @@
+' AuthStore — the current session, purely local.
+'
+' Guest login creates a local "guest" session and nothing else: no transport,
+' no network call, no authKey exchange. It simply means the app runs without an
+' account, so nothing syncs (watch history, library, add-ons). Account linking
+' is a later, separate session mode that will talk to the Stremio account API
+' and can reuse the same shape (session <> "" means signed in).
+
+class AuthStore
+    session as string
+
+    sub new()
+        m.session = ""
+    end sub
+
+    function LoginGuest() as object
+        m.session = "guest"
+        return { ok: true, session: m.session }
+    end function
+
+    function GetSession() as string
+        return m.session
+    end function
+
+    function IsLoggedIn() as boolean
+        return m.session <> ""
+    end function
+
+    sub Logout()
+        m.session = ""
+    end sub
+end class

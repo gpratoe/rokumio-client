@@ -5,7 +5,7 @@
     "description": "Native Roku client for Stremio addons and debrid streams",
 "scripts": {
         "build": "bsc",
-        "test": "node tests/run.js",
+        "test": "node tests/run.js && node tools/mock-addon-server/server.test.js",
         "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true }); require('fs').rmSync('out', { recursive: true, force: true }); require('fs').rmSync('out-test', { recursive: true, force: true })\""
     },
     "devDependencies": {

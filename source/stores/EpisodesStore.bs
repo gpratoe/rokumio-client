@@ -1,0 +1,82 @@
+' EpisodesStore — series/movie meta and episode resolution from an add-on
+' server. GetMeta talks to the add-on; the rest are pure helpers over an
+' already-fetched meta so they unit-test without any transport.
+'
+' Video ids follow the Stremio convention "{imdbId}:{season}:{episode}" that
+' stream add-ons (Torrentio-style) expect, so ResolveVideoId is the bridge from
+' a Details-selected episode to a Pass-2 stream lookup.
+
+class EpisodesStore
+    transport as object
+
+    sub new(http as object)
+        m.transport = http
+    end sub
+
+    ' Fetch {address}/meta/{type}/{id}.json. A series must carry a non-empty
+    ' meta.videos array, otherwise it is rejected.
+    function GetMeta(addonAddress as string, metaType as string, id as string) as object
+        result = { ok: false, meta: invalid, error: "" }
+        if addonAddress = ""
+            result.error = "no addon address"
+            return result
+        end if
+        if metaType = "" or id = ""
+            result.error = "meta type or id missing"
+            return result
+        end if
+
+        url = addonAddress + "/meta/" + metaType + "/" + id + ".json"
+        response = m.transport.Get(url)
+        if not response.ok or response.json = invalid
+            result.error = response.error
+            return result
+        end if
+
+        meta = response.json.meta
+        if meta = invalid
+            result.error = "meta response missing meta"
+            return result
+        end if
+        if metaType = "series" and (meta.videos = invalid or meta.videos.Count() = 0)
+            result.error = "series meta missing videos"
+            return result
+        end if
+
+        result.meta = meta
+        result.ok = true
+        return result
+    end function
+
+    ' Sorted list of the distinct season numbers in a series meta.
+    function Seasons(meta as object) as object
+        seasons = []
+        if meta = invalid or meta.videos = invalid then return seasons
+        for each video in meta.videos
+            if video.season <> invalid
+                season = video.season
+                found = false
+                for each existing in seasons
+                    if existing = season then found = true
+                end for
+                if not found then seasons.Push(season)
+            end if
+        end for
+        seasons.Sort()
+        return seasons
+    end function
+
+    function EpisodesForSeason(meta as object, season as integer) as object
+        episodes = []
+        if meta = invalid or meta.videos = invalid then return episodes
+        for each video in meta.videos
+            if video.season <> invalid and video.season = season then episodes.Push(video)
+        end for
+        return episodes
+    end function
+
+    ' "{imdbId}:{season}:{episode}" — the video id stream add-ons resolve.
+    function ResolveVideoId(seriesId as string, season as integer, episode as integer) as string
+        return seriesId + ":" + season.ToStr() + ":" + episode.ToStr()
+    end function
+end class

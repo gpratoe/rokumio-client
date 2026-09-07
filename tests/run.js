@@ -21,7 +21,14 @@ async function writeCombinedScript() {
     const fs = require('fs');
     const parts = [
         'tests/harness.brs',
+        'tests/mocks.brs',
         'tests/screenstack.test.brs',
+        'tests/transport.test.brs',
+        'tests/settingsstore.test.brs',
+        'tests/authstore.test.brs',
+        'tests/addonsstore.test.brs',
+        'tests/catalogstore.test.brs',
+        'tests/episodesstore.test.brs',
         'tests/_run.brs'
     ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });
@@ -30,7 +37,13 @@ async function writeCombinedScript() {
 
 const transpiled = [
     path.join(stagingDir, 'source', 'bslib.brs'),
-    path.join(stagingDir, 'source', 'core', 'ScreenStack.brs')
+    path.join(stagingDir, 'source', 'core', 'ScreenStack.brs'),
+    path.join(stagingDir, 'source', 'stores', 'Transport.brs'),
+    path.join(stagingDir, 'source', 'stores', 'SettingsStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'AuthStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'AddonsStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'CatalogStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs')
 ];
 
 function checkScreenContract() {
