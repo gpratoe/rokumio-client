@@ -1,0 +1,13 @@
+{
+    "rootDir": ".",
+    "files": [
+        "manifest",
+        "source/**/*.*",
+        "components/**/*.*",
+        "images/**/*.*"
+    ],
+    "stagingDir": "out",
+    "createPackage": true,
+    "outFile": "dist/rokumio-client.zip",
+    "sourceMap": false
+}

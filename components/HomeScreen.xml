@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="HomeScreen" extends="Group">
+    <script type="text/brightscript" uri="pkg:/components/HomeScreen.brs" />
+
+    <children>
+        <Rectangle width="1920" height="1080" color="0x0A0F0CFF" />
+        <Label
+            id="homeTitle"
+            translation="[80, 80]"
+            width="1760"
+            height="70"
+            text="Rokumio"
+            font="font:LargeBoldSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            translation="[80, 170]"
+            width="1760"
+            height="40"
+            text="Home — M0 skeleton. Poster rows land in M3."
+            font="font:SmallSystemFont"
+            color="0x8FA399FF" />
+    </children>
+</component>

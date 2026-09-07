@@ -1,0 +1,30 @@
+' Screen contract.
+'
+' Every screen in the app is a SceneGraph component (extends Group) that owns
+' its whole visible surface and its own onKeyEvent. Roku screens cannot extend
+' a BrightScript class, so the contract is enforced by convention and invoked
+' by the ScreenStack through callFunc on the node:
+'
+'   function OnEnter(params as object)  - called when the screen is pushed or
+'                                         restored; params is invalid when it is
+'                                         only being uncovered by a pop.
+'   function OnExit()                   - called when the screen is popped.
+'   function OnBackPressed() as boolean - true means the screen swallowed Back
+'                                         (e.g. a backdrop or dialog inside it);
+'                                         false lets the stack pop the screen.
+'   function BlurFocus()                - drop any inline focus the screen holds
+'                                         (chips, secondary lists) so a blurred
+'                                         node never eats OK/arrow keys again.
+'
+' Rules screens follow:
+'   - screen-level keys are their own; cross-screen navigation happens ONLY by
+'     publishing an action / calling the stack, never by driving a sibling.
+'   - inline controls (chip rows, season tabs) exit via Back or Down; they are
+'     not navigation modes.
+'   - the scene dispatches actions; it never re-dispatches list itemSelected.
+
+' Debug identity helper: report a screen node without touching node fields.
+function ScreenDebugName(node as object) as string
+    if node = invalid then return "<invalid>"
+    return node.id
+end function

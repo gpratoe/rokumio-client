@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+    <interface>
+        <field id="exitApp" type="boolean" alwaysNotify="true" value="false" />
+        <function name="Start" />
+    </interface>
+
+    <!-- Core + stores are included once here; Roku loads them for the whole
+         subtree, so every screen component sees them. -->
+    <script type="text/brightscript" uri="pkg:/source/core/Screen.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/ScreenStack.bs" />
+    <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+
+    <children>
+        <Group id="uiRoot">
+            <!-- Everything inside uiRoot is authored in 1920x1080 design space.
+                 Screens are children of uiRoot; the stack shows one at a time. -->
+            <Rectangle id="background" width="1920" height="1080" color="0x0A0F0CFF" />
+
+            <HomeScreen id="homeScreen" />
+        </Group>
+    </children>
+</component>

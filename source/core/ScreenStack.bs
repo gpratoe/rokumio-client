@@ -1,0 +1,82 @@
+' Thin screen stack over the Scene's child components.
+'
+' Screens are declared declaratively as children of MainScene and looked up by
+' node id. Only one is visible and focused at a time; every transition blurs
+' the outgoing screen so an un-blurred list can never eat OK/arrow keys again.
+'
+' Back is routed by MainScene: the top screen gets it first via OnBackPressed;
+' if it returns false and there is more than one screen on the stack, this pops.
+
+class ScreenStack
+    scene as object
+    entries as object
+
+    sub new(scene as object)
+        m.scene = scene
+        m.entries = []
+    end sub
+
+    function count() as integer
+        return m.entries.Count()
+    end function
+
+    function top() as dynamic
+        if m.entries.Count() = 0 then return invalid
+        return m.entries[m.entries.Count() - 1]
+    end function
+
+    function has(screenId as string) as boolean
+        for each entry in m.entries
+            if entry.id = screenId then return true
+        end for
+        return false
+    end function
+
+    sub push(screenId as string, params = invalid as dynamic)
+        shown = m.top()
+        if shown <> invalid
+            shown.node.visible = false
+            shown.node.callFunc("BlurFocus")
+        end if
+
+        node = m.scene.FindNode(screenId)
+        if node = invalid then return
+
+        m.entries.Push({ id: screenId, node: node })
+        node.visible = true
+        node.callFunc("OnEnter", params)
+        node.SetFocus(true)
+    end sub
+
+    function pop() as boolean
+        if m.entries.Count() <= 1 then return false
+
+        removed = m.entries.Pop()
+        removed.node.visible = false
+        removed.node.callFunc("BlurFocus")
+        removed.node.callFunc("OnExit")
+
+        shown = m.top()
+        if shown <> invalid
+            shown.node.visible = true
+            shown.node.callFunc("OnEnter", invalid)
+            shown.node.SetFocus(true)
+        end if
+        return true
+    end function
+
+    function onBackPressed() as boolean
+        shown = m.top()
+        if shown = invalid then return false
+        handled = shown.node.callFunc("OnBackPressed")
+        return handled = true
+    end function
+
+    function popTo(screenId as string) as boolean
+        while m.count() > 0
+            if m.top().id = screenId then return true
+            m.pop()
+        end while
+        return false
+    end function
+end class
