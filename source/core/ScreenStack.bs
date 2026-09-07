@@ -32,10 +32,13 @@ class ScreenStack
         return false
     end function
 
-    sub push(screenId as string, params = invalid as dynamic)
+    sub push(screenId as string, params = invalid as dynamic, modal = false as boolean)
         shown = m.top()
         if shown <> invalid
-            shown.node.visible = false
+            ' A non-modal push hides the outgoing screen. A modal push keeps it
+            ' visible (dimmed by the modal's own scrim) but still blurs it, so
+            ' the underlying screen can never eat keys while the modal is up.
+            if not modal then shown.node.visible = false
             shown.node.callFunc("BlurFocus")
         end if
 
@@ -44,8 +47,8 @@ class ScreenStack
 
         m.entries.Push({ id: screenId, node: node })
         node.visible = true
-        node.callFunc("OnEnter", params)
         node.SetFocus(true)
+        node.callFunc("OnEnter", params)
     end sub
 
     function pop() as boolean
@@ -59,8 +62,8 @@ class ScreenStack
         shown = m.top()
         if shown <> invalid
             shown.node.visible = true
-            shown.node.callFunc("OnEnter", invalid)
             shown.node.SetFocus(true)
+            shown.node.callFunc("OnEnter", invalid)
         end if
         return true
     end function
@@ -68,13 +71,13 @@ class ScreenStack
     function onBackPressed() as boolean
         shown = m.top()
         if shown = invalid then return false
-        handled = shown.node.callFunc("OnBackPressed")
-        return handled = true
+        return shown.node.callFunc("OnBackPressed") = true
     end function
 
     function popTo(screenId as string) as boolean
         while m.count() > 0
             if m.top().id = screenId then return true
+            if m.count() = 1 then return false
             m.pop()
         end while
         return false

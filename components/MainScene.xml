@@ -17,7 +17,12 @@
                  Screens are children of uiRoot; the stack shows one at a time. -->
             <Rectangle id="background" width="1920" height="1080" color="0x0A0F0CFF" />
 
-            <HomeScreen id="homeScreen" />
+            <HomeScreen id="homeScreen" visible="false" />
+            <DummyDetail id="dummyDetail" visible="false" />
+
+            <!-- Scene-owned system UI: the confirm-exit dialog. Screens stay
+                 ignorant of the Scene's exit policy. -->
+            <ConfirmExitDialog id="confirmExitDialog" visible="false" />
         </Group>
     </children>
 </component>

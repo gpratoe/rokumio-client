@@ -1,23 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="HomeScreen" extends="Group">
+    <interface>
+        <!-- The one action Home reports upward: a push request. The Scene
+             observes it and calls ScreenStack.push with a target + params. -->
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+
+        <!-- Screen contract: called by ScreenStack for show/hide/focus/back.
+             callFunc only runs for functions declared in the interface. -->
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
     <script type="text/brightscript" uri="pkg:/components/HomeScreen.brs" />
 
     <children>
-        <Rectangle width="1920" height="1080" color="0x0A0F0CFF" />
+        <Rectangle id="homeBg" width="1920" height="1080" color="0x0A0F0CFF" />
         <Label
             id="homeTitle"
-            translation="[80, 80]"
+            translation="[80, 48]"
             width="1760"
             height="70"
             text="Rokumio"
             font="font:LargeBoldSystemFont"
             color="0x2BD675FF" />
         <Label
-            translation="[80, 170]"
+            id="homeSub"
+            translation="[80, 128]"
             width="1760"
             height="40"
-            text="Home — M0 skeleton. Poster rows land in M3."
+            text="M1 focus spike — move up/down between rows, left/right across posters, OK to push"
             font="font:SmallSystemFont"
             color="0x8FA399FF" />
+
+        <!-- Poster rows: a single RowList owns the whole grid physics (vertical
+             row scrolling/clipping, horizontal per-row tiles, row labels). Each
+             item renders as a PosterTile component. Content is set in code. -->
+        <RowList
+            id="catalog"
+            translation="[80, 210]"
+            numRows="2"
+            itemSize="[1760, 400]"
+            itemSpacing="[0, 8]"
+            rowItemSize="[[270, 378]]"
+            rowItemSpacing="[[18, 0]]"
+            showRowLabel="[true]"
+            rowLabelOffset="[0, 0]"
+            rowLabelFont="font:MediumBoldSystemFont"
+            rowLabelTextColor="0x8FA399FF"
+            drawFocusFeedback="false"
+            itemComponentName="PosterTile" />
     </children>
 </component>
