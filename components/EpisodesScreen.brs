@@ -14,6 +14,7 @@
 
 sub init()
     m.epName = m.top.FindNode("epName")
+    m.bgPoster = m.top.FindNode("bgPoster")
     m.epTitle = m.top.FindNode("epTitle")
     m.epDesc = m.top.FindNode("epDesc")
     m.epList = m.top.FindNode("epList")
@@ -40,6 +41,10 @@ function OnEnter(params as object) as void
     name = m.meta.name
     if name = invalid then name = ""
     m.epName.text = name
+
+    bg = m.meta.background
+    if bg = invalid then bg = ""
+    m.bgPoster.uri = bg
 
     BuildList()
 end function

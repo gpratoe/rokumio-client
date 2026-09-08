@@ -173,7 +173,7 @@ sub OpenEpisodes()
         screen: "episodesScreen"
         params: {
             addonAddress: m.addonAddress
-            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster }
+            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, background: m.meta.background }
             resume: m.resume
         }
     }

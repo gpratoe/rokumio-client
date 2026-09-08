@@ -19,6 +19,8 @@
 
     <children>
         <Rectangle id="epBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
+        <Rectangle id="bgScrim" width="1920" height="1080" color="0x0A0F0C99" />
 
         <!-- Header: series name, then the focused episode's label and synopsis. -->
         <Label
