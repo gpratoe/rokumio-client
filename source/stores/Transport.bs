@@ -1,17 +1,29 @@
 ' Transport — synchronous roUrlTransfer wrapper.
 '
 ' Transport is the only store that touches Roku's networking primitives. Real
-' requests go through a synchronous HTTP client (roUrlTransfer GetToString /
-' PostFromString); tests inject a fake client so every store, Transport itself
-' included, runs in the brs interpreter with no device calls.
+' requests go through a blocking HTTP client (roUrlTransfer async calls parked
+' on a message port with Wait); tests inject a fake client so every store,
+' Transport itself included, runs in the brs interpreter with no device calls.
 '
 ' The client seam returns a raw result { ok, status, body, error }. Transport
 ' normalizes that into { ok, status, json, error }: it parses the body as JSON
 ' and treats an unparseable body on an otherwise-successful response as a
 ' failure. Stores read result.json and never care where the bytes came from.
+'
+' Helpers live as instance methods: Roku scopes user-defined global functions
+' per component, so a bare global called from a method that is invoked from
+' another component's code resolves to invalid (call of a non-function). Only
+' the platform's own globals (CreateObject, Wait, ParseJson, ...) resolve from
+' any scope; anything user-defined must be reachable through m.
+
+const REQUEST_TIMEOUT_MS = 15000
 
 ' The real client. Serializes a body assocarray to JSON and issues a blocking
-' GET or POST over roUrlTransfer.
+' GET or POST over roUrlTransfer. The transfer runs async and Wait parks this
+' thread until its roUrlEvent lands: the synchronous GetToString/PostFromString
+' entry points discard the response code (and roUrlTransfer no longer exposes
+' GetResponseCode), while the async path surfaces both the body
+' (roUrlEvent.GetString) and the status (roUrlEvent.GetResponseCode).
 function CreateSyncHttpClient() as object
     client = {}
     client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
@@ -19,53 +31,49 @@ function CreateSyncHttpClient() as object
         transfer = CreateObject("roUrlTransfer")
         transfer.SetUrl(url)
         if headers <> invalid then transfer.SetHeaders(headers)
-        response = ""
+        transfer.RetainBodyOnError(true)
+        port = CreateObject("roMessagePort")
+        transfer.SetMessagePort(port)
+
+        issued = false
         if method = "POST"
             payload = ""
             if body <> invalid then payload = FormatJson(body)
-            response = transfer.PostFromString(payload)
+            issued = transfer.AsyncPostFromString(payload)
         else
-            response = transfer.GetToString()
+            issued = transfer.AsyncGetToString()
         end if
-        result.body = response
-        result.status = transfer.GetResponseCode()
+        if not issued
+            result.error = "request could not be issued"
+            return result
+        end if
+
+        event = Wait(REQUEST_TIMEOUT_MS, port)
+        if event = invalid
+            transfer.AsyncCancel()
+            result.error = "request timed out"
+            return result
+        end if
+        if Type(event) <> "roUrlEvent"
+            result.error = "unexpected port message"
+            return result
+        end if
+
+        result.body = event.GetString()
+        result.status = event.GetResponseCode()
         result.ok = result.status >= 200 and result.status < 300
-        if not result.ok then result.error = "HTTP " + result.status.ToStr()
+        if not result.ok
+            if result.status < 0
+                reason = event.GetFailureReason()
+                if reason = invalid or reason = "" then reason = "transfer failed"
+                result.error = reason
+            else
+                result.error = "HTTP " + result.status.ToStr()
+            end if
+        end if
         return result
     end function
     return client
-end function
-
-' Normalize a raw client result into the transport result: parse JSON when the
-' body is non-empty, and demote a 2xx with a broken body to a failure.
-function TransportResult(raw as object) as object
-    result = {
-        ok: raw.ok
-        status: raw.status
-        json: invalid
-        error: raw.error
-    }
-    body = raw.body
-    if body <> invalid and body <> ""
-        parsed = MatchedJson(body)
-        if parsed = invalid
-            result.ok = false
-            result.error = "invalid JSON response"
-        end if
-        result.json = parsed
-    end if
-    return result
-end function
-
-' Parse is a guard around ParseJson: the Roku runtime throws on malformed input
-' rather than returning invalid, and Transport must turn that into a clean
-' failure instead of a crash.
-function MatchedJson(body as string) as dynamic
-    try
-        return ParseJson(body)
-    catch e
-        return invalid
-    end try
 end function
 
 class Transport
@@ -77,10 +85,42 @@ class Transport
     end sub
 
     function Get(url as string, headers = invalid as dynamic) as object
-        return TransportResult(m.client.request("GET", url, headers, invalid))
+        return m.Result(m.client.request("GET", url, headers, invalid))
     end function
 
     function Post(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
-        return TransportResult(m.client.request("POST", url, headers, body))
+        return m.Result(m.client.request("POST", url, headers, body))
+    end function
+
+    ' Normalize a raw client result into the transport result: parse JSON when
+    ' the body is non-empty, and demote a 2xx with a broken body to a failure.
+    function Result(raw as object) as object
+        result = {
+            ok: raw.ok
+            status: raw.status
+            json: invalid
+            error: raw.error
+        }
+        body = raw.body
+        if body <> invalid and body <> ""
+            parsed = m.Parse(body)
+            if parsed = invalid
+                result.ok = false
+                result.error = "invalid JSON response"
+            end if
+            result.json = parsed
+        end if
+        return result
+    end function
+
+    ' Parse is a guard around ParseJson: the Roku runtime throws on malformed
+    ' input rather than returning invalid, and Transport must turn that into a
+    ' clean failure instead of a crash.
+    function Parse(body as string) as dynamic
+        try
+            return ParseJson(body)
+        catch e
+            return invalid
+        end try
     end function
 end class

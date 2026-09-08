@@ -6,8 +6,10 @@
 ' dimming. Each row item is a PosterTile (see its interface fields). OK on a
 ' poster publishes one pushRequest; the Scene does the stack work.
 '
-' M3 replaces the placeholder rows with real catalog data; the list mechanics
-' stay.
+' Rows are served by the addon stores: each addon's manifest is resolved on
+' demand, then every advertised catalog is fetched and rendered as a row. Rows
+' that fail to load are skipped; on total failure the grid stays empty so a
+' break in the fetch pipeline is unambiguous.
 '
 ' Content is built lazily on first OnEnter, not in init(): init runs during
 ' CreateScene, before screen.Show(), and nodes created pre-Show can be dropped
@@ -17,30 +19,88 @@ sub init()
     m.catalog = m.top.FindNode("catalog")
     m.catalog.ObserveField("rowItemSelected", "onRowItemSelected")
     m.rowsBuilt = false
-    m.rowsData = [
-        { title: "Continue Watching", names: ["Dune: Part Two", "Severance", "The Bear", "Shogun", "Silo", "Hacks", "True Detective", "Cunk on Earth"] }
-        { title: "Because you watched Blade Runner", names: ["Ex Machina", "Arrival", "Her", "Oppenheimer", "The Creator", "Gattaca", "Moon", "Annihilation"] }
-        { title: "Top Movies", names: ["Parasite", "Everything Everywhere", "Interstellar", "Whiplash", "Mad Max: Fury Road", "The Revenant", "Come and See", "Yi Yi"] }
-    ]
+    m.rows = []
 end sub
 
+' Stores are class instances, which cannot cross components through an interface
+' field, so the Scene hands them over with callFunc instead.
+function SetStores(stores as object) as void
+    m.stores = stores
+end function
+
+' Collect {addonAddress, type, catalogId, name} for every advertised catalog.
+' Built-ins carry catalogs = invalid until their manifest is fetched, so the
+' manifest is resolved here on demand; addons serving no catalogs (e.g.
+' OpenSubtitles v3) contribute nothing.
+function ResolveCatalogs() as object
+    catalogs = []
+    for each addon in m.stores.addons.GetAll()
+        list = addon.catalogs
+        if list = invalid or Type(list) <> "roArray"
+            result = m.stores.catalog.Manifest(addon.address)
+            if result.ok and result.manifest.catalogs <> invalid then list = result.manifest.catalogs
+        end if
+        if list <> invalid and Type(list) = "roArray"
+            for each catalog in list
+                catalogs.Push({
+                    addonAddress: addon.address
+                    type: catalog.type
+                    catalogId: catalog.id
+                    name: catalog.name
+                })
+            end for
+        end if
+    end for
+    return catalogs
+end function
+
 ' One content tree for the whole list: a child per row (its `title` becomes the
-' row label) with one item child per poster. Item titles keep the
-' "R{row}C{col}:{name}" form that PosterTile uses for its label.
+' row label) with one item child per poster. Items carry the artwork through
+' hdPosterUrl (mapped from the addon meta's poster field). Catalog names repeat
+' across meta types ("Popular" for both movies and series), so a name that
+' occurs more than once is disambiguated with its type label.
 sub BuildRows()
+    for each catalog in ResolveCatalogs()
+        response = m.stores.catalog.Catalog(catalog.addonAddress, catalog.type, catalog.catalogId)
+        if response.ok and response.metas <> invalid and response.metas.Count() > 0
+            m.rows.Push({ title: catalog.name, metaType: catalog.type, metas: response.metas })
+        end if
+    end for
+
+    counts = {}
+    for each row in m.rows
+        count = counts[row.title]
+        if count = invalid then count = 0
+        counts[row.title] = count + 1
+    end for
+
     content = CreateObject("roSGNode", "ContentNode")
-    for r = 0 to m.rowsData.Count() - 1
-        data = m.rowsData[r]
+    for r = 0 to m.rows.Count() - 1
         row = content.CreateChild("ContentNode")
-        row.title = data.title
-        for c = 0 to 7
+        label = m.rows[r].title
+        if counts[label] > 1 then label = label + " " + TypeLabel(m.rows[r].metaType)
+        row.title = label
+        metas = m.rows[r].metas
+        for c = 0 to metas.Count() - 1
             item = row.CreateChild("ContentNode")
-            item.title = "R" + r.ToStr() + "C" + c.ToStr() + ":" + data.names[c mod data.names.Count()]
+            name = metas[c].name
+            if name = invalid then name = ""
+            item.title = name
+            poster = metas[c].poster
+            if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
         end for
     end for
     m.catalog.content = content
+    if m.rows.Count() > 0 then m.catalog.numRows = m.rows.Count()
     m.rowsBuilt = true
 end sub
+
+' Row-label suffix for duplicated catalog names.
+function TypeLabel(metaType as string) as string
+    if metaType = "movie" then return "Movies"
+    if metaType = "series" then return "Series"
+    return metaType
+end function
 
 function OnEnter(params as object) as void
     if not m.rowsBuilt then BuildRows()
@@ -65,15 +125,16 @@ sub onRowItemSelected(event as object)
     if data = invalid or data.Count() < 2 then return
     row = data[0]
     index = data[1]
-    if row < 0 or index < 0 then return
-    names = m.rowsData[row].names
-    name = names[index mod names.Count()]
+    if row < 0 or index < 0 or m.stores = invalid then return
+    if row >= m.rows.Count() then return
+    metas = m.rows[row].metas
+    if index >= metas.Count() then return
     m.top.pushRequest = {
         screen: "dummyDetail"
         params: {
             row: row
             index: index
-            title: name
+            title: metas[index].name
         }
     }
 end sub

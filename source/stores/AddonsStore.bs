@@ -8,44 +8,14 @@
 '
 ' Persistence is a single registry key "addons" (FormatJson of an AA keyed by
 ' addon id). Records are plain data only — FormatJson drops unsupported values.
+'
+' Helpers live as instance methods, not file-scope functions: Roku scopes global
+' functions per component, so a bare global called from a method that gets
+' invoked from another component's code would resolve to invalid (call of a
+' non-function). Anything the instance needs must be reachable through m.
 
 const CINEMETA_ADDRESS = "https://v3-cinemeta.strem.io"
 const OPENSUBTITLES_V3_ADDRESS = "https://opensubtitles-v3.strem.io"
-
-' A missing AA key reads back as invalid in BrightScript, so this stands in for
-' roAssociativeArray.DidExist (which the brs interpreter does not implement).
-function AA_HasKey(aa as object, key as string) as boolean
-    if aa = invalid then return false
-    return aa[key] <> invalid
-end function
-
-' The two protected built-in add-ons. Their catalogs/types are unknown until a
-' manifest is fetched (CatalogStore.Manifest), so only the stable identity and
-' address are seeded here.
-function AddonStore_BuiltIns() as object
-    return {
-        "com.linvo.cinemeta": {
-            id: "com.linvo.cinemeta"
-            name: "Cinemeta"
-            address: CINEMETA_ADDRESS
-            version: ""
-            types: ["movie", "series"]
-            catalogs: invalid
-            resources: ["catalog", "meta"]
-            builtin: true
-        }
-        "org.stremio.opensubtitlesv3": {
-            id: "org.stremio.opensubtitlesv3"
-            name: "OpenSubtitles v3"
-            address: OPENSUBTITLES_V3_ADDRESS
-            version: ""
-            types: ["movie", "series"]
-            catalogs: []
-            resources: ["subtitles"]
-            builtin: true
-        }
-    }
-end function
 
 class AddonsStore
     transport as object
@@ -58,6 +28,42 @@ class AddonsStore
         m.installed = {}
         m.Load()
     end sub
+
+    ' A missing AA key reads back as invalid in BrightScript, so this stands in
+    ' for roAssociativeArray.DidExist (which the brs interpreter does not
+    ' implement).
+    function HasKey(aa as object, key as string) as boolean
+        if aa = invalid then return false
+        return aa[key] <> invalid
+    end function
+
+    ' The two protected built-in add-ons. Their catalogs/types are unknown until a
+    ' manifest is fetched (CatalogStore.Manifest), so only the stable identity and
+    ' address are seeded here.
+    function BuiltIns() as object
+        return {
+            "com.linvo.cinemeta": {
+                id: "com.linvo.cinemeta"
+                name: "Cinemeta"
+                address: CINEMETA_ADDRESS
+                version: ""
+                types: ["movie", "series"]
+                catalogs: invalid
+                resources: ["catalog", "meta"]
+                builtin: true
+            }
+            "org.stremio.opensubtitlesv3": {
+                id: "org.stremio.opensubtitlesv3"
+                name: "OpenSubtitles v3"
+                address: OPENSUBTITLES_V3_ADDRESS
+                version: ""
+                types: ["movie", "series"]
+                catalogs: []
+                resources: ["subtitles"]
+                builtin: true
+            }
+        }
+    end function
 
     ' Fetch {address}/manifest.json and register the addon. Returns a record
     ' keyed by the manifest id, or an error when the manifest is missing its
@@ -100,7 +106,7 @@ class AddonsStore
     ' Remove an installed add-ons. Built-ins are protected and always refused.
     function Uninstall(id as string) as boolean
         if m.IsBuiltin(id) then return false
-        if AA_HasKey(m.installed, id)
+        if m.HasKey(m.installed, id)
             m.installed.Delete(id)
             m.Save()
             return true
@@ -111,16 +117,16 @@ class AddonsStore
     ' An installed add-ons wins over a built-in with the same id (e.g. a
     ' self-hosted mirror of an official add-on).
     function Get(id as string) as dynamic
-        if AA_HasKey(m.installed, id) then return m.installed[id]
-        builtins = AddonStore_BuiltIns()
-        if AA_HasKey(builtins, id) then return builtins[id]
+        if m.HasKey(m.installed, id) then return m.installed[id]
+        builtins = m.BuiltIns()
+        if m.HasKey(builtins, id) then return builtins[id]
         return invalid
     end function
 
     ' Built-ins first, then installed add-ons.
     function GetAll() as object
         list = []
-        builtins = AddonStore_BuiltIns()
+        builtins = m.BuiltIns()
         for each id in builtins
             list.Push(builtins[id])
         end for
@@ -131,12 +137,12 @@ class AddonsStore
     end function
 
     function IsBuiltin(id as string) as boolean
-        return AA_HasKey(AddonStore_BuiltIns(), id)
+        return m.HasKey(m.BuiltIns(), id)
     end function
 
     ' Flat list of the catalogs each add-on advertises — the Home row source.
     ' Built-ins that have not had a manifest fetched yet carry catalogs = invalid
-    ' and contribute nothing until M3 resolves manifests on demand.
+    ' and contribute nothing until the Home screen resolves manifests on demand.
     function Catalogs() as object
         list = []
         for each addon in m.GetAll()

@@ -33,6 +33,7 @@ sub init()
         catalog: m.catalogStore
         episodes: m.episodesStore
     }
+    m.homeScreen.callFunc("SetStores", m.stores)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
