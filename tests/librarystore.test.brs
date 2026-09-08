@@ -55,6 +55,24 @@ sub Test_Library_RemovePosition()
     Harness_Ok(not store.RemovePosition("tt0133093"), "remove missing position is false")
 end sub
 
+sub Test_Library_ResumeFor()
+    Harness_Suite("LibraryStore.ResumeFor returns the most recent entry for a meta")
+    store = LibraryStore(MockRegistry())
+    Harness_Ok(store.ResumeFor("tt0000000") = invalid, "nothing watched is invalid")
+    Harness_Ok(store.ResumeFor("") = invalid, "blank id is invalid")
+
+    store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix")
+    store.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot")
+    store.SetPosition("tt1234567:2:1", "tt1234567", "series", 2, 1, "Cool Hand Luke")
+
+    resume = store.ResumeFor("tt1234567")
+    Harness_Ok(resume <> invalid, "found an entry")
+    Harness_Equal(resume.videoId, "tt1234567:2:1", "most recent episode wins")
+    Harness_Equal(resume.season, 2, "season carried")
+    Harness_Equal(resume.episode, 1, "episode carried")
+    Harness_Ok(store.ResumeFor("tt0133093").videoId = "tt0133093", "movie entry found")
+end sub
+
 sub Test_Library_PersistsViaRegistry()
     Harness_Suite("LibraryStore persists saved + positions across reloads")
     registry = MockRegistry()

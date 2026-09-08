@@ -114,6 +114,21 @@ class LibraryStore
         return m.SortBySeqDesc(items)
     end function
 
+    ' The most recent continue-watching entry for one series/movie, or invalid
+    ' when nothing has been watched. Details uses this to resurrect a resume
+    ' hint for episodes opened straight from a catalog row.
+    function ResumeFor(metaId as string) as dynamic
+        if metaId = "" then return invalid
+        best = invalid
+        for each videoId in m.positions
+            entry = m.positions[videoId]
+            if entry.metaId = metaId and (best = invalid or entry.seq > best.seq)
+                best = entry
+            end if
+        end for
+        return best
+    end function
+
     function RemovePosition(videoId as string) as boolean
         if m.HasKey(m.positions, videoId)
             m.positions.Delete(videoId)

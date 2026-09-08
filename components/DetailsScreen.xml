@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="DetailsScreen" extends="Group">
+    <interface>
+        <!-- The one action Details reports upward: a push request (movie Play,
+             series Resume / "Episodes" → EpisodesScreen). The Scene observes
+             it and routes to the stack. Stores are class instances and cannot
+             cross components through a field, so they arrive via callFunc. -->
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+
+        <!-- Screen contract: called by ScreenStack for show/hide/focus/back. -->
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/DetailsScreen.brs" />
+
+    <children>
+        <Rectangle id="detailsBg" width="1920" height="1080" color="0x0A0F0CFF" />
+
+        <!-- Hero: left poster, right name/type/description. -->
+        <Poster id="heroPoster" translation="[80, 120]" width="360" height="510" failBackgroundColor="0x0B110DFF" />
+        <Label
+            id="detailName"
+            translation="[520, 140]"
+            width="1320"
+            height="90"
+            font="font:LargeBoldSystemFont"
+            color="0xE9F2ECFF" />
+        <Label
+            id="detailType"
+            translation="[520, 248]"
+            width="1320"
+            height="40"
+            font="font:MediumSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="detailDesc"
+            translation="[520, 306]"
+            width="1160"
+            height="260"
+            wrap="true"
+            vertAlign="top"
+            font="font:SmallSystemFont"
+            color="0x8FA399FF" />
+
+        <!-- Series: a Resume chip (when a position exists) + "Episodes".
+             Movie: action buttons (Play / add to library). Exactly one of the
+             two is visible at a time. -->
+        <RowList
+            id="seriesRow"
+            translation="[80, 620]"
+            itemSize="[1320, 56]"
+            itemSpacing="[0, 8]"
+            numRows="1"
+            rowItemSize="[[260, 56]]"
+            rowItemSpacing="[[12, 0]]"
+            showRowLabel="false"
+            drawFocusFeedback="false"
+            itemComponentName="ChipTile" />
+
+        <RowList
+            id="actionRow"
+            translation="[520, 660]"
+            itemSize="[1040, 120]"
+            itemSpacing="[0, 8]"
+            numRows="1"
+            rowItemSize="[[240, 56]]"
+            rowItemSpacing="[[16, 0]]"
+            showRowLabel="false"
+            drawFocusFeedback="false"
+            itemComponentName="ChipTile" />
+    </children>
+</component>

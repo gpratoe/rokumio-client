@@ -33,7 +33,7 @@
             translation="[80, 128]"
             width="1760"
             height="40"
-            text="M1 focus spike — move up/down between rows, left/right across posters, OK to push"
+            text="Move between rows, OK for details, Back to exit"
             font="font:SmallSystemFont"
             color="0x8FA399FF" />
 

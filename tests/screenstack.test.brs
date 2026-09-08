@@ -121,7 +121,23 @@ sub Test_Push_UnknownScreen()
     scene = MockScene({}, log)
     stack = ScreenStack(scene)
     stack.push("ghost", invalid)
-    Harness_Equal(stack.count(), 0, "nothing pushed")
+    Harness_Equal(stack.count(), 0, "nothing pushed on empty stack")
+end sub
+
+sub Test_Push_UnknownScreenLeavesCurrentAlone()
+    Harness_Suite("ScreenStack.push unknown screen leaves the current screen untouched")
+    log = []
+    screens = { home: MockNode("home", log) }
+    scene = MockScene(screens, log)
+    stack = ScreenStack(scene)
+
+    stack.push("home", invalid)
+    stack.push("ghost", { pick: 3 })
+
+    Harness_Equal(stack.count(), 1, "unknown push leaves the stack untouched")
+    Harness_Ok(screens.home.visible, "current screen stays visible")
+    Harness_Ok(Test_FindCall(log, "home", "BlurFocus") = invalid, "current screen not blurred")
+    Harness_Ok(Test_FindCall(log, "ghost", "OnEnter") = invalid, "ghost never entered")
 end sub
 
 sub Test_Pop_RefusesOnSingle()

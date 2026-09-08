@@ -11,6 +11,16 @@ sub init()
     m.homeScreen = m.top.FindNode("homeScreen")
     m.homeScreen.ObserveField("pushRequest", "onHomeAction")
 
+    ' Details pushes its own actions (episode selection, movie Play) up through
+    ' the same one-action channel Home uses.
+    m.detailsScreen = m.top.FindNode("detailsScreen")
+    m.detailsScreen.ObserveField("pushRequest", "onDetailsAction")
+
+    ' EpisodesScreen (the series episode browser) reports episode selections
+    ' through the same one-action channel.
+    m.episodesScreen = m.top.FindNode("episodesScreen")
+    m.episodesScreen.ObserveField("pushRequest", "onEpisodesAction")
+
     ' Bottom-of-stack Back pushes the confirm-exit dialog; the dialog's
     ' closeRequest is how it asks the Scene to dismiss it.
     m.confirmExit = m.top.FindNode("confirmExitDialog")
@@ -38,12 +48,28 @@ sub init()
         playback: m.playbackStore
     }
     m.homeScreen.callFunc("SetStores", m.stores)
+    m.detailsScreen.callFunc("SetStores", m.stores)
+    m.episodesScreen.callFunc("SetStores", m.stores)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
 ' No business logic — the Scene stays a thin orchestrator.
 sub onHomeAction()
     request = m.homeScreen.pushRequest
+    if request = invalid or request.screen = invalid then return
+    m.stack.push(request.screen, request.params)
+end sub
+
+' Details' action channel; same one-action routing.
+sub onDetailsAction()
+    request = m.detailsScreen.pushRequest
+    if request = invalid or request.screen = invalid then return
+    m.stack.push(request.screen, request.params)
+end sub
+
+' EpisodesScreen's action channel; same one-action routing.
+sub onEpisodesAction()
+    request = m.episodesScreen.pushRequest
     if request = invalid or request.screen = invalid then return
     m.stack.push(request.screen, request.params)
 end sub

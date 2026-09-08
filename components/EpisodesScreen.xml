@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="EpisodesScreen" extends="Group">
+    <!-- The dedicated episode browser for a series. Pushed from DetailsScreen
+         ("Episodes") with { addonAddress, meta, resume }. A Home-style RowList
+         shows one row per season (tiles are episodes); the top header tracks the
+         focused episode's "S#E# name" and synopsis. OK on an episode reports a
+         stream-push request upward. -->
+    <interface>
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/EpisodesScreen.brs" />
+
+    <children>
+        <Rectangle id="epBg" width="1920" height="1080" color="0x0A0F0CFF" />
+
+        <!-- Header: series name, then the focused episode's label and synopsis. -->
+        <Label
+            id="epName"
+            translation="[80, 48]"
+            width="1760"
+            height="70"
+            horizAlign="left"
+            font="font:LargeBoldSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="epTitle"
+            translation="[80, 128]"
+            width="1760"
+            height="40"
+            font="font:MediumBoldSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="epDesc"
+            translation="[80, 172]"
+            width="1760"
+            height="118"
+            wrap="true"
+            horizAlign="left"
+            vertAlign="top"
+            font="font:SmallSystemFont"
+            color="0x8FA399FF" />
+
+        <!-- Episode rows: one row per season, tiles are landscape EpisodeTiles.
+             Content is built in code from the series meta. -->
+        <RowList
+            id="epList"
+            translation="[80, 306]"
+            numRows="2"
+            itemSize="[1760, 230]"
+            itemSpacing="[0, 8]"
+            rowItemSize="[[320, 180]]"
+            rowItemSpacing="[[12, 0]]"
+            showRowLabel="[true]"
+            rowLabelOffset="[0, 0]"
+            rowLabelFont="font:MediumBoldSystemFont"
+            rowLabelTextColor="0x8FA399FF"
+            drawFocusFeedback="false"
+            itemComponentName="EpisodeTile" />
+    </children>
+</component>

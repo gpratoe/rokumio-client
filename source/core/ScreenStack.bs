@@ -33,6 +33,13 @@ class ScreenStack
     end function
 
     sub push(screenId as string, params = invalid as dynamic, modal = false as boolean)
+        ' Resolve the target first: a push to an unknown screen is a true no-op
+        ' that leaves the current screen visible, focused and un-blurred. (This
+        ' bit us: a bad id hid the outgoing screen before FindNode returned
+        ' invalid, leaving a blank screen with the old top still on the stack.)
+        node = m.scene.FindNode(screenId)
+        if node = invalid then return
+
         shown = m.top()
         if shown <> invalid
             ' A non-modal push hides the outgoing screen. A modal push keeps it
@@ -41,9 +48,6 @@ class ScreenStack
             if not modal then shown.node.visible = false
             shown.node.callFunc("BlurFocus")
         end if
-
-        node = m.scene.FindNode(screenId)
-        if node = invalid then return
 
         m.entries.Push({ id: screenId, node: node })
         node.visible = true

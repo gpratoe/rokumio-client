@@ -26,7 +26,8 @@
             <Rectangle id="background" width="1920" height="1080" color="0x0A0F0CFF" />
 
             <HomeScreen id="homeScreen" visible="false" />
-            <DummyDetail id="dummyDetail" visible="false" />
+            <DetailsScreen id="detailsScreen" visible="false" />
+            <EpisodesScreen id="episodesScreen" visible="false" />
 
             <!-- Scene-owned system UI: the confirm-exit dialog. Screens stay
                  ignorant of the Scene's exit policy. -->

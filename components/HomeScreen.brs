@@ -1,4 +1,4 @@
-' HomeScreen — M1 focus spike and the stack bottom.
+' HomeScreen — the stack bottom: continue watching first, then catalog rows.
 '
 ' The body is a single RowList: Roku owns the whole grid physics — vertical row
 ' scrolling/clipping (no row is ever stranded past the screen edge), horizontal
@@ -7,19 +7,23 @@
 ' poster publishes one pushRequest; the Scene does the stack work.
 '
 ' Rows are served by the addon stores: each addon's manifest is resolved on
-' demand, then every advertised catalog is fetched and rendered as a row. Rows
-' that fail to load are skipped; on total failure the grid stays empty so a
-' break in the fetch pipeline is unambiguous.
+' demand, then every advertisable catalog is fetched and rendered as a row. On
+' top sits a Continue Watching row built from the (local) LibraryStore whenever
+' the user has entries — guests included, since that state is local. Rows that
+' fail to load are skipped; on total failure the grid stays empty so a break in
+' the fetch pipeline is unambiguous.
 '
 ' Content is built lazily on first OnEnter, not in init(): init runs during
 ' CreateScene, before screen.Show(), and nodes created pre-Show can be dropped
-' by the renderer. Building post-Show keeps every dynamic node on a live branch.
+' by the renderer. The catalog rows are fetched once; the visible grid is
+' rebuilt on every OnEnter so Continue Watching reflects the latest progress.
 
 sub init()
     m.catalog = m.top.FindNode("catalog")
     m.catalog.ObserveField("rowItemSelected", "onRowItemSelected")
-    m.rowsBuilt = false
-    m.rows = []
+    m.catalogRowsBuilt = false
+    m.catalogRows = []
+    m.gridRows = []
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -79,33 +83,48 @@ function CatalogBrowsable(catalog as object) as boolean
     return true
 end function
 
-' One content tree for the whole list: a child per row (its `title` becomes the
-' row label) with one item child per poster. Items carry the artwork through
-' hdPosterUrl (mapped from the addon meta's poster field). Catalog names repeat
-' across meta types ("Popular" for both movies and series), so a name that
-' occurs more than once is disambiguated with its type label.
-sub BuildRows()
+' Fetch every advertisable catalog once. The result is the catalog-rows gallery
+' the visible grid re-renders from; network only happens on first entry.
+sub BuildCatalogRows()
     for each catalog in ResolveCatalogs()
         response = m.stores.catalog.Catalog(catalog.addonAddress, catalog.type, catalog.catalogId)
         if response.ok and response.metas <> invalid and response.metas.Count() > 0
-            m.rows.Push({ title: catalog.name, metaType: catalog.type, metas: response.metas })
+            m.catalogRows.Push({
+                addonAddress: catalog.addonAddress
+                title: catalog.name
+                metaType: catalog.type
+                metas: response.metas
+            })
         end if
+    end for
+    m.catalogRowsBuilt = true
+end sub
+
+' Assemble the visible grid: Continue Watching (when the local library has
+' entries) first, then the catalog rows. Called on every OnEnter so the CW row
+' tracks progress made since last visit.
+sub BuildRows()
+    m.gridRows = []
+    cw = LibraryRow()
+    if cw <> invalid then m.gridRows.Push(cw)
+    for each row in m.catalogRows
+        m.gridRows.Push(row)
     end for
 
     counts = {}
-    for each row in m.rows
+    for each row in m.gridRows
         count = counts[row.title]
         if count = invalid then count = 0
         counts[row.title] = count + 1
     end for
 
     content = CreateObject("roSGNode", "ContentNode")
-    for r = 0 to m.rows.Count() - 1
+    for r = 0 to m.gridRows.Count() - 1
         row = content.CreateChild("ContentNode")
-        label = m.rows[r].title
-        if counts[label] > 1 then label = label + " " + TypeLabel(m.rows[r].metaType)
+        label = m.gridRows[r].title
+        if counts[label] > 1 then label = label + " " + TypeLabel(m.gridRows[r].metaType)
         row.title = label
-        metas = m.rows[r].metas
+        metas = m.gridRows[r].metas
         for c = 0 to metas.Count() - 1
             item = row.CreateChild("ContentNode")
             name = metas[c].name
@@ -116,9 +135,40 @@ sub BuildRows()
         end for
     end for
     m.catalog.content = content
-    if m.rows.Count() > 0 then m.catalog.numRows = m.rows.Count()
-    m.rowsBuilt = true
+    if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
 end sub
+
+' The top row when the user has watched something: one tile per local
+' continue-watching entry, carrying its resume hint so Details can reopen on
+' the right spot. Items are synthesized catalog metas.
+function LibraryRow() as dynamic
+    if m.stores = invalid or m.stores.library = invalid then return invalid
+    entries = m.stores.library.ContinueWatching()
+    if entries = invalid or entries.Count() = 0 then return invalid
+    metas = []
+    for each entry in entries
+        metas.Push({
+            id: entry.metaId
+            type: entry.metaType
+            name: entry.name
+            poster: entry.poster
+            videoId: entry.videoId
+            season: entry.season
+            episode: entry.episode
+            position: entry.position
+        })
+    end for
+    return { source: "library", title: "Continue Watching", metaType: "", metas: metas }
+end function
+
+' Where the meta for a library-sourced tile comes from. The library records no
+' addon origin, so the Cinemeta built-in (the meta authority) is the default.
+function MetaAddress() as string
+    if m.stores = invalid or m.stores.addons = invalid then return ""
+    addon = m.stores.addons.Get("com.linvo.cinemeta")
+    if addon = invalid then return ""
+    return addon.address
+end function
 
 ' Row-label suffix for duplicated catalog names.
 function TypeLabel(metaType as string) as string
@@ -128,7 +178,8 @@ function TypeLabel(metaType as string) as string
 end function
 
 function OnEnter(params as object) as void
-    if not m.rowsBuilt then BuildRows()
+    if not m.catalogRowsBuilt then BuildCatalogRows()
+    BuildRows()
     m.catalog.SetFocus(true)
 end function
 
@@ -144,22 +195,41 @@ end sub
 
 ' rowItemSelected is a field observer, so this receives the roSGNodeEvent. Its
 ' data is a [row, itemIndex] pair; the selected name comes from the row's own
-' data (the tiles only know their parsed label).
+' data (the tiles only know their parsed label). A catalog tile opens Details
+' for its meta; a Continue-Watching tile adds the resume hint and points the
+' meta fetch at the Cinemeta built-in.
 sub onRowItemSelected(event as object)
     data = event.GetData()
     if data = invalid or data.Count() < 2 then return
     row = data[0]
     index = data[1]
     if row < 0 or index < 0 or m.stores = invalid then return
-    if row >= m.rows.Count() then return
-    metas = m.rows[row].metas
+    if row >= m.gridRows.Count() then return
+    metas = m.gridRows[row].metas
     if index >= metas.Count() then return
-    m.top.pushRequest = {
-        screen: "dummyDetail"
-        params: {
-            row: row
-            index: index
-            title: metas[index].name
+
+    item = metas[index]
+    if m.gridRows[row].source = "library"
+        m.top.pushRequest = {
+            screen: "detailsScreen"
+            params: {
+                addonAddress: MetaAddress()
+                meta: { id: item.id, type: item.type, name: item.name, poster: item.poster }
+                resume: {
+                    videoId: item.videoId
+                    season: item.season
+                    episode: item.episode
+                    position: item.position
+                }
+            }
         }
-    }
+    else
+        m.top.pushRequest = {
+            screen: "detailsScreen"
+            params: {
+                addonAddress: m.gridRows[row].addonAddress
+                meta: item
+            }
+        }
+    end if
 end sub
