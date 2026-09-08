@@ -64,6 +64,20 @@ function metaResponse(type, id) {
     };
 }
 
+function streamResponse(type, id) {
+    return {
+        streams: [
+            {
+                name: "Mock Torrent",
+                type: "torrent",
+                infoHash: "0123456789abcdef0123456789abcdef01234567",
+                fileIdx: 1,
+            },
+            { name: "Mock Direct", url: "http://127.0.0.1:11470/mock/file.mp4" },
+        ],
+    };
+}
+
 function createAddonServer() {
     const server = http.createServer((req, res) => {
         const path = new URL(req.url, "http://localhost").pathname;
@@ -83,6 +97,11 @@ function createAddonServer() {
         const metaMatch = path.match(/^\/meta\/([^/]+)\/([^/]+)\.json$/);
         if (req.method === "GET" && metaMatch) {
             return sendJson(res, 200, metaResponse(metaMatch[1], metaMatch[2]));
+        }
+
+        const streamMatch = path.match(/^\/stream\/([^/]+)\/([^/]+)\.json$/);
+        if (req.method === "GET" && streamMatch) {
+            return sendJson(res, 200, streamResponse(streamMatch[1], streamMatch[2]));
         }
 
         sendJson(res, 404, { error: "not found" });

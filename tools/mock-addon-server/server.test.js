@@ -94,6 +94,16 @@ server.listen(0, "127.0.0.1", async () => {
                 metaSeries.json.meta.videos[0].season === 1
         );
 
+        const streams = await request(port, "GET", "/stream/movie/tt0133093.json");
+        check(
+            "stream returns a torrent + a direct url",
+            streams.status === 200 &&
+                Array.isArray(streams.json.streams) &&
+                streams.json.streams.length === 2 &&
+                typeof streams.json.streams[0].infoHash === "string" &&
+                streams.json.streams[1].url === "http://127.0.0.1:11470/mock/file.mp4"
+        );
+
         const missing = await request(port, "GET", "/nope");
         check("unknown path is 404", missing.status === 404);
     } catch (err) {

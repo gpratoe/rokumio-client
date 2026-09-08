@@ -29,6 +29,8 @@ async function writeCombinedScript() {
         'tests/addonsstore.test.brs',
         'tests/catalogstore.test.brs',
         'tests/episodesstore.test.brs',
+        'tests/librarystore.test.brs',
+        'tests/playbackstore.test.brs',
         'tests/_run.brs'
     ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });
@@ -43,7 +45,9 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'AuthStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'AddonsStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'CatalogStore.brs'),
-    path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs')
+    path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'LibraryStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'PlaybackStore.brs')
 ];
 
 function checkScreenContract() {

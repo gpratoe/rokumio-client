@@ -25,6 +25,8 @@ sub init()
     m.addonsStore = AddonsStore(m.transport, CreateObject("roRegistrySection", "addons"))
     m.catalogStore = CatalogStore(m.transport)
     m.episodesStore = EpisodesStore(m.transport)
+    m.libraryStore = LibraryStore(CreateObject("roRegistrySection", "library"))
+    m.playbackStore = PlaybackStore(m.transport)
     m.stores = {
         transport: m.transport
         settings: m.settingsStore
@@ -32,6 +34,8 @@ sub init()
         addons: m.addonsStore
         catalog: m.catalogStore
         episodes: m.episodesStore
+        library: m.libraryStore
+        playback: m.playbackStore
     }
     m.homeScreen.callFunc("SetStores", m.stores)
 end sub
