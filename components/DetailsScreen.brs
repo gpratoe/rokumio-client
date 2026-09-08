@@ -1,12 +1,14 @@
 ' DetailsScreen — one screen for both content kinds.
 '
-' Movies render a hero (poster, name, type/year/rating, description) plus an
-' action row (Play, and an "add to library" toggle backed by LibraryStore) and
-' push a stream selection on Play. Series render the same hero, then a slim
-' chip row instead of an inline episode browser: a Resume chip when the user has
-' a saved position for the show (from the Continue-Watching row or the local
-' library), and an "Episodes" chip that pushes the dedicated EpisodesScreen
-' (season columns + episode list).
+' Movies render a hero (poster, name, type/year/rating, description) plus a chip
+' row (Play, and an "add to library" toggle backed by LibraryStore) and push a
+' stream selection on Play. Series render the same hero, then a chip row: a
+' Resume chip for the saved position (falling back to "Play S1E1" when nothing
+' is saved) and an "Episodes" chip that pushes the dedicated EpisodesScreen.
+'
+' One shared chips RowList serves both kinds — the chips differ, the plumbing
+' doesn't. Each chip ContentNode maps to a stored action id, and a single
+' selection observer dispatches on that id.
 '
 ' Params: { addonAddress, meta } for a hero rendered from the catalog/CW data
 ' immediately (no fetch needed; series browsing happens on EpisodesScreen),
@@ -21,13 +23,13 @@ sub init()
     m.detailName = m.top.FindNode("detailName")
     m.detailType = m.top.FindNode("detailType")
     m.detailDesc = m.top.FindNode("detailDesc")
-    m.seriesRow = m.top.FindNode("seriesRow")
-    m.actionRow = m.top.FindNode("actionRow")
+    m.chipsRow = m.top.FindNode("chipsRow")
 
-    m.seriesRow.ObserveField("rowItemSelected", "onSeriesSelected")
-    m.actionRow.ObserveField("rowItemSelected", "onActionSelected")
+    m.chipsRow.ObserveField("rowItemSelected", "onChipSelected")
 end sub
 
+' Stores are class instances, which cannot cross components through an interface
+' field, so the Scene hands them over with callFunc instead.
 function SetStores(stores as object) as void
     m.stores = stores
 end function
@@ -75,16 +77,11 @@ function OnEnter(params as object) as void
     end if
 end function
 
-' Re-entry: refocus whichever chip row matches the current mode (series chips
-' vs. movie actions). m.meta/m.resume survive the push/pop, so a rebuild is not
-' needed — the existing content just needs focus back.
+' Re-entry: the shared chip RowList just needs focus back. m.meta/m.resume
+' survive the push/pop, so a rebuild is not needed.
 sub RestoreFocus()
-    if m.meta = invalid or m.meta.type = invalid then return
-    if m.meta.type = "series"
-        m.seriesRow.SetFocus(true)
-    else
-        m.actionRow.SetFocus(true)
-    end if
+    if m.meta = invalid then return
+    m.chipsRow.SetFocus(true)
 end sub
 
 ' The second header line: "{type} · {releaseInfo} · ★ {imdbRating}".
@@ -95,54 +92,56 @@ sub RenderKind(meta as object)
     m.detailType.text = kind
 end sub
 
-' Series get one chip row: Resume (when a position exists) then "Episodes"
-' (pushed to EpisodesScreen). Browsing seasons/episodes lives on that screen.
+' Series chips: Resume for the saved spot when there is one, otherwise a "Play
+' S1E1" stand-in (no fetch happens on this screen; EpisodesScreen browses the
+' real list), then "Episodes".
 sub ShowSeries()
-    m.actionRow.visible = false
-    m.seriesRow.visible = true
-
-    m.seriesActions = ["episodes"]
+    actions = []
     if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
-        m.seriesActions.Unshift("resume")
+        actions.Push({ action: "resume", title: "Resume S" + m.resume.season.ToStr() + "E" + m.resume.episode.ToStr() })
+    else
+        actions.Push({ action: "play", title: "Play S1E1" })
     end if
-
-    root = CreateObject("roSGNode", "ContentNode")
-    row = root.CreateChild("ContentNode")
-    for each action in m.seriesActions
-        chip = row.CreateChild("ContentNode")
-        if action = "resume"
-            chip.title = "Resume S" + m.resume.season.ToStr() + "E" + m.resume.episode.ToStr()
-        else
-            chip.title = "Episodes"
-        end if
-    end for
-    m.seriesRow.content = root
-    m.seriesRow.jumpToRowItem = [0, 0]
-    m.seriesRow.SetFocus(true)
+    actions.Push({ action: "episodes", title: "Episodes" })
+    ShowChips(actions)
 end sub
 
 sub ShowMovie()
-    m.seriesRow.visible = false
-    m.actionRow.visible = true
-
-    action = CreateObject("roSGNode", "ContentNode")
-    row = action.CreateChild("ContentNode")
-    row.CreateChild("ContentNode").title = "Play"
-    row.CreateChild("ContentNode").title = LibraryActionLabel()
-    m.actionRow.content = action
-    m.actionRow.jumpToRowItem = [0, 0]
-    m.actionRow.SetFocus(true)
+    actions = []
+    actions.Push({ action: "play", title: "Play" })
+    actions.Push({ action: "library", title: LibraryActionLabel() })
+    ShowChips(actions)
 end sub
 
-sub onSeriesSelected()
-    data = m.seriesRow.rowItemSelected
+' Fill the shared chips row and remember the action id per chip so the single
+' selection observer can dispatch.
+sub ShowChips(actions as object)
+    m.chips = actions
+    root = CreateObject("roSGNode", "ContentNode")
+    row = root.CreateChild("ContentNode")
+    for each chip in actions
+        item = row.CreateChild("ContentNode")
+        item.title = chip.title
+    end for
+    m.chipsRow.content = root
+    m.chipsRow.jumpToRowItem = [0, 0]
+    m.chipsRow.SetFocus(true)
+end sub
+
+sub onChipSelected()
+    data = m.chipsRow.rowItemSelected
     if data = invalid or data.Count() < 2 then return
     index = data[1]
-    if m.seriesActions = invalid or index < 0 or index >= m.seriesActions.Count() then return
-    if m.seriesActions[index] = "resume"
+    if m.chips = invalid or index < 0 or index >= m.chips.Count() then return
+    action = m.chips[index].action
+    if action = "resume"
         ResumeEpisode()
-    else if m.seriesActions[index] = "episodes"
+    else if action = "play"
+        PlayMedia()
+    else if action = "episodes"
         OpenEpisodes()
+    else if action = "library"
+        ToggleLibrary()
     end if
 end sub
 
@@ -168,22 +167,26 @@ sub ResumeEpisode()
     }
 end sub
 
-sub OpenEpisodes()
-    m.top.pushRequest = {
-        screen: "episodesScreen"
-        params: {
-            addonAddress: m.addonAddress
-            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, background: m.meta.background }
-            resume: m.resume
+' The generic Play action: for a movie it is the only play path; for a series it
+' covers the no-resume "Play S1E1" fallback. Both push stream selection.
+sub PlayMedia()
+    if m.stores = invalid then return
+    if m.meta.type = "series"
+        m.top.pushRequest = {
+            screen: "streams"
+            params: {
+                addonAddress: m.addonAddress
+                metaType: "series"
+                metaId: m.meta.id
+                videoId: m.stores.episodes.ResolveVideoId(m.meta.id, 1, 1)
+                season: 1
+                episode: 1
+                position: ResumePosition()
+                name: m.meta.name
+                poster: m.meta.poster
+            }
         }
-    }
-end sub
-
-sub onActionSelected()
-    data = m.actionRow.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    index = data[1]
-    if index = 0
+    else
         m.top.pushRequest = {
             screen: "streamsScreen"
             params: {
@@ -196,9 +199,18 @@ sub onActionSelected()
                 poster: m.meta.poster
             }
         }
-    else if index = 1
-        ToggleLibrary()
     end if
+end sub
+
+sub OpenEpisodes()
+    m.top.pushRequest = {
+        screen: "episodesScreen"
+        params: {
+            addonAddress: m.addonAddress
+            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, background: m.meta.background }
+            resume: m.resume
+        }
+    }
 end sub
 
 ' Keep an accurate resume for the current meta: the saved position when the user
@@ -215,12 +227,16 @@ sub ToggleLibrary()
     else
         m.stores.library.AddSaved(m.meta.id, m.meta.type, m.meta.name, m.meta.poster)
     end if
-    if m.actionRow.content <> invalid and m.actionRow.content.GetChildCount() > 0
-        row = m.actionRow.content.GetChild(0)
-        if row <> invalid and row.GetChildCount() > 1
-            row.GetChild(1).title = LibraryActionLabel()
+    label = LibraryActionLabel()
+    for i = 0 to m.chips.Count() - 1
+        if m.chips[i].action = "library"
+            if m.chipsRow.content <> invalid and m.chipsRow.content.GetChildCount() > 0
+                row = m.chipsRow.content.GetChild(0)
+                if row <> invalid and i < row.GetChildCount() then row.GetChild(i).title = label
+            end if
+            exit for
         end if
-    end if
+    end for
 end sub
 
 function LibraryActionLabel() as string

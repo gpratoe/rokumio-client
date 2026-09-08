@@ -51,29 +51,17 @@
             font="font:SmallSystemFont"
             color="0x8FA399FF" />
 
-        <!-- Series: a Resume chip (when a position exists) + "Episodes".
-             Movie: action buttons (Play / add to library). Exactly one of the
-             two is visible at a time. Both sit below the hero poster. -->
+        <!-- One shared chip row below the hero poster. Series load Resume / "Play
+             S1E1" + "Episodes"; movies load Play / add-to-library. The chips
+             change per content kind; the plumbing does not. -->
         <RowList
-            id="seriesRow"
+            id="chipsRow"
             translation="[80, 662]"
             itemSize="[1760, 56]"
             itemSpacing="[0, 8]"
             numRows="1"
             rowItemSize="[[260, 56]]"
             rowItemSpacing="[[12, 0]]"
-            showRowLabel="false"
-            drawFocusFeedback="false"
-            itemComponentName="ChipTile" />
-
-        <RowList
-            id="actionRow"
-            translation="[80, 662]"
-            itemSize="[1760, 120]"
-            itemSpacing="[0, 8]"
-            numRows="1"
-            rowItemSize="[[240, 56]]"
-            rowItemSpacing="[[16, 0]]"
             showRowLabel="false"
             drawFocusFeedback="false"
             itemComponentName="ChipTile" />
