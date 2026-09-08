@@ -3,17 +3,20 @@
 ' MarkupGrid/RowList feed each item its ContentNode through the interface field
 ' `itemContent` and drive focus through `itemHasFocus`/`rowHasFocus` (they never
 ' touch `content` or `focused`). The artwork comes from the item's
-' hdPosterUrl (mapped from the addon meta's poster); tiles with no image show
-' the plain background. No tile text: the poster art is the label.
+' hdPosterUrl (mapped from the addon meta's poster). Tiles without art — no
+' poster URL, or one that failed to load — fall back to the title text so the
+' tile is never a blank face. A tile with art shows the poster only.
 
 sub init()
     m.poster = m.top.FindNode("poster")
     m.tileBg = m.top.FindNode("tileBg")
     m.tileBorder = m.top.FindNode("tileBorder")
+    m.titleText = m.top.FindNode("titleText")
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
+    m.poster.ObserveField("loadStatus", "onPosterLoadStatus")
 end sub
 
 ' Focus must read as "this tile is selected" from the couch: a thick mint frame,
@@ -43,5 +46,21 @@ end sub
 
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
-    m.poster.uri = m.top.itemContent.hdPosterUrl
+    poster = m.top.itemContent.hdPosterUrl
+    if poster = invalid then poster = ""
+    m.poster.uri = poster
+    m.titleText.text = m.top.itemContent.title
+    UpdateFallback()
+end sub
+
+sub onPosterLoadStatus()
+    UpdateFallback()
+end sub
+
+' The fallback text is shown only while no workable art is available: no URL,
+' or a URL whose load errored out.
+sub UpdateFallback()
+    status = m.poster.loadStatus
+    hasArt = m.poster.uri <> invalid and m.poster.uri <> "" and status <> "error"
+    m.titleText.visible = not hasArt
 end sub

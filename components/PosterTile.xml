@@ -17,10 +17,13 @@
         <!-- tileBorder is the frame (full tile), tileBg the inset poster face so
              focus draws a real mint border instead of painting the tile. poster
              carries the artwork; with no uri it stays transparent and tileBg
-             shows through. -->
+             shows through. titleText is the fallback for tiles that have no
+             art (or whose art failed to load): hidden whenever a poster is
+             showing. -->
         <Rectangle id="tileBorder" width="270" height="378" color="0x2BD67500">
             <Rectangle id="tileBg" width="262" height="370" translation="[4, 4]" color="0x0B110DFF" />
             <Poster id="poster" width="262" height="370" translation="[4, 4]" failBackgroundColor="0x0B110DFF" />
+            <Label id="titleText" width="246" height="362" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" color="0xE9F2ECFF" />
         </Rectangle>
     </children>
 </component>

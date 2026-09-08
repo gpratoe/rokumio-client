@@ -28,10 +28,15 @@ function SetStores(stores as object) as void
     m.stores = stores
 end function
 
-' Collect {addonAddress, type, catalogId, name} for every advertised catalog.
+' Collect {addonAddress, type, catalogId, name} for every advertisable catalog.
 ' Built-ins carry catalogs = invalid until their manifest is fetched, so the
 ' manifest is resolved here on demand; addons serving no catalogs (e.g.
 ' OpenSubtitles v3) contribute nothing.
+'
+' Catalogs whose required extras we cannot supply are skipped: a plain browse
+' only sends skip=0, so rows that need a library (Cinemeta's last-videos,
+' calendar-videos) or a chosen genre (year/"New") stay off the Home grid — the
+' same rows Stremio itself omits for a guest.
 function ResolveCatalogs() as object
     catalogs = []
     for each addon in m.stores.addons.GetAll()
@@ -42,16 +47,36 @@ function ResolveCatalogs() as object
         end if
         if list <> invalid and Type(list) = "roArray"
             for each catalog in list
-                catalogs.Push({
-                    addonAddress: addon.address
-                    type: catalog.type
-                    catalogId: catalog.id
-                    name: catalog.name
-                })
+                if CatalogBrowsable(catalog)
+                    catalogs.Push({
+                        addonAddress: addon.address
+                        type: catalog.type
+                        catalogId: catalog.id
+                        name: catalog.name
+                    })
+                end if
             end for
         end if
     end for
     return catalogs
+end function
+
+' A catalog is browsable when none of its required extras demand more than the
+' plain skip=0 browse supplies.
+function CatalogBrowsable(catalog as object) as boolean
+    required = catalog.extraRequired
+    if required <> invalid and Type(required) = "roArray"
+        for each name in required
+            if name <> "skip" then return false
+        end for
+    end if
+    extras = catalog.extra
+    if extras <> invalid and Type(extras) = "roArray"
+        for each extra in extras
+            if extra.isRequired = true and extra.name <> "skip" then return false
+        end for
+    end if
+    return true
 end function
 
 ' One content tree for the whole list: a child per row (its `title` becomes the
