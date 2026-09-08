@@ -18,7 +18,12 @@
     <script type="text/brightscript" uri="pkg:/components/DetailsScreen.brs" />
 
     <children>
+        <!-- Background: flat theme base, then the Cinemeta `background` artwork
+             (when provided) cropped to fill, dimmed by a scrim so the hero and
+             text stay readable. -->
         <Rectangle id="detailsBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
+        <Rectangle id="bgScrim" width="1920" height="1080" color="0x0A0F0C99" />
 
         <!-- Hero: left poster, right name/type/description. -->
         <Poster id="heroPoster" translation="[80, 120]" width="360" height="510" failBackgroundColor="0x0B110DFF" />
@@ -48,11 +53,11 @@
 
         <!-- Series: a Resume chip (when a position exists) + "Episodes".
              Movie: action buttons (Play / add to library). Exactly one of the
-             two is visible at a time. -->
+             two is visible at a time. Both sit below the hero poster. -->
         <RowList
             id="seriesRow"
-            translation="[80, 620]"
-            itemSize="[1320, 56]"
+            translation="[80, 662]"
+            itemSize="[1760, 56]"
             itemSpacing="[0, 8]"
             numRows="1"
             rowItemSize="[[260, 56]]"
@@ -63,8 +68,8 @@
 
         <RowList
             id="actionRow"
-            translation="[520, 660]"
-            itemSize="[1040, 120]"
+            translation="[80, 662]"
+            itemSize="[1760, 120]"
             itemSpacing="[0, 8]"
             numRows="1"
             rowItemSize="[[240, 56]]"

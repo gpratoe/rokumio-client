@@ -17,6 +17,7 @@
 
 sub init()
     m.heroPoster = m.top.FindNode("heroPoster")
+    m.bgPoster = m.top.FindNode("bgPoster")
     m.detailName = m.top.FindNode("detailName")
     m.detailType = m.top.FindNode("detailType")
     m.detailDesc = m.top.FindNode("detailDesc")
@@ -57,6 +58,12 @@ function OnEnter(params as object) as void
     poster = meta.poster
     if poster = invalid then poster = ""
     m.heroPoster.uri = poster
+
+    ' Cinemeta catalog metas carry a `background` artwork URL; fill the screen
+    ' behind everything. Missing background leaves the flat theme base showing.
+    bg = meta.background
+    if bg = invalid then bg = ""
+    m.bgPoster.uri = bg
 
     desc = meta.description
     if desc <> invalid then m.detailDesc.text = desc else m.detailDesc.text = ""
