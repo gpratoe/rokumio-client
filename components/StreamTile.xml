@@ -17,8 +17,8 @@
     <children>
         <!-- tileBorder is the frame, tileFace the inset face so focus draws a
              real mint frame instead of painting over the card. -->
-        <Rectangle id="tileBorder" width="1080" height="300" color="0x2BD67500">
-            <Rectangle id="tileFace" width="1072" height="292" translation="[4, 4]" color="0x0B110DFF" />
+        <Rectangle id="tileBorder" width="1080" height="280" color="0x2BD67500">
+            <Rectangle id="tileFace" width="1072" height="270" translation="[4, 4]" color="0x0B110DFF" />
             <Label
                 id="tileTitle"
                 width="1040"
