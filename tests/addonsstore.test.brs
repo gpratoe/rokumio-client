@@ -23,11 +23,14 @@ sub Test_Addons_BuiltInsPresent()
     addons = AddonsStore(ScriptedTransport([]), invalid)
     list = addons.GetAll()
 
-    Harness_Equal(list.Count(), 2, "two built-in add-ons")
+    Harness_Equal(list.Count(), 3, "three built-in add-ons")
     Harness_Ok(addons.Get("com.linvo.cinemeta") <> invalid, "cinemeta present")
     Harness_Ok(addons.Get("org.stremio.opensubtitlesv3") <> invalid, "opensubtitles v3 present")
+    Harness_Ok(addons.Get("com.stremio.torrentio") <> invalid, "torrentio present")
     Harness_Equal(addons.Get("com.linvo.cinemeta").builtin, true, "cinemeta marked builtin")
     Harness_Equal(addons.Get("org.stremio.opensubtitlesv3").address, "https://opensubtitles-v3.strem.io", "opensubtitles address seeded")
+    Harness_Equal(addons.Get("com.stremio.torrentio").address, "https://torrentio.strem.fun", "torrentio address seeded")
+    Harness_Equal(addons.Get("com.stremio.torrentio").resources[0], "stream", "torrentio streams stream links")
 end sub
 
 sub Test_Addons_BuiltInsProtected()
@@ -35,7 +38,7 @@ sub Test_Addons_BuiltInsProtected()
     addons = AddonsStore(ScriptedTransport([]), invalid)
 
     Harness_Ok(not addons.Uninstall("com.linvo.cinemeta"), "cannot uninstall cinemeta")
-    Harness_Equal(addons.GetAll().Count(), 2, "both built-ins remain")
+    Harness_Equal(addons.GetAll().Count(), 3, "all built-ins remain")
 end sub
 
 sub Test_Addons_Install()
@@ -53,7 +56,7 @@ sub Test_Addons_Install()
     Harness_Equal(record.name, "Example", "name stored")
     Harness_Equal(record.address, address, "address stored")
     Harness_Equal(record.builtin, false, "installed add-on not builtin")
-    Harness_Equal(addons.GetAll().Count(), 3, "built-ins plus the new one")
+    Harness_Equal(addons.GetAll().Count(), 4, "built-ins plus the new one")
 end sub
 
 sub Test_Addons_RejectsInvalidManifest()
@@ -66,7 +69,7 @@ sub Test_Addons_RejectsInvalidManifest()
 
     Harness_Ok(not result.ok, "install rejected")
     Harness_Equal(result.error, "manifest missing id or name", "error names the missing field")
-    Harness_Equal(addons.GetAll().Count(), 2, "nothing installed")
+    Harness_Equal(addons.GetAll().Count(), 3, "nothing installed")
 end sub
 
 sub Test_Addons_InstallNoAddress()
@@ -88,7 +91,7 @@ sub Test_Addons_Uninstall()
     addons.Install(address)
 
     Harness_Ok(addons.Uninstall("com.example.addon"), "uninstall ok")
-    Harness_Equal(addons.GetAll().Count(), 2, "back to built-ins")
+    Harness_Equal(addons.GetAll().Count(), 3, "back to built-ins")
     Harness_Ok(not addons.Uninstall("com.example.addon"), "second uninstall fails")
 end sub
 

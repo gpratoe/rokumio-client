@@ -1,12 +1,20 @@
-' ChipTile — focusable label tile for the single-row RowLists (season chips,
-' movie action buttons). Same field plumbing as PosterTile: RowList feeds the
-' ContentNode through itemContent and drives focus through itemHasFocus /
-' rowHasFocus. Text is read from itemContent.title.
+' StreamTile — wide stream card for StreamsScreen's list.
+'
+' RowList feeds each item its ContentNode through `itemContent` and drives focus
+' through `itemHasFocus`/`rowHasFocus`. The primary line is the stream name
+' (e.g. "Torrentio 4k DV | HDR10+"); the lines below are the stream title split
+' at its embedded line feeds (release / file / peers-size / languages). The
+' description field carries the whole multi-line title, split right here into
+' however many rows the card fits — never pre-mapped onto fixed fields.
 
 sub init()
-    m.border = m.top.FindNode("chipBorder")
-    m.face = m.top.FindNode("chipFace")
-    m.text = m.top.FindNode("chipText")
+    m.border = m.top.FindNode("tileBorder")
+    m.face = m.top.FindNode("tileFace")
+    m.title = m.top.FindNode("tileTitle")
+    m.lines = []
+    for i = 1 to 5
+        m.lines.Push(m.top.FindNode("tileLine" + i.ToStr()))
+    end for
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
@@ -23,20 +31,24 @@ sub UpdateLook()
     if m.top.itemHasFocus
         m.border.color = "0x5BEF95FF"
         m.face.color = "0x233329FF"
-        m.text.color = "0xE9F2ECFF"
-        m.top.scale = [1.05, 1.05]
     else
         m.border.color = "0x2BD67500"
         m.face.color = "0x0B110DFF"
-        m.text.color = "0x8FA399FF"
-        m.top.scale = [1.0, 1.0]
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub
 
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
-    m.text.text = m.top.itemContent.title
+    m.title.text = m.top.itemContent.title
+    description = m.top.itemContent.description
+    if description = invalid then description = ""
+    pieces = description.Split(chr(10))
+    for i = 0 to m.lines.Count() - 1
+        text = ""
+        if pieces <> invalid and i < pieces.Count() then text = pieces[i]
+        m.lines[i].text = text
+    end for
     UpdateLook()
 end sub
 

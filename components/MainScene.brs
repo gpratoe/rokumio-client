@@ -21,6 +21,12 @@ sub init()
     m.episodesScreen = m.top.FindNode("episodesScreen")
     m.episodesScreen.ObserveField("pushRequest", "onEpisodesAction")
 
+    ' StreamsScreen reports the player push after a stream is resolved; the
+    ' player itself never pushes — Back pops it.
+    m.streamsScreen = m.top.FindNode("streamsScreen")
+    m.streamsScreen.ObserveField("pushRequest", "onStreamsAction")
+    m.playerScreen = m.top.FindNode("playerScreen")
+
     ' Bottom-of-stack Back pushes the confirm-exit dialog; the dialog's
     ' closeRequest is how it asks the Scene to dismiss it.
     m.confirmExit = m.top.FindNode("confirmExitDialog")
@@ -50,6 +56,8 @@ sub init()
     m.homeScreen.callFunc("SetStores", m.stores)
     m.detailsScreen.callFunc("SetStores", m.stores)
     m.episodesScreen.callFunc("SetStores", m.stores)
+    m.streamsScreen.callFunc("SetStores", m.stores)
+    m.playerScreen.callFunc("SetStores", m.stores)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -70,6 +78,13 @@ end sub
 ' EpisodesScreen's action channel; same one-action routing.
 sub onEpisodesAction()
     request = m.episodesScreen.pushRequest
+    if request = invalid or request.screen = invalid then return
+    m.stack.push(request.screen, request.params)
+end sub
+
+' StreamsScreen's action channel; same one-action routing.
+sub onStreamsAction()
+    request = m.streamsScreen.pushRequest
     if request = invalid or request.screen = invalid then return
     m.stack.push(request.screen, request.params)
 end sub

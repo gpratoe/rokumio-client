@@ -28,6 +28,8 @@
             <HomeScreen id="homeScreen" visible="false" />
             <DetailsScreen id="detailsScreen" visible="false" />
             <EpisodesScreen id="episodesScreen" visible="false" />
+            <StreamsScreen id="streamsScreen" visible="false" />
+            <PlayerScreen id="playerScreen" visible="false" />
 
             <!-- Scene-owned system UI: the confirm-exit dialog. Screens stay
                  ignorant of the Scene's exit policy. -->

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="PlayerScreen" extends="Group">
+    <!-- Minimal player pushed from StreamsScreen with { url, metaType, metaId,
+         videoId, season, episode, position, name, poster }. Pops on Back and
+         records the watched position through LibraryStore.SetPosition. -->
+    <interface>
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/PlayerScreen.brs" />
+
+    <children>
+        <Rectangle id="playerBg" width="1920" height="1080" color="0x000000FF" />
+        <Video
+            id="video"
+            translation="[0, 0]"
+            width="1920"
+            height="1080" />
+        <Label
+            id="playerTitle"
+            translation="[40, 1016]"
+            width="1840"
+            height="44"
+            font="font:SmallSystemFont"
+            color="0xE9F2EC99" />
+    </children>
+</component>

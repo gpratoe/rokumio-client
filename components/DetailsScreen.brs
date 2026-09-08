@@ -84,13 +84,26 @@ sub RestoreFocus()
     m.chipsRow.SetFocus(true)
 end sub
 
-' The second header line: "{type} · {releaseInfo} · ★ {imdbRating}".
+' The second header line: "{type} · {releaseInfo} · ★ {imdbRating}", with the
+' movie runtime appended when the meta carries it (Cinemeta does).
 sub RenderKind(meta as object)
     kind = TypeLabel(meta.type)
     if meta.releaseInfo <> invalid and meta.releaseInfo <> "" then kind = kind + " · " + meta.releaseInfo
     if meta.imdbRating <> invalid and meta.imdbRating <> "" then kind = kind + " · ★ " + meta.imdbRating
+    if meta.runtime <> invalid and meta.type <> "series"
+        runtime = FormatRuntime(meta.runtime)
+        if runtime <> "" then kind = kind + " · " + runtime
+    end if
     m.detailType.text = kind
 end sub
+
+' Runtime echoed straight from the meta JSON — Cinemeta ships plain minutes, so
+' no parsing and no "2h 5m" conversion. Per-component function scope: duplicated
+' from StreamsScreen, since Roku does not share globals across components.
+function FormatRuntime(runtime as dynamic) as string
+    if runtime = invalid then return ""
+    return runtime.ToStr().Trim()
+end function
 
 ' Series chips: Resume for the saved spot when there is one, otherwise a "Play
 ' S1E1" stand-in (no fetch happens on this screen; EpisodesScreen browses the
@@ -146,13 +159,12 @@ sub onChipSelected()
 end sub
 
 ' Resume sends the user into stream selection for the saved episode. The Streams
-' screen is Phase B; this push carries the full context so it is ready when the
-' screen lands.
+' screen is the picker; this push carries the full context for it.
 sub ResumeEpisode()
     if m.resume = invalid or m.stores = invalid then return
     videoId = m.stores.episodes.ResolveVideoId(m.meta.id, m.resume.season, m.resume.episode)
     m.top.pushRequest = {
-        screen: "streams"
+        screen: "streamsScreen"
         params: {
             addonAddress: m.addonAddress
             metaType: "series"
@@ -173,7 +185,7 @@ sub PlayMedia()
     if m.stores = invalid then return
     if m.meta.type = "series"
         m.top.pushRequest = {
-            screen: "streams"
+            screen: "streamsScreen"
             params: {
                 addonAddress: m.addonAddress
                 metaType: "series"

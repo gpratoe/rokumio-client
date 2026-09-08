@@ -33,7 +33,15 @@ function SetStores(stores as object) as void
 end function
 
 function OnEnter(params as object) as void
-    if params = invalid or params.meta = invalid then return
+    ' Re-entry after a push (streams, player, …): params is invalid and the
+    ' screen Group was handed focus by the stack. The episode RowList must take
+    ' it back, or nothing inside is reachable — the list and its seasons survive,
+    ' so no rebuild is needed.
+    if params = invalid
+        if m.epList <> invalid then m.epList.SetFocus(true)
+        return
+    end if
+    if params.meta = invalid then return
     m.addonAddress = params.addonAddress
     m.meta = params.meta
     m.resume = params.resume
@@ -200,7 +208,7 @@ sub PushEpisode(season as integer, ep as object)
         position = m.resume.position
     end if
     m.top.pushRequest = {
-        screen: "streams"
+        screen: "streamsScreen"
         params: {
             addonAddress: m.addonAddress
             metaType: "series"

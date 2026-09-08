@@ -72,6 +72,10 @@ server.listen(0, "127.0.0.1", async () => {
             "manifest.json alias returns the same manifest",
             manifestJson.status === 200 && manifestJson.json.id === "stremio.rokumio.mock"
         );
+        check(
+            "manifest advertises the stream resource",
+            Array.isArray(manifestJson.json.resources) && manifestJson.json.resources.includes("stream")
+        );
 
         const catalog = await request(port, "GET", "/catalog/movie/top/skip=0.json");
         check(
@@ -81,17 +85,21 @@ server.listen(0, "127.0.0.1", async () => {
 
         const metaMovie = await request(port, "GET", "/meta/movie/tt0133093.json");
         check(
-            "movie meta returns a movie",
-            metaMovie.status === 200 && metaMovie.json.meta.type === "movie" && metaMovie.json.meta.name.includes("tt0133093")
+            "movie meta returns a movie with runtime",
+            metaMovie.status === 200 &&
+                metaMovie.json.meta.type === "movie" &&
+                metaMovie.json.meta.name.includes("tt0133093") &&
+                metaMovie.json.meta.runtime === 121
         );
 
         const metaSeries = await request(port, "GET", "/meta/series/tt1234567.json");
         check(
-            "series meta returns episodes with seasons",
+            "series meta returns episodes with seasons and runtimes",
             metaSeries.status === 200 &&
                 Array.isArray(metaSeries.json.meta.videos) &&
                 metaSeries.json.meta.videos.length === 3 &&
-                metaSeries.json.meta.videos[0].season === 1
+                metaSeries.json.meta.videos[0].season === 1 &&
+                metaSeries.json.meta.videos[0].runtime === 49
         );
 
         const streams = await request(port, "GET", "/stream/movie/tt0133093.json");
@@ -102,6 +110,14 @@ server.listen(0, "127.0.0.1", async () => {
                 streams.json.streams.length === 2 &&
                 typeof streams.json.streams[0].infoHash === "string" &&
                 streams.json.streams[1].url === "http://127.0.0.1:11470/mock/file.mp4"
+        );
+        check(
+            "torrent stream embeds peers, size and indexer in the title",
+            streams.status === 200 &&
+                streams.json.streams[0].name === "Torrentio\n4K" &&
+                streams.json.streams[0].title.includes("👤 412") &&
+                streams.json.streams[0].title.includes("💾 54.2 GB") &&
+                streams.json.streams[0].title.includes("🔗 RARBG")
         );
 
         const missing = await request(port, "GET", "/nope");

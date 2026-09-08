@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="StreamsScreen" extends="Group">
+    <!-- Stream picker for a movie or episode, pushed with
+         { addonAddress, metaType, metaId, videoId, season, episode, position,
+           name, poster }. Two panes:
+           - left: title (series + episode line), synopsis, and the Cinemeta
+             background artwork (no poster);
+           - right: one selectable stream card per candidate, collected from
+             every installed add-on that advertises the "stream" resource.
+         OK on a card resolves playback and pushes the PlayerScreen; resolution
+         failures (e.g. torrent streams without a streaming server) surface in
+         the status line. -->
+    <interface>
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/StreamsScreen.brs" />
+
+    <children>
+        <Rectangle id="streamBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
+        <Rectangle id="bgScrim" width="1920" height="1080" color="0x0A0F0C99" />
+
+        <!-- Left: title + optional episode line + synopsis. No poster. -->
+        <Label
+            id="headTitle"
+            translation="[80, 150]"
+            width="620"
+            height="90"
+            horizAlign="left"
+            wrap="true"
+            font="font:LargeBoldSystemFont"
+            color="0xE9F2ECFF" />
+        <Label
+            id="headSub"
+            translation="[80, 250]"
+            width="620"
+            height="40"
+            font="font:MediumSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="synopsis"
+            translation="[80, 306]"
+            width="600"
+            height="640"
+            wrap="true"
+            horizAlign="left"
+            vertAlign="top"
+            font="font:SmallSystemFont"
+            color="0x8FA399FF" />
+        <Label
+            id="status"
+            translation="[80, 975]"
+            width="600"
+            height="60"
+            wrap="true"
+            horizAlign="left"
+            vertAlign="top"
+            font="font:SmallSystemFont"
+            color="0x2BD675FF" />
+
+        <!-- Right: the selectable stream list. -->
+        <Label
+            id="streamsTitle"
+            translation="[760, 100]"
+            width="1040"
+            height="40"
+            text="Streams"
+            font="font:MediumBoldSystemFont"
+            color="0x8FA399FF" />
+        <RowList
+            id="streamsList"
+            translation="[760, 150]"
+            numRows="1"
+            itemSize="[1080, 312]"
+            itemSpacing="[0, 12]"
+            rowItemSize="[[1080, 300]]"
+            rowItemSpacing="[[0, 0]]"
+            showRowLabel="false"
+            drawFocusFeedback="false"
+            itemComponentName="StreamTile" />
+    </children>
+</component>

@@ -1,10 +1,14 @@
 ' AddonsStore — the registry of installed add-ons, incl. the Stremio-built-ins.
 '
-' Cinemeta and OpenSubtitles v3 are the two official add-ons Stremio ships, and
-' the only ones of the official set this client needs, so they are built-in and
-' protected (never uninstallable). Everything else is installed by fetching its
-' manifest from {address}/manifest.json and stored in the registry so a second
-' instance reconstructed over the same registry restores the state.
+' Cinemeta, OpenSubtitles v3 and Torrentio are seeded here. Cinemeta and
+' OpenSubtitles are the Stremio official built-ins this client needs and are
+' protected (never uninstallable). Torrentio is seeded so the stream screen has
+' a real stream add-on to render links from while testing — TEMP seeded here as a
+' built-in; once the settings screen can install add-ons, Torrentio's entry
+' should be removed from BuiltIns() and let the user install it themselves.
+' Everything else is installed by fetching its manifest from
+' {address}/manifest.json and stored in the registry so a second instance
+' reconstructed over the same registry restores the state.
 '
 ' Persistence is a single registry key "addons" (FormatJson of an AA keyed by
 ' addon id). Records are plain data only — FormatJson drops unsupported values.
@@ -16,6 +20,7 @@
 
 const CINEMETA_ADDRESS = "https://v3-cinemeta.strem.io"
 const OPENSUBTITLES_V3_ADDRESS = "https://opensubtitles-v3.strem.io"
+const TORRENTIO_ADDRESS = "https://torrentio.strem.fun"
 
 class AddonsStore
     transport as object
@@ -60,6 +65,16 @@ class AddonsStore
                 types: ["movie", "series"]
                 catalogs: []
                 resources: ["subtitles"]
+                builtin: true
+            }
+            "com.stremio.torrentio": {
+                id: "com.stremio.torrentio"
+                name: "Torrentio"
+                address: TORRENTIO_ADDRESS
+                version: ""
+                types: ["movie", "series"]
+                catalogs: []
+                resources: ["stream", "meta"]
                 builtin: true
             }
         }

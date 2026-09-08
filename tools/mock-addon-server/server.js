@@ -20,7 +20,7 @@ const manifest = {
         { type: "series", id: "top", name: "Top Series" },
     ],
     types: ["movie", "series"],
-    resources: ["catalog", "meta"],
+    resources: ["catalog", "meta", "stream"],
 };
 
 function sendJson(res, status, body) {
@@ -47,9 +47,9 @@ function metaResponse(type, id) {
                 name: `Mock ${id} Series`,
                 poster: "https://images.metahub.space/poster/medium/img.png",
                 videos: [
-                    { id: `mock:series:${id}:s1:e1`, name: `${id} s1e1`, season: 1, episode: 1 },
-                    { id: `mock:series:${id}:s1:e2`, name: `${id} s1e2`, season: 1, episode: 2 },
-                    { id: `mock:series:${id}:s2:e1`, name: `${id} s2e1`, season: 2, episode: 1 },
+                    { id: `mock:series:${id}:s1:e1`, name: `${id} s1e1`, season: 1, episode: 1, runtime: 49 },
+                    { id: `mock:series:${id}:s1:e2`, name: `${id} s1e2`, season: 1, episode: 2, runtime: 46 },
+                    { id: `mock:series:${id}:s2:e1`, name: `${id} s2e1`, season: 2, episode: 1, runtime: 55 },
                 ],
             },
         };
@@ -60,6 +60,7 @@ function metaResponse(type, id) {
             type: "movie",
             name: `Mock ${id} Movie`,
             poster: "https://images.metahub.space/poster/medium/img.png",
+            runtime: 121,
         },
     };
 }
@@ -68,9 +69,10 @@ function streamResponse(type, id) {
     return {
         streams: [
             {
-                name: "Mock Torrent",
+                name: "Torrentio\n4K",
+                title: "Interstellar.2014.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-FGT\n👤 412 💾 54.2 GB 🔗 RARBG",
                 type: "torrent",
-                infoHash: "0123456789abcdef0123456789abcdef01234567",
+                infoHash: "6ae29a3a9bf8c1d5b123456789abcdef01234567",
                 fileIdx: 1,
             },
             { name: "Mock Direct", url: "http://127.0.0.1:11470/mock/file.mp4" },
