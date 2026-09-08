@@ -120,6 +120,19 @@ server.listen(0, "127.0.0.1", async () => {
                 streams.json.streams[0].title.includes("🔗 RARBG")
         );
 
+        const seriesStreams = await request(port, "GET", "/stream/series/tt1234567.json");
+        check(
+            "series stream is a season pack with file, facts and flags on their own lines",
+            seriesStreams.status === 200 &&
+                seriesStreams.json.streams.some(
+                    (s) =>
+                        (s.title || "").split("\n").length === 4 &&
+                        s.title.includes("Pilot.mkv") &&
+                        s.title.includes("👤 113") &&
+                        s.title.includes("🇬🇧 / 🇷🇺 / 🇺🇦")
+                )
+        );
+
         const missing = await request(port, "GET", "/nope");
         check("unknown path is 404", missing.status === 404);
     } catch (err) {

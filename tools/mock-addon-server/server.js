@@ -66,18 +66,30 @@ function metaResponse(type, id) {
 }
 
 function streamResponse(type, id) {
-    return {
-        streams: [
-            {
-                name: "Torrentio\n4K",
-                title: "Interstellar.2014.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-FGT\n👤 412 💾 54.2 GB 🔗 RARBG",
-                type: "torrent",
-                infoHash: "6ae29a3a9bf8c1d5b123456789abcdef01234567",
-                fileIdx: 1,
-            },
-            { name: "Mock Direct", url: "http://127.0.0.1:11470/mock/file.mp4" },
-        ],
-    };
+    const streams = [
+        {
+            name: "Torrentio\n4K",
+            title: "Interstellar.2014.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-FGT\n👤 412 💾 54.2 GB 🔗 RARBG",
+            type: "torrent",
+            infoHash: "6ae29a3a9bf8c1d5b123456789abcdef01234567",
+            fileIdx: 1,
+        },
+        { name: "Mock Direct", url: "http://127.0.0.1:11470/mock/file.mp4" },
+    ];
+    if (type === "series") {
+        streams.push({
+            name: "Torrentio\n4k DV | HDR10+",
+            title:
+                "Breaking.Bad.S01.2008.2160P._Marjenbo\n" +
+                "Breaking Bad  S01E01  Pilot.mkv\n" +
+                "👤 113 💾 9.53 GB ⚙️ ThePirateBay\n" +
+                "🇬🇧 / 🇷🇺 / 🇺🇦",
+            type: "torrent",
+            infoHash: "7a307b4f5a9b77e3a45e6f789abcdef01234567",
+            fileIdx: 0,
+        });
+    }
+    return { streams };
 }
 
 function createAddonServer() {
