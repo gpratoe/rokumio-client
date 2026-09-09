@@ -21,9 +21,12 @@
 sub init()
     m.catalog = m.top.FindNode("catalog")
     m.catalog.ObserveField("rowItemSelected", "onRowItemSelected")
+    m.rail = m.top.FindNode("rail")
+    m.rail.ObserveField("rowItemSelected", "onRailItemSelected")
     m.catalogRowsBuilt = false
     m.catalogRows = []
     m.gridRows = []
+    m.railBuilt = false
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -178,6 +181,7 @@ function TypeLabel(metaType as string) as string
 end function
 
 function OnEnter(params as object) as void
+    if not m.railBuilt then BuildRail()
     if not m.catalogRowsBuilt then BuildCatalogRows()
     BuildRows()
     m.catalog.SetFocus(true)
@@ -192,6 +196,53 @@ end function
 
 sub BlurFocus()
 end sub
+
+' The left rail: a fixed one-column icon menu. Built once (nodes created in init
+' can be dropped pre-Show, so it happens on first OnEnter like the catalog).
+sub BuildRail()
+    entries = [
+        { glyph: "⚙️", screen: "settingsScreen" }
+        { glyph: "➕", screen: "addonsScreen" }
+    ]
+    m.railEntries = entries
+    content = CreateObject("roSGNode", "ContentNode")
+    for each entry in entries
+        row = content.CreateChild("ContentNode")
+        item = row.CreateChild("ContentNode")
+        item.title = entry.glyph
+    end for
+    m.rail.content = content
+    m.rail.numRows = entries.Count()
+    m.railBuilt = true
+end sub
+
+' OK on a rail icon: an action request the Scene pushes as a stack screen.
+sub onRailItemSelected()
+    data = m.rail.rowItemSelected
+    if data = invalid or data.Count() < 2 then return
+    row = data[0]
+    if row < 0 or m.railEntries = invalid or row >= m.railEntries.Count() then return
+    m.top.pushRequest = {
+        screen: m.railEntries[row].screen
+        params: {}
+    }
+end sub
+
+' Cross-focus between the rail and the catalog grid. Left from the grid enters
+' the rail; Right from the rail enters the grid. Whether a RowList at its left
+' edge lets Left bubble here is device-dependent — if the grid swallows it, the
+' fallback is starting Home focus on the rail. Verify on-device.
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if key = "right" and m.rail.HasFocus()
+        m.catalog.SetFocus(true)
+        return true
+    else if key = "left" and m.catalog.HasFocus()
+        m.rail.SetFocus(true)
+        return true
+    end if
+    return false
+end function
 
 ' rowItemSelected is a field observer, so this receives the roSGNodeEvent. Its
 ' data is a [row, itemIndex] pair; the selected name comes from the row's own

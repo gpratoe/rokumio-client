@@ -61,6 +61,12 @@ class SettingsStore
         return m.serverAddress <> ""
     end function
 
+    ' Blank the streaming server address (the Settings screen's Clear action).
+    function ClearServerAddress() as void
+        m.serverAddress = ""
+        m.Save()
+    end function
+
     function SetUiScale(value as integer) as boolean
         if value < 0 or value > 200 then return false
         m.uiScale = value

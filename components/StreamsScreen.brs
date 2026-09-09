@@ -108,7 +108,6 @@ sub RenderStreams(params as object)
                 for each stream in result.streams
                     m.streams.Push({
                         stream: stream
-                        addonName: addon.name
                     })
                 end for
             end if

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="SettingsScreen" extends="Group">
+    <!-- App preferences: streaming server address, UI language, UI scale. Values
+         are persisted through SettingsStore. Editing the server address opens a
+         system KeyboardDialog; the language and scale rows cycle their options
+         on OK. A scale change is reported through scaleChanged so MainScene can
+         reapply the live uiRoot scale. -->
+    <interface>
+        <field id="scaleChanged" type="boolean" alwaysNotify="true" value="false" />
+
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/SettingsScreen.brs" />
+
+    <children>
+        <Rectangle id="settingsBg" width="1920" height="1080" color="0x0A0F0CFF" />
+
+        <Label
+            id="settingsTitle"
+            translation="[80, 48]"
+            width="1760"
+            height="70"
+            text="Settings"
+            font="font:LargeBoldSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="settingsSub"
+            translation="[80, 128]"
+            width="1760"
+            height="40"
+            text="OK edits a row's value, Back returns to Home"
+            font="font:SmallSystemFont"
+            color="0x8FA399FF" />
+
+        <RowList
+            id="settingsList"
+            translation="[80, 210]"
+            numRows="3"
+            itemSize="[1000, 118]"
+            itemSpacing="[0, 8]"
+            rowItemSize="[[1000, 110]]"
+            showRowLabel="[false]"
+            drawFocusFeedback="false"
+            itemComponentName="PrefRow" />
+
+        <Label
+            id="settingsStatus"
+            translation="[80, 620]"
+            width="1760"
+            height="40"
+            font="font:SmallSystemFont"
+            color="0x2BD675FF" />
+    </children>
+</component>

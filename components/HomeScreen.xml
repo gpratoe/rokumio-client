@@ -37,14 +37,29 @@
             font="font:SmallSystemFont"
             color="0x8FA399FF" />
 
+        <!-- Left rail: the vertical icon menu (Settings, Add-ons). A one-column
+             RowList of RailTiles; OK on an icon publishes a pushRequest the
+             Scene routes. Focus reaches it from the grid via Left/Right. -->
+        <RowList
+            id="rail"
+            translation="[40, 220]"
+            numRows="2"
+            itemSize="[120, 132]"
+            itemSpacing="[0, 12]"
+            rowItemSize="[[120, 120]]"
+            rowItemSpacing="[[0, 0]]"
+            showRowLabel="[false]"
+            drawFocusFeedback="false"
+            itemComponentName="RailTile" />
+
         <!-- Poster rows: a single RowList owns the whole grid physics (vertical
              row scrolling/clipping, horizontal per-row tiles, row labels). Each
              item renders as a PosterTile component. Content is set in code. -->
         <RowList
             id="catalog"
-            translation="[80, 210]"
+            translation="[220, 210]"
             numRows="2"
-            itemSize="[1760, 400]"
+            itemSize="[1680, 400]"
             itemSpacing="[0, 8]"
             rowItemSize="[[270, 378]]"
             rowItemSpacing="[[18, 0]]"

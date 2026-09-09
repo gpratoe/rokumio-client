@@ -23,14 +23,12 @@ sub Test_Addons_BuiltInsPresent()
     addons = AddonsStore(ScriptedTransport([]), invalid)
     list = addons.GetAll()
 
-    Harness_Equal(list.Count(), 3, "three built-in add-ons")
+    Harness_Equal(list.Count(), 2, "two built-in add-ons")
     Harness_Ok(addons.Get("com.linvo.cinemeta") <> invalid, "cinemeta present")
     Harness_Ok(addons.Get("org.stremio.opensubtitlesv3") <> invalid, "opensubtitles v3 present")
-    Harness_Ok(addons.Get("com.stremio.torrentio") <> invalid, "torrentio present")
     Harness_Equal(addons.Get("com.linvo.cinemeta").builtin, true, "cinemeta marked builtin")
     Harness_Equal(addons.Get("org.stremio.opensubtitlesv3").address, "https://opensubtitles-v3.strem.io", "opensubtitles address seeded")
-    Harness_Equal(addons.Get("com.stremio.torrentio").address, "https://torrentio.strem.fun", "torrentio address seeded")
-    Harness_Equal(addons.Get("com.stremio.torrentio").resources[0], "stream", "torrentio streams stream links")
+    Harness_Equal(addons.Get("com.stremio.torrentio"), invalid, "torrentio is not a built-in")
 end sub
 
 sub Test_Addons_BuiltInsProtected()
@@ -38,7 +36,29 @@ sub Test_Addons_BuiltInsProtected()
     addons = AddonsStore(ScriptedTransport([]), invalid)
 
     Harness_Ok(not addons.Uninstall("com.linvo.cinemeta"), "cannot uninstall cinemeta")
-    Harness_Equal(addons.GetAll().Count(), 3, "all built-ins remain")
+    Harness_Ok(not addons.Uninstall("org.stremio.opensubtitlesv3"), "cannot uninstall opensubtitles")
+    Harness_Equal(addons.GetAll().Count(), 2, "all built-ins remain")
+end sub
+
+sub Test_Addons_TorrentioSeededFirstRun()
+    Harness_Suite("AddonsStore seeds Torrentio on first run as a removable add-on")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry)
+
+    Harness_Equal(addons.GetAll().Count(), 3, "built-ins plus seeded torrentio")
+    torrentio = addons.Get("com.stremio.torrentio")
+    Harness_Ok(torrentio <> invalid, "torrentio present after first run")
+    Harness_Equal(torrentio.builtin, false, "seeded torrentio is not a built-in")
+    Harness_Equal(torrentio.address, "https://torrentio.strem.fun", "torrentio address seeded")
+    Harness_Equal(torrentio.resources[0], "stream", "torrentio streams stream links")
+
+    Harness_Ok(addons.Uninstall("com.stremio.torrentio"), "seeded torrentio can be removed")
+    Harness_Equal(addons.Get("com.stremio.torrentio"), invalid, "torrentio gone after removal")
+    Harness_Equal(addons.GetAll().Count(), 2, "back to built-ins only")
+
+    reopened = AddonsStore(ScriptedTransport([]), registry)
+    Harness_Equal(reopened.Get("com.stremio.torrentio"), invalid, "removal is not undone on reload")
+    Harness_Equal(reopened.GetAll().Count(), 2, "no re-seed after a removal")
 end sub
 
 sub Test_Addons_Install()
@@ -56,7 +76,22 @@ sub Test_Addons_Install()
     Harness_Equal(record.name, "Example", "name stored")
     Harness_Equal(record.address, address, "address stored")
     Harness_Equal(record.builtin, false, "installed add-on not builtin")
-    Harness_Equal(addons.GetAll().Count(), 4, "built-ins plus the new one")
+    Harness_Equal(addons.GetAll().Count(), 3, "built-ins plus the new one")
+end sub
+
+sub Test_Addons_TorrentioNotBuiltInButSeeded()
+    Harness_Suite("AddonsStore.Install keeps the seeded torrentio")
+    address = "https://addon.example.com"
+    script = [
+        { method: "GET", url: address + "/manifest.json", ok: true, status: 200, json: ManifestFixture("com.example.addon", "Example"), error: "" }
+    ]
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport(script), registry)
+
+    Harness_Ok(addons.Install(address).ok, "install ok")
+    Harness_Ok(addons.Get("com.stremio.torrentio") <> invalid, "seeded torrentio still installed")
+    Harness_Equal(addons.Get("com.stremio.torrentio").builtin, false, "seeded torrentio is removable")
+    Harness_Equal(addons.GetAll().Count(), 4, "built-ins + torrentio + example")
 end sub
 
 sub Test_Addons_RejectsInvalidManifest()
@@ -69,7 +104,7 @@ sub Test_Addons_RejectsInvalidManifest()
 
     Harness_Ok(not result.ok, "install rejected")
     Harness_Equal(result.error, "manifest missing id or name", "error names the missing field")
-    Harness_Equal(addons.GetAll().Count(), 3, "nothing installed")
+    Harness_Equal(addons.GetAll().Count(), 2, "nothing installed")
 end sub
 
 sub Test_Addons_InstallNoAddress()
@@ -91,7 +126,7 @@ sub Test_Addons_Uninstall()
     addons.Install(address)
 
     Harness_Ok(addons.Uninstall("com.example.addon"), "uninstall ok")
-    Harness_Equal(addons.GetAll().Count(), 3, "back to built-ins")
+    Harness_Equal(addons.GetAll().Count(), 2, "back to built-ins")
     Harness_Ok(not addons.Uninstall("com.example.addon"), "second uninstall fails")
 end sub
 

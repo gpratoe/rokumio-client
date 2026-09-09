@@ -39,6 +39,20 @@ sub Test_Settings_UiScaleBounds()
     Harness_Equal(settings.GetUiScale(), 200, "only the accepted value took")
 end sub
 
+sub Test_Settings_ClearServerAddress()
+    Harness_Suite("SettingsStore.ClearServerAddress blanks and persists")
+    registry = MockRegistry()
+    settings = SettingsStore(registry)
+    settings.SetServerAddress("http://10.0.0.2:4141")
+    settings.ClearServerAddress()
+
+    Harness_Equal(settings.GetServerAddress(), "", "address blanked")
+    Harness_Equal(settings.ServerAddressSet(), false, "no longer set")
+
+    reopened = SettingsStore(registry)
+    Harness_Equal(reopened.GetServerAddress(), "", "blank persisted")
+end sub
+
 sub Test_Settings_PersistsViaRegistry()
     Harness_Suite("SettingsStore round-trips through the registry")
     registry = MockRegistry()

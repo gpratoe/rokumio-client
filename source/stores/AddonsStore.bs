@@ -1,14 +1,12 @@
 ' AddonsStore — the registry of installed add-ons, incl. the Stremio-built-ins.
 '
-' Cinemeta, OpenSubtitles v3 and Torrentio are seeded here. Cinemeta and
-' OpenSubtitles are the Stremio official built-ins this client needs and are
-' protected (never uninstallable). Torrentio is seeded so the stream screen has
-' a real stream add-on to render links from while testing — TEMP seeded here as a
-' built-in; once the settings screen can install add-ons, Torrentio's entry
-' should be removed from BuiltIns() and let the user install it themselves.
-' Everything else is installed by fetching its manifest from
-' {address}/manifest.json and stored in the registry so a second instance
-' reconstructed over the same registry restores the state.
+' Cinemeta and OpenSubtitles v3 are the Stremio official built-ins this client
+' needs and are protected (never uninstallable). Torrentio is not a built-in:
+' it is seeded on a first run as a regular add-on, so a fresh install still has
+' a real stream add-on out of the box while staying removable + reinstallable
+' from the Add-ons screen. Everything else is installed by fetching its
+' manifest from {address}/manifest.json and stored in the registry so a second
+' instance reconstructed over the same registry restores the state.
 '
 ' Persistence is a single registry key "addons" (FormatJson of an AA keyed by
 ' addon id). Records are plain data only — FormatJson drops unsupported values.
@@ -32,6 +30,10 @@ class AddonsStore
         m.registry = registry
         m.installed = {}
         m.Load()
+        if m.registry <> invalid
+            raw = m.registry.Read("addons")
+            if raw = "" then m.SeedFirstRun()
+        end if
     end sub
 
     ' A missing AA key reads back as invalid in BrightScript, so this stands in
@@ -67,18 +69,25 @@ class AddonsStore
                 resources: ["subtitles"]
                 builtin: true
             }
-            "com.stremio.torrentio": {
-                id: "com.stremio.torrentio"
-                name: "Torrentio"
-                address: TORRENTIO_ADDRESS
-                version: ""
-                types: ["movie", "series"]
-                catalogs: []
-                resources: ["stream", "meta"]
-                builtin: true
-            }
         }
     end function
+
+    ' First run: no add-ons key in the registry, so seed Torrentio as a regular
+    ' (not built-in) add-on. A later uninstall leaves an empty "{}" record in the
+    ' registry, which reads back non-empty, so removal is preserved across runs.
+    sub SeedFirstRun()
+        m.installed["com.stremio.torrentio"] = {
+            id: "com.stremio.torrentio"
+            name: "Torrentio"
+            address: TORRENTIO_ADDRESS
+            version: ""
+            types: ["movie", "series"]
+            catalogs: []
+            resources: ["stream", "meta"]
+            builtin: false
+        }
+        m.Save()
+    end sub
 
     ' Fetch {address}/manifest.json and register the addon. Returns a record
     ' keyed by the manifest id, or an error when the manifest is missing its
