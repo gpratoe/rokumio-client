@@ -18,6 +18,9 @@ function ScriptedHttpClient(script as object, log as object) as object
         end for
         return { ok: false, status: 0, body: "", error: "no scripted response" }
     end function
+    client.requestLong = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
+        return m.request(method, url, headers, body)
+    end function
     return client
 end function
 
@@ -85,4 +88,20 @@ sub Test_Transport_Post_ForwardsBody()
     Harness_Equal(log[0].method, "POST", "method forwarded")
     Harness_Equal(log[0].url, "http://host/login", "url forwarded")
     Harness_Equal(log[0].body.type, "guest", "body forwarded to the client")
+end sub
+
+sub Test_Transport_PostLong_RoutesLongRequest()
+    Harness_Suite("Transport.PostLong rides the long-window client request")
+    log = []
+    body = "{" + QuoteString("guessFileIdx") + ":7}"
+    script = [
+        { method: "POST", ok: true, status: 200, body: body, error: "" }
+    ]
+    result = Transport(ScriptedHttpClient(script, log)).PostLong("http://host/abc/create", { guessFileIdx: 7 })
+
+    Harness_Ok(result.ok, "postLong ok")
+    Harness_Equal(result.json.guessFileIdx, 7, "json parsed")
+    Harness_Equal(log[0].method, "POST", "method forwarded")
+    Harness_Equal(log[0].url, "http://host/abc/create", "url forwarded")
+    Harness_Equal(log[0].body.guessFileIdx, 7, "body forwarded to the client")
 end sub

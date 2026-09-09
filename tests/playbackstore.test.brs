@@ -110,6 +110,56 @@ sub Test_Playback_TorrentResolvesThroughServer()
     Harness_Equal(result.url, server + "/" + infoHash + "/2/hls.m3u8", "HLS master url")
 end sub
 
+sub Test_Playback_CreateSessionLargestVideoWhenGuessedMissing()
+    Harness_Suite("PlaybackStore.CreateSession picks the largest video file when guessedFileIdx is absent")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    script = [
+        {
+            method: "POST"
+            url: server + "/" + infoHash + "/create"
+            ok: true
+            status: 200
+            json: {
+                files: [
+                    { name: "Episode 1.mkv", length: 1048576 }
+                    { name: "sample.mp4", length: 10485760 }
+                ]
+                guessedFileIdx: invalid
+            }
+            error: ""
+        }
+    ]
+    store = PlaybackStore(ScriptedTransport(script))
+    session = store.CreateSession(server, TorrentStream(infoHash))
+
+    Harness_Ok(session.ok, "session created despite no guessedFileIdx")
+    Harness_Equal(session.fileIdx, 1, "largest video file chosen")
+    Harness_Equal(session.files.Count(), 2, "file list surfaced")
+end sub
+
+sub Test_Playback_CreateSessionNamesServerKeysWhenNothingPicked()
+    Harness_Suite("PlaybackStore.CreateSession reports the server keys when no file can be picked")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    script = [
+        {
+            method: "POST"
+            url: server + "/" + infoHash + "/create"
+            ok: true
+            status: 200
+            json: { files: [], guessedFileIdx: invalid }
+            error: ""
+        }
+    ]
+    store = PlaybackStore(ScriptedTransport(script))
+    session = store.CreateSession(server, TorrentStream(infoHash))
+
+    Harness_Ok(not session.ok, "session refused")
+    Harness_Ok(session.error.InStr("guessedFileIdx") >= 0, "error names guessedFileIdx")
+    Harness_Ok(session.error.InStr("files") >= 0, "error names the returned keys")
+end sub
+
 sub Test_Playback_TorrentWithoutServerAddress()
     Harness_Suite("PlaybackStore.ResolvePlayback refuses a torrent with no server")
     store = PlaybackStore(ScriptedTransport([]))

@@ -2,9 +2,11 @@
 '
 ' One column of PrefRows backed by SettingsStore: streaming server address
 ' (edited through a system KeyboardDialog), UI language and UI scale (cycled on
-' OK). Every value is rebuilt on entry so the rows always reflect the persisted
-' values. A successful scale change flips scaleChanged, which MainScene
-' observes to reapply the live uiRoot scale.
+' OK), plus a Test-server row that hearts the configured streaming server so a
+' playback dead-end is caught before pressing play. Every value is rebuilt on
+' entry so the rows always reflect the persisted values. A successful scale
+' change flips scaleChanged, which MainScene observes to reapply the live
+' uiRoot scale.
 
 sub init()
     m.title = m.top.FindNode("settingsTitle")
@@ -59,6 +61,11 @@ sub BuildRows()
         title: "UI scale"
         value: ScaleValue()
     })
+    m.rows.Push({
+        action: "testServer"
+        title: "Test server"
+        value: "Check streaming server"
+    })
 
     content = CreateObject("roSGNode", "ContentNode")
     for each row in m.rows
@@ -101,6 +108,8 @@ sub onRowSelected()
         CycleLanguage()
     else if action = "scale"
         CycleScale()
+    else if action = "testServer"
+        TestServer()
     end if
 end sub
 
@@ -128,6 +137,7 @@ sub onServerChoice()
                 m.stores.settings.ClearServerAddress()
                 m.status.text = "Server address cleared."
             else if m.stores.settings.SetServerAddress(chosen)
+                m.stores.settings.Save()
                 m.status.text = "Server address updated."
             else
                 m.status.text = "Invalid address — use http://host[:port]"
@@ -166,5 +176,26 @@ sub CycleScale() as void
         m.status.text = "UI scale updated."
         m.top.scaleChanged = not m.top.scaleChanged
         BuildRows()
+    end if
+end sub
+
+' Report the streaming server's reachability through the status line. Verifying
+' the address before trying to play a torrent stream turns a 90-second playback
+' dead-end into a quick, obvious check.
+sub TestServer() as void
+    if m.stores = invalid or m.stores.settings = invalid or m.stores.playback = invalid then return
+    address = m.stores.settings.GetServerAddress()
+    if address = ""
+        m.status.text = "Set a streaming server address first."
+        return
+    end if
+
+    m.status.text = "Testing server…"
+    result = m.stores.playback.Heartbeat(address)
+    print "[rokumio] TestServer '" + address + "'/heartbeat -> ok=" + result.ok.ToStr() + " alive=" + result.alive.ToStr() + " error='" + result.error + "'"
+    if result.alive
+        m.status.text = "Server OK."
+    else
+        m.status.text = "Server unreachable: " + result.error
     end if
 end sub

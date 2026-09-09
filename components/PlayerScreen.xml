@@ -2,7 +2,10 @@
 <component name="PlayerScreen" extends="Group">
     <!-- Minimal player pushed from StreamsScreen with { url, metaType, metaId,
          videoId, season, episode, position, name, poster }. Pops on Back and
-         records the watched position through LibraryStore.SetPosition. -->
+         records the watched position through LibraryStore.SetPosition. Native
+         video UI is disabled entirely; transport (play/pause, seek, progress)
+         lives in this screen's own overlay so no platform overlay can ever
+         collide with it. OK and the play/pause buttons behave identically. -->
     <interface>
         <function name="SetStores" />
         <function name="OnEnter" />
@@ -19,13 +22,85 @@
             id="video"
             translation="[0, 0]"
             width="1920"
-            height="1080" />
+            height="1080"
+            enableUI="false"
+            enableTrickPlay="false" />
         <Label
-            id="playerTitle"
-            translation="[40, 1016]"
+            id="playerStatus"
+            translation="[40, 560]"
             width="1840"
             height="44"
-            font="font:SmallSystemFont"
-            color="0xE9F2EC99" />
+            font="font:MediumSystemFont"
+            color="0xE9F2ECFF"
+            horizAlign="center" />
+
+        <Group id="playerOverlay" visible="false">
+            <Rectangle
+                id="topScrim"
+                translation="[0, 0]"
+                width="1920"
+                height="120"
+                color="0x00000080" />
+            <Label
+                id="overlayTitle"
+                translation="[80, 46]"
+                width="1760"
+                height="50"
+                font="font:LargeBoldSystemFont"
+                color="0xE9F2ECFF" />
+
+            <Rectangle
+                id="bottomScrim"
+                translation="[0, 840]"
+                width="1920"
+                height="240"
+                color="0x000000A0" />
+            <Poster
+                id="playButton"
+                uri="pkg:/images/icon_play.png"
+                translation="[70, 905]"
+                width="80"
+                height="80" />
+            <Rectangle
+                id="progressTrack"
+                translation="[190, 924]"
+                width="1640"
+                height="16"
+                color="0xFFFFFF26" />
+            <Rectangle
+                id="progressFill"
+                translation="[190, 924]"
+                width="0"
+                height="16"
+                color="0x2BD675FF" />
+            <Label
+                id="timeLabel"
+                translation="[190, 950]"
+                width="1640"
+                height="34"
+                horizAlign="right"
+                font="font:MediumSystemFont"
+                color="0x8FA399FF" />
+
+            <Group id="seekToast" visible="false">
+                <Rectangle
+                    id="seekToastBg"
+                    translation="[830, 808]"
+                    width="260"
+                    height="60"
+                    color="0x000000E6" />
+                <Label
+                    id="seekToastText"
+                    translation="[830, 820]"
+                    width="260"
+                    height="36"
+                    horizAlign="center"
+                    font="font:MediumBoldSystemFont"
+                    color="0xE9F2ECFF" />
+            </Group>
+        </Group>
+
+        <Timer id="overlayHideTimer" duration="5" repeat="false" />
+        <Timer id="toastHideTimer" duration="1.5" repeat="false" />
     </children>
 </component>

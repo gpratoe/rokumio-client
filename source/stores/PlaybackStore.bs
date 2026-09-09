@@ -20,6 +20,7 @@ class PlaybackStore
 
     sub new(http as object)
         m.transport = http
+        m.videoExtensions = ["mkv", "mp4", "avi", "ts", "mov", "webm", "m4v", "m2ts"]
     end sub
 
     ' GET {address}/stream/{type}/{videoId}.json — the stream candidates for a
@@ -55,8 +56,13 @@ class PlaybackStore
 
     ' Ask the streaming server to load the engine for a torrent infoHash and
     ' pick a file. The create body forwards the stream's own fileIdx hint when
-    ' the add-on provided one, otherwise the server guesses. Returns the chosen
-    ' file index and the file list for a UI picker.
+    ' the add-on provided one, otherwise the server guesses. When the server
+    ' answers without a guessedFileIdx but with a file list, the largest
+    ' video-named file is picked; failing that the error carries the server's
+    ' returned keys so a live miswire is diagnosable. Create rides the long
+    ' timeout: a cold engine fetches metadata over DHT/trackers first and can
+    ' take tens of seconds. Returns the chosen file index and the file list for
+    ' a UI picker.
     function CreateSession(serverAddress as string, stream as object) as object
         result = { ok: false, infoHash: "", fileIdx: 0, files: invalid, error: "" }
         if serverAddress = ""
@@ -70,22 +76,96 @@ class PlaybackStore
 
         body = {}
         if stream.fileIdx <> invalid then body.guessFileIdx = stream.fileIdx
-        response = m.transport.Post(serverAddress + "/" + stream.infoHash + "/create", body)
+        print "[rokumio] CreateSession server='" + serverAddress + "' infoHash='" + stream.infoHash + "'"
+        response = m.transport.PostLong(serverAddress + "/" + stream.infoHash + "/create", body)
+        print "[rokumio]   -> ok=" + response.ok.ToStr() + " status=" + response.status.ToStr() + " error='" + response.error + "'"
         if not response.ok or response.json = invalid
             result.error = response.error
             return result
         end if
 
         json = response.json
-        if json.guessedFileIdx = invalid
+        fileIdx = json.guessedFileIdx
+        if fileIdx = invalid
+            files = json.files
+            if files <> invalid and Type(files) = "roArray" and files.Count() > 0
+                fileIdx = m.LargestVideoFileIdx(files)
+            end if
+        end if
+        if fileIdx = invalid or fileIdx < 0
             result.error = "create response missing guessedFileIdx"
+            keys = m.ServerResponseKeys(json)
+            if keys <> "" then result.error = result.error + " (server returned keys: " + keys + ")"
             return result
         end if
 
+        print "[rokumio] CreateSession fileIdx=" + fileIdx.ToStr()
+
         result.infoHash = stream.infoHash
-        result.fileIdx = json.guessedFileIdx
+        result.fileIdx = fileIdx
         result.files = json.files
         result.ok = true
+        return result
+    end function
+
+    ' Index of the largest video-named file in a create response's files array;
+    ' -1 when nothing is usable. Webtorrent file objects carry name/length; a
+    ' recognizable video extension is preferred, falling back to the largest
+    ' file regardless of name.
+    function LargestVideoFileIdx(files as object) as integer
+        best = -1
+        bestLength = -1
+        for i = 0 to files.Count() - 1
+            file = files[i]
+            if file <> invalid and Type(file) = "roAssociativeArray"
+                if m.IsVideoName(file.name) or m.IsVideoName(file.path)
+                    length = 0
+                    if file.length <> invalid then length = file.length
+                    if length > bestLength
+                        bestLength = length
+                        best = i
+                    end if
+                end if
+            end if
+        end for
+        if best >= 0 then return best
+
+        best = -1
+        bestLength = -1
+        for i = 0 to files.Count() - 1
+            file = files[i]
+            if file <> invalid and Type(file) = "roAssociativeArray"
+                length = 0
+                if file.length <> invalid then length = file.length
+                if length > bestLength
+                    bestLength = length
+                    best = i
+                end if
+            end if
+        end for
+        return best
+    end function
+
+    function IsVideoName(name as dynamic) as boolean
+        if name = invalid or Type(name) <> "roString" then return false
+        lower = LCase(name)
+        for each ext in m.videoExtensions
+            if lower.Right(ext.Len()) = ext then return true
+        end for
+        return false
+    end function
+
+    ' Comma-joined keys of a create response, for the missing-guessedFileIdx
+    ' error. An empty string when there is no object to introspect.
+    function ServerResponseKeys(json as object) as string
+        if json = invalid or Type(json) <> "roAssociativeArray" then return ""
+        keys = json.Keys()
+        if keys = invalid or keys.Count() = 0 then return ""
+        result = ""
+        for each key in keys
+            if result <> "" then result = result + ", "
+            result = result + key.ToStr()
+        end for
         return result
     end function
 
@@ -104,10 +184,13 @@ class PlaybackStore
             return result
         end if
 
+        print "[rokumio] ResolvePlayback server='" + serverAddress + "' infoHash='" + m.StreamInfoHash(stream) + "'"
+
         url = stream.url
         if url <> invalid and url.Trim() <> ""
             result.ok = true
             result.url = url.Trim()
+            print "[rokumio]   -> direct url '" + result.url + "'"
             return result
         end if
 
@@ -119,7 +202,13 @@ class PlaybackStore
 
         result.url = m.PlaybackUrl(serverAddress, session.infoHash, session.fileIdx)
         result.ok = true
+        print "[rokumio]   -> hls url '" + result.url + "'"
         return result
+    end function
+
+    function StreamInfoHash(stream as object) as string
+        if stream <> invalid and stream.infoHash <> invalid then return stream.infoHash.ToStr()
+        return ""
     end function
 
     ' Liveness check for the streaming server: GET /heartbeat → { success: true }.
@@ -135,7 +224,11 @@ class PlaybackStore
             result.ok = true
             result.alive = true
         else
-            result.error = response.error
+            if response.error <> "" then
+                result.error = response.error
+            else
+                result.error = "unexpected heartbeat response"
+            end if
         end if
         return result
     end function

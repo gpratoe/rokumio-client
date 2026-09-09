@@ -18,6 +18,12 @@
 
 const REQUEST_TIMEOUT_MS = 15000
 
+' The dedicated-request timeout ceiling for the streaming-server create call:
+' cold torrent engines fetch metadata from DHT/trackers first, which the service
+' lets take tens of seconds. A default-sized request would abort the session
+' mid-metadata, so create rides the long path.
+const LONG_REQUEST_TIMEOUT_MS = 120000
+
 ' The real client. Serializes a body assocarray to JSON and issues a blocking
 ' GET or POST over roUrlTransfer. The transfer runs async and Wait parks this
 ' thread until its roUrlEvent lands: the synchronous GetToString/PostFromString
@@ -26,36 +32,47 @@ const REQUEST_TIMEOUT_MS = 15000
 ' (roUrlEvent.GetString) and the status (roUrlEvent.GetResponseCode).
 function CreateSyncHttpClient() as object
     client = {}
-    client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
+
+    ' Shared roUrlTransfer round-trip for both timeouts. roUrlTransfer is not
+    ' re-entrant, so each request builds its own transfer + port; the two
+    ' request flavors only differ in how long Wait parks before cancelling.
+    ' Lives on the client AA (not as a bare global) because user-defined globals
+    ' resolve to invalid when a caller from another component invokes the
+    ' request functions — anything user-defined must be reachable through m.
+    client._execute = function(request as object) as object
         result = { ok: false, status: 0, body: "", error: "" }
         transfer = CreateObject("roUrlTransfer")
-        transfer.SetUrl(url)
-        if headers <> invalid then transfer.SetHeaders(headers)
+        transfer.SetUrl(request.url)
+        if request.headers <> invalid then transfer.SetHeaders(request.headers)
         transfer.RetainBodyOnError(true)
         port = CreateObject("roMessagePort")
         transfer.SetMessagePort(port)
 
+        print "[rokumio] " + request.method + " " + request.url
         issued = false
-        if method = "POST"
+        if request.method = "POST"
             payload = ""
-            if body <> invalid then payload = FormatJson(body)
+            if request.body <> invalid then payload = FormatJson(request.body)
             issued = transfer.AsyncPostFromString(payload)
         else
             issued = transfer.AsyncGetToString()
         end if
         if not issued
             result.error = "request could not be issued"
+            print "[rokumio]   -> could not be issued"
             return result
         end if
 
-        event = Wait(REQUEST_TIMEOUT_MS, port)
+        event = Wait(request.timeoutMs, port)
         if event = invalid
             transfer.AsyncCancel()
             result.error = "request timed out"
+            print "[rokumio]   -> timed out after " + request.timeoutMs.ToStr() + "ms"
             return result
         end if
         if Type(event) <> "roUrlEvent"
             result.error = "unexpected port message"
+            print "[rokumio]   -> unexpected port message"
             return result
         end if
 
@@ -71,7 +88,28 @@ function CreateSyncHttpClient() as object
                 result.error = "HTTP " + result.status.ToStr()
             end if
         end if
+        print "[rokumio]   -> status=" + result.status.ToStr() + " ok=" + result.ok.ToStr() + " bytes=" + result.body.Len().ToStr()
+        if result.error <> "" then print "[rokumio]   -> error: " + result.error
         return result
+    end function
+
+    client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
+        return m._execute({
+            method: method
+            url: url
+            headers: headers
+            body: body
+            timeoutMs: REQUEST_TIMEOUT_MS
+        })
+    end function
+    client.requestLong = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
+        return m._execute({
+            method: method
+            url: url
+            headers: headers
+            body: body
+            timeoutMs: LONG_REQUEST_TIMEOUT_MS
+        })
     end function
     return client
 end function
@@ -90,6 +128,14 @@ class Transport
 
     function Post(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
         return m.Result(m.client.request("POST", url, headers, body))
+    end function
+
+    ' Long-window POST for requests that may legitimately run tens of seconds —
+    ' the streaming-server create call is the one caller today (cold torrent
+    ' engine setup). Uses requestLong so the default timeout is never stretched
+    ' for every caller.
+    function PostLong(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
+        return m.Result(m.client.requestLong("POST", url, headers, body))
     end function
 
     ' Normalize a raw client result into the transport result: parse JSON when
