@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="StreamResolveTask" extends="Task">
+    <interface>
+        <field id="serverAddress" type="string" value="" />
+        <field id="stream" type="assocarray" />
+        <field id="result" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/PlaybackStore.bs" />
+    <script type="text/brightscript" uri="pkg:/components/StreamResolveTask.brs" />
+</component>

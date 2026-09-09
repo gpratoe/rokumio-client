@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="StreamsLoaderTask" extends="Task">
+    <interface>
+        <field id="metaAddress" type="string" value="" />
+        <field id="metaType" type="string" value="" />
+        <field id="metaId" type="string" value="" />
+        <field id="videoId" type="string" value="" />
+        <field id="addonAddresses" type="array" />
+        <field id="result" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/PlaybackStore.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/EpisodesStore.bs" />
+    <script type="text/brightscript" uri="pkg:/components/StreamsLoaderTask.brs" />
+</component>
