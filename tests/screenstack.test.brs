@@ -6,10 +6,11 @@
 ' behavior: push shows + enters, pop hides + blurs + exits + refocuses, back
 ' delegates, popTo walks the stack, and the bottom screen is never popped away.
 
-function MockNode(id as string, log as object) as object
+function MockNode(id as string, log as object, parent = invalid as dynamic) as object
     node = {
         id: id
         visible: false
+        parent: parent
         onBackResult: false
         _log: log
     }
@@ -25,7 +26,21 @@ function MockNode(id as string, log as object) as object
         return invalid
     end function
 
+    node.getParent = function() as dynamic
+        return m.parent
+    end function
+
     return node
+end function
+
+' A fake parent for the node-destruction path: ScreenStack reads getParent() and
+' calls RemoveChild on whatever the node reports, so the parent just logs it.
+function MockParent(log as object) as object
+    parent = { _log: log }
+    parent.RemoveChild = function(node as object)
+        m._log.Push({ screen: node.id, call: "RemoveChild" })
+    end function
+    return parent
 end function
 
 function MockScene(screens as object, log as object) as object
@@ -178,6 +193,58 @@ sub Test_Pop_RestoresPrevious()
 
     call = Test_FindCall(log, "home", "SetFocus")
     Harness_Ok(call <> invalid and call.value = true, "home refocused")
+end sub
+
+sub Test_PushNode_LikePush()
+    Harness_Suite("ScreenStack.pushNode pushes a caller-built node like push")
+    log = []
+    home = MockNode("home", log)
+    player = MockNode("player", log, MockParent(log))
+    scene = MockScene({ home: home }, log)
+    stack = ScreenStack(scene)
+
+    stack.push("home", invalid)
+    stack.pushNode(player, { url: "http://example/lib.m3u8" })
+
+    Harness_Equal(stack.count(), 2, "count is 2 after pushNode")
+    Harness_Ok(player.visible, "player visible after pushNode")
+    Harness_Ok(not home.visible, "outgoing home hidden after pushNode")
+
+    call = Test_FindCall(log, "player", "OnEnter")
+    Harness_Ok(call <> invalid and call.withParams.url = "http://example/lib.m3u8", "pushNode OnEnter received params")
+end sub
+
+sub Test_PushNode_DestroysOnPop()
+    Harness_Suite("ScreenStack.pop removes a pushNode'd screen from the tree")
+    log = []
+    home = MockNode("home", log)
+    parent = MockParent(log)
+    player = MockNode("player", log, parent)
+    scene = MockScene({ home: home }, log)
+    stack = ScreenStack(scene)
+
+    stack.push("home", invalid)
+    stack.pushNode(player, invalid)
+
+    ret = stack.pop()
+    Harness_Ok(ret = true, "pop returns true")
+    Harness_Equal(stack.count(), 1, "count back to 1")
+    Harness_Ok(Test_FindCall(log, "player", "OnExit") <> invalid, "player exited before teardown")
+    Harness_Ok(Test_FindCall(log, "player", "RemoveChild") <> invalid, "player removed from its parent on pop")
+end sub
+
+sub Test_Static_Push_NotDestroyedOnPop()
+    Harness_Suite("ScreenStack.pop never removes a statically-resolved screen")
+    log = []
+    detail = MockNode("detail", log, MockParent(log))
+    scene = MockScene({ home: MockNode("home", log), detail: detail }, log)
+    stack = ScreenStack(scene)
+
+    stack.push("home", invalid)
+    stack.push("detail", invalid)
+    stack.pop()
+
+    Harness_Ok(Test_FindCall(log, "detail", "RemoveChild") = invalid, "static screen stays in the tree")
 end sub
 
 sub Test_Back_Delegates()

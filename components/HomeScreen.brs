@@ -155,6 +155,7 @@ function LibraryRow() as dynamic
             type: entry.metaType
             name: entry.name
             poster: entry.poster
+            logo: entry.logo
             videoId: entry.videoId
             season: entry.season
             episode: entry.episode
@@ -265,7 +266,7 @@ sub onRowItemSelected(event as object)
             screen: "detailsScreen"
             params: {
                 addonAddress: MetaAddress()
-                meta: { id: item.id, type: item.type, name: item.name, poster: item.poster }
+                meta: { id: item.id, type: item.type, name: item.name, poster: item.poster, logo: item.logo }
                 resume: {
                     videoId: item.videoId
                     season: item.season

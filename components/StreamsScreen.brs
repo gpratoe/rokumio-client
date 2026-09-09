@@ -8,6 +8,11 @@
 ' resolution failure (torrent streams need the streaming server, which is not
 ' configured until the settings screen exists) lands on the status line.
 '
+' Nothing here blocks the render thread: meta + every add-on's stream list load
+' through StreamsLoaderTask, and every torrent resolve runs through
+' StreamResolveTask (the create call can park for the full 120s long timeout on
+' a cold engine). The screen only does cheap formatting in its own thread.
+'
 ' Params: { addonAddress, metaType, metaId, videoId, season, episode, position,
 '           name, poster }.
 
@@ -22,6 +27,9 @@ sub init()
     m.streamsList.ObserveField("rowItemSelected", "onStreamSelected")
 
     m.streams = []
+    m.loadTask = invalid
+    m.resolveTask = invalid
+    m.resolving = false
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -37,25 +45,89 @@ function OnEnter(params as object) as void
         RestoreFocus()
         return
     end if
+
+    CancelStreamsLoad()
     m.params = params
     name = params.name
     if name = invalid then name = ""
     m.headTitle.text = name
 
-    RenderMeta(params)
-    RenderStreams(params)
+    m.synopsis.text = "No synopsis available."
+    m.headSub.text = ""
+    m.bgPoster.uri = ""
+    m.streams = []
+    m.streamsList.content = invalid
+    m.status.text = "Looking for streams…"
+
+    LoadStreams(params)
 end function
+
+' Kick the meta + stream-list fetch off the render thread. The installed add-ons
+' are read here (registry reads only, no network) so only the addresses that
+' advertise the "stream" resource cross into the task.
+sub LoadStreams(params as object)
+    print "[rokumio] LoadStreams called"
+    if m.stores = invalid or m.stores.addons = invalid then return
+    if m.loadTask <> invalid then return
+
+    addresses = []
+    for each addon in m.stores.addons.GetAll()
+        if addon.resources <> invalid and HasResource(addon.resources, "stream")
+            if addon.address <> invalid and addon.address <> "" then addresses.Push(addon.address)
+        end if
+    end for
+    print "[rokumio] LoadStreams addonAddresses=" + addresses.Count().ToStr()
+
+    task = CreateObject("roSGNode", "StreamsLoaderTask")
+    task.id = "streamsLoader"
+    m.top.AppendChild(task)
+    task.metaAddress = ParamString(params.addonAddress)
+    task.metaType = ParamString(params.metaType)
+    task.metaId = ParamString(params.metaId)
+    task.videoId = ParamString(params.videoId)
+    task.addonAddresses = addresses
+    task.observeField("result", "onStreamsLoaded")
+    m.loadTask = task
+    task.control = "RUN"
+    print "[rokumio] LoadStreams task started"
+end sub
+
+' The loader finished. Apply the fetched meta to the left panel, then fill the
+' stream list. A stale result that landed after CancelStreamsLoad is dropped by
+' the m.loadTask guard.
+sub onStreamsLoaded()
+    if m.loadTask = invalid then return
+    task = m.loadTask
+    m.loadTask = invalid
+    result = task.result
+    'print "[rokumio] onStreamsLoaded result ok=" + (result <> invalid).ToStr() + " streams=" + (result.streams <> invalid and result.streams.Count()).ToStr() + " error=" + (result.error <> invalid and result.error or "")
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result <> invalid then ApplyMeta(m.params, result.meta)
+
+    m.streams = []
+    if result <> invalid and result.streams <> invalid
+        for each stream in result.streams
+            m.streams.Push({ stream: stream })
+        end for
+    end if
+    PopulateStreams()
+end sub
+
+sub CancelStreamsLoad()
+    if m.loadTask <> invalid
+        m.loadTask.unobserveField("result")
+        m.loadTask.control = "STOP"
+        if m.loadTask.getParent() <> invalid then m.top.RemoveChild(m.loadTask)
+        m.loadTask = invalid
+    end if
+end sub
 
 ' Fill the left panel from the full meta (episodes.GetMeta against the meta
 ' add-on). The fetched meta carries the real title, background artwork and
 ' synopsis the slim catalog params lack.
-sub RenderMeta(params as object)
-    meta = invalid
-    if m.stores <> invalid and m.stores.episodes <> invalid
-        answer = m.stores.episodes.GetMeta(params.addonAddress, params.metaType, params.metaId)
-        if answer.ok then meta = answer.meta
-    end if
-
+sub ApplyMeta(params as object, meta as object)
     m.synopsis.text = "No synopsis available."
     m.headSub.text = ""
     bg = ""
@@ -93,27 +165,9 @@ function EpisodeFor(meta as object, season as object, episode as object) as dyna
     return invalid
 end function
 
-' Collect every stream candidate from the installed add-ons that advertise the
-' "stream" resource, then fill the right-side list.
-sub RenderStreams(params as object)
-    m.streams = []
-    m.status.text = "Looking for streams…"
-    m.streamsList.content = invalid
-
-    if m.stores = invalid or m.stores.addons = invalid or m.stores.playback = invalid then return
-    for each addon in m.stores.addons.GetAll()
-        if addon.resources <> invalid and HasResource(addon.resources, "stream")
-            result = m.stores.playback.Streams(addon.address, params.metaType, params.videoId)
-            if result.ok and result.streams <> invalid
-                for each stream in result.streams
-                    m.streams.Push({
-                        stream: stream
-                    })
-                end for
-            end if
-        end if
-    end for
-
+' Build the right-side list from the loaded m.streams (already wrapped one card
+' per stream).
+sub PopulateStreams()
     if m.streams.Count() = 0
         m.status.text = "No streams found for this title."
         return
@@ -203,30 +257,78 @@ function FormatRuntime(runtime as dynamic) as string
     return runtime.ToStr().Trim()
 end function
 
-' OK on a stream card: resolve to a playable URL (direct URLs play as-is; torrent
-' streams need the streaming server, configured via SettingsStore once the
-' settings screen exists) and push the player.
+' OK on a stream card: direct-URL streams play as-is (nothing blocking); torrent
+' streams resolve through StreamResolveTask, which owns the streaming-server
+' create call (up to the 120s long timeout on a cold engine) off the render
+' thread. A re-entry guard swallows repeat OKs until the resolve reports back.
 sub onStreamSelected()
     data = m.streamsList.rowItemSelected
     if data = invalid or data.Count() < 2 then return
     index = data[0]
     if m.streams = invalid or index < 0 or index >= m.streams.Count() then return
-    if m.stores = invalid or m.stores.playback = invalid then return
+    if m.resolving or m.resolveTask <> invalid then return
 
     stream = m.streams[index].stream
-    serverAddress = ""
-    if m.stores.settings <> invalid then serverAddress = m.stores.settings.GetServerAddress()
-    result = m.stores.playback.ResolvePlayback(serverAddress, stream)
-    if not result.ok
-        m.status.text = "Could not play this stream: " + result.error
+    url = stream.url
+    if url <> invalid and url.Trim() <> ""
+        StartPlayback(url.Trim())
         return
     end if
 
+    serverAddress = ""
+    if m.stores <> invalid and m.stores.settings <> invalid then serverAddress = m.stores.settings.GetServerAddress()
+
+    m.resolving = true
+    m.status.text = "Resolving stream…"
+    task = CreateObject("roSGNode", "StreamResolveTask")
+    task.id = "streamResolve"
+    m.top.AppendChild(task)
+    task.serverAddress = serverAddress
+    task.stream = stream
+    task.observeField("result", "onResolveResult")
+    m.resolveTask = task
+    task.control = "RUN"
+end sub
+
+' The resolve finished. Success pushes the player; a failure (e.g. "request
+' timed out") surfaces on the status line. Results that land after a Back-out
+' are dropped by the m.resolveTask guard.
+sub onResolveResult()
+    if m.resolveTask = invalid then return
+    if not m.resolving then return
+    task = m.resolveTask
+    m.resolveTask = invalid
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    m.resolving = false
+
+    if result = invalid or not result.ok
+        error = ""
+        if result <> invalid then error = result.error
+        m.status.text = "Could not play this stream: " + error
+        return
+    end if
+
+    StartPlayback(result.url)
+end sub
+
+sub CancelResolve()
+    if m.resolveTask <> invalid
+        m.resolveTask.unobserveField("result")
+        m.resolveTask.control = "STOP"
+        if m.resolveTask.getParent() <> invalid then m.top.RemoveChild(m.resolveTask)
+        m.resolveTask = invalid
+    end if
+    m.resolving = false
+end sub
+
+sub StartPlayback(url as string)
     m.status.text = "Starting playback…"
     m.top.pushRequest = {
         screen: "playerScreen"
         params: {
-            url: result.url
+            url: url
             metaType: m.params.metaType
             metaId: m.params.metaId
             videoId: m.params.videoId
@@ -235,15 +337,24 @@ sub onStreamSelected()
             position: m.params.position
             name: m.headTitle.text
             poster: m.params.poster
+            logo: m.params.logo
         }
     }
 end sub
+
+' Params values can carry invalid; string interface fields cannot, so coerce.
+function ParamString(value as dynamic) as string
+    if value = invalid then return ""
+    return value.ToStr()
+end function
 
 sub RestoreFocus()
     if m.streams.Count() > 0 then m.streamsList.SetFocus(true)
 end sub
 
 function OnExit() as void
+    CancelStreamsLoad()
+    CancelResolve()
 end function
 
 function OnBackPressed() as boolean

@@ -22,10 +22,11 @@ sub init()
     m.episodesScreen.ObserveField("pushRequest", "onEpisodesAction")
 
     ' StreamsScreen reports the player push after a stream is resolved; the
-    ' player itself never pushes — Back pops it.
+    ' player itself never pushes — Back pops it. The player is NOT a static child
+    ' anymore: it is built from scratch per play and destroyed on pop (see
+    ' onStreamsAction), so this Scene only needs StreamsScreen here.
     m.streamsScreen = m.top.FindNode("streamsScreen")
     m.streamsScreen.ObserveField("pushRequest", "onStreamsAction")
-    m.playerScreen = m.top.FindNode("playerScreen")
 
     ' SettingsScreen is content-focused (no pushes); MainScene only needs its
     ' live UI-scale signal. AddonsScreen is also content-only.
@@ -64,7 +65,6 @@ sub init()
     m.detailsScreen.callFunc("SetStores", m.stores)
     m.episodesScreen.callFunc("SetStores", m.stores)
     m.streamsScreen.callFunc("SetStores", m.stores)
-    m.playerScreen.callFunc("SetStores", m.stores)
     m.settingsScreen.callFunc("SetStores", m.stores)
     m.addonsScreen.callFunc("SetStores", m.stores)
 
@@ -93,11 +93,37 @@ sub onEpisodesAction()
     m.stack.push(request.screen, request.params)
 end sub
 
-' StreamsScreen's action channel; same one-action routing.
+' StreamsScreen's action channel; same one-action routing. The player is special:
+' it is created here, per play, instead of being a declared child — a component
+' that survives pop keeps its Video node (and the audio it is decoding) alive on
+' this device no matter how thoroughly the node itself is torn down. Removing the
+' whole component from the tree and dropping the reference is what actually lets
+' SceneGraph destroy it. The stack teardown calls OnExit first, so the resume
+' position is saved before the component dies.
 sub onStreamsAction()
     request = m.streamsScreen.pushRequest
     if request = invalid or request.screen = invalid then return
-    m.stack.push(request.screen, request.params)
+    if request.screen <> "playerScreen" then
+        m.stack.push(request.screen, request.params)
+        return
+    end if
+
+    player = CreateObject("roSGNode", "PlayerScreen")
+    player.id = "playerScreen"
+    m.uiRoot.AppendChild(player)
+    player.callFunc("SetStores", m.stores)
+    player.ObserveField("closeRequest", "onPlayerClose")
+    m.stack.pushNode(player, request.params)
+end sub
+
+' The player requests its own pop once teardown is genuinely complete (a stop
+' can be asynchronous while buffering — the leave is held open until the OS
+' reports "stopped"). Only pop when it is still the top screen, so a stale
+' closeRequest can never pop anything else.
+sub onPlayerClose()
+    if m.stack.top() <> invalid and m.stack.top().id = "playerScreen"
+        m.stack.pop()
+    end if
 end sub
 
 sub onConfirmExitClose()

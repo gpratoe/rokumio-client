@@ -175,6 +175,7 @@ sub ResumeEpisode()
             position: ResumePosition()
             name: m.meta.name
             poster: m.meta.poster
+            logo: m.meta.logo
         }
     }
 end sub
@@ -191,11 +192,12 @@ sub PlayMedia()
                 metaType: "series"
                 metaId: m.meta.id
                 videoId: m.stores.episodes.ResolveVideoId(m.meta.id, 1, 1)
-                season: 1
-                episode: 1
-                position: ResumePosition()
-                name: m.meta.name
-                poster: m.meta.poster
+season: 1
+            episode: 1
+            position: ResumePosition()
+            name: m.meta.name
+            poster: m.meta.poster
+            logo: m.meta.logo
             }
         }
     else
@@ -209,6 +211,7 @@ sub PlayMedia()
                 position: ResumePosition()
                 name: m.meta.name
                 poster: m.meta.poster
+                logo: m.meta.logo
             }
         }
     end if
@@ -219,7 +222,7 @@ sub OpenEpisodes()
         screen: "episodesScreen"
         params: {
             addonAddress: m.addonAddress
-            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, background: m.meta.background }
+            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, background: m.meta.background, logo: m.meta.logo }
             resume: m.resume
         }
     }
@@ -237,7 +240,7 @@ sub ToggleLibrary()
     if m.stores.library.IsSaved(m.meta.id)
         m.stores.library.RemoveSaved(m.meta.id)
     else
-        m.stores.library.AddSaved(m.meta.id, m.meta.type, m.meta.name, m.meta.poster)
+        m.stores.library.AddSaved(m.meta.id, m.meta.type, m.meta.name, m.meta.poster, m.meta.logo)
     end if
     label = LibraryActionLabel()
     for i = 0 to m.chips.Count() - 1

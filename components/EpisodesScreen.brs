@@ -219,6 +219,7 @@ sub PushEpisode(season as integer, ep as object)
             position: position
             name: m.meta.name
             poster: m.meta.poster
+            logo: m.meta.logo
         }
     }
 end sub

@@ -126,7 +126,7 @@ sub ShowRemoveConfirm(row as object)
         return
     end if
     m.pendingRow = row
-    nodeType = "MessageDialog"
+    nodeType = "StandardMessageDialog"
     dialog = CreateObject("roSGNode", nodeType)
     dialog.title = "Remove " + row.name + "?"
     dialog.message = "You can add it back at any time from this screen."

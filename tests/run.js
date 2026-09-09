@@ -93,12 +93,15 @@ function checkItemContract() {
 // Group.visible defaults to true, and screens are declared children of the
 // Scene, so an undisclosed screen paints over the stack's top screen (this bit
 // us: DummyDetail covered HomeScreen from the first frame). Screens must start
-// hidden; only the stack makes them visible.
+// hidden; only the stack makes them visible. PlayerScreen is intentionally NOT
+// here: it is built fresh per play in MainScene and destroyed on pop so the
+// device releases the media player (a static child would survive and keep
+// leaking audio). Its interface contract is still pinned by checkScreenContract.
 function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
     let ok = true;
-    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'ConfirmExitDialog']) {
+    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'ConfirmExitDialog']) {
         const element = xml.match(new RegExp(`<${name}[^>]*>`));
         if (!element) {
             console.error(`MainScene.xml is missing a <${name} ... /> child`);

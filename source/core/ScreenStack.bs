@@ -39,6 +39,18 @@ class ScreenStack
         ' invalid, leaving a blank screen with the old top still on the stack.)
         node = m.scene.FindNode(screenId)
         if node = invalid then return
+        m.pushNode(node, params, modal, false)
+    end sub
+
+    ' Push a screen instance the stack does not resolve by id — used for screens
+    ' the caller builds fresh each time (the player). The stack owns the node's
+    ' whole lifetime: pop() tears it out of the tree and drops the reference, so
+    ' SceneGraph destroys the component for real. That is the only reliable way to
+    ' release a Video node's media player on this device; a surviving component
+    ' keeps a mid-buffer stream decoding invisibly behind the next screen.
+    sub pushNode(node as object, params = invalid as dynamic, modal = false as boolean, destroy = true as boolean)
+        if node = invalid then return
+        screenId = node.id
 
         shown = m.top()
         if shown <> invalid
@@ -49,7 +61,7 @@ class ScreenStack
             shown.node.callFunc("BlurFocus")
         end if
 
-        m.entries.Push({ id: screenId, node: node })
+        m.entries.Push({ id: screenId, node: node, destroy: destroy })
         node.visible = true
         node.SetFocus(true)
         node.callFunc("OnEnter", params)
@@ -62,6 +74,12 @@ class ScreenStack
         removed.node.visible = false
         removed.node.callFunc("BlurFocus")
         removed.node.callFunc("OnExit")
+
+        if removed.destroy
+            parent = removed.node.getParent()
+            if parent <> invalid then parent.RemoveChild(removed.node)
+        end if
+        removed.node = invalid
 
         shown = m.top()
         if shown <> invalid

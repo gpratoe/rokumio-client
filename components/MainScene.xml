@@ -29,7 +29,6 @@
             <DetailsScreen id="detailsScreen" visible="false" />
             <EpisodesScreen id="episodesScreen" visible="false" />
             <StreamsScreen id="streamsScreen" visible="false" />
-            <PlayerScreen id="playerScreen" visible="false" />
             <SettingsScreen id="settingsScreen" visible="false" />
             <AddonsScreen id="addonsScreen" visible="false" />
 

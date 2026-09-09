@@ -19,6 +19,8 @@ sub init()
     m.rows = []
     m.languages = ["en", "es", "fr", "de", "it", "pt"]
     m.scales = [100, 125, 150]
+    m.heartbeatTask = invalid
+    m.testing = false
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -28,12 +30,14 @@ function SetStores(stores as object) as void
 end function
 
 function OnEnter(params as object) as void
+    CancelTestServer()
     BuildRows()
     m.status.text = ""
     m.list.SetFocus(true)
 end function
 
 function OnExit() as void
+    CancelTestServer()
 end function
 
 function OnBackPressed() as boolean
@@ -181,21 +185,55 @@ end sub
 
 ' Report the streaming server's reachability through the status line. Verifying
 ' the address before trying to play a torrent stream turns a 90-second playback
-' dead-end into a quick, obvious check.
+' dead-end into a quick, obvious check. The heartbeat rides the default request
+' timeout, so it runs through HeartbeatTask — a dead address costs the worker
+' thread, not a frozen Settings screen.
 sub TestServer() as void
-    if m.stores = invalid or m.stores.settings = invalid or m.stores.playback = invalid then return
+    if m.stores = invalid or m.stores.settings = invalid then return
     address = m.stores.settings.GetServerAddress()
     if address = ""
         m.status.text = "Set a streaming server address first."
         return
     end if
+    if m.testing or m.heartbeatTask <> invalid then return
 
+    m.testing = true
     m.status.text = "Testing server…"
-    result = m.stores.playback.Heartbeat(address)
-    print "[rokumio] TestServer '" + address + "'/heartbeat -> ok=" + result.ok.ToStr() + " alive=" + result.alive.ToStr() + " error='" + result.error + "'"
+    task = CreateObject("roSGNode", "HeartbeatTask")
+    task.id = "heartbeatTask"
+    m.top.AppendChild(task)
+    task.address = address
+    task.observeField("result", "onTestServerResult")
+    m.heartbeatTask = task
+    task.control = "RUN"
+end sub
+
+' The heartbeat finished. A stale result that landed after CancelTestServer is
+' dropped by the m.heartbeatTask guard.
+sub onTestServerResult()
+    if m.heartbeatTask = invalid then return
+    if not m.testing then return
+    task = m.heartbeatTask
+    m.heartbeatTask = invalid
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    m.testing = false
+
+    print "[rokumio] TestServer /heartbeat -> ok=" + result.ok.ToStr() + " alive=" + result.alive.ToStr() + " error='" + result.error + "'"
     if result.alive
         m.status.text = "Server OK."
     else
         m.status.text = "Server unreachable: " + result.error
     end if
+end sub
+
+sub CancelTestServer()
+    if m.heartbeatTask <> invalid
+        m.heartbeatTask.unobserveField("result")
+        m.heartbeatTask.control = "STOP"
+        if m.heartbeatTask.getParent() <> invalid then m.top.RemoveChild(m.heartbeatTask)
+        m.heartbeatTask = invalid
+    end if
+    m.testing = false
 end sub

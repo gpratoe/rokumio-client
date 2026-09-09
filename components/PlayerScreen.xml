@@ -12,19 +12,14 @@
         <function name="OnExit" />
         <function name="OnBackPressed" />
         <function name="BlurFocus" />
+        <field id="closeRequest" type="assocarray" alwaysNotify="true" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/PlayerScreen.brs" />
 
     <children>
         <Rectangle id="playerBg" width="1920" height="1080" color="0x000000FF" />
-        <Video
-            id="video"
-            translation="[0, 0]"
-            width="1920"
-            height="1080"
-            enableUI="false"
-            enableTrickPlay="false" />
+        <Group id="videoSurface" width="1920" height="1080" />
         <Label
             id="playerStatus"
             translation="[40, 560]"
@@ -33,6 +28,24 @@
             font="font:MediumSystemFont"
             color="0xE9F2ECFF"
             horizAlign="center" />
+
+        <Group id="bufferingGroup" visible="false" translation="[510, 287]">
+            <Poster
+                id="logoBack"
+                uri=""
+                width="900"
+                height="506"
+                opacity="0.22"
+                loadDisplayMode="scaleToFit" />
+            <Poster
+                id="logoFront"
+                uri=""
+                width="900"
+                height="506"
+                opacity="1.0"
+                loadDisplayMode="scaleToFit"
+                clippingRect="[0, 0, 0, 506]" />
+        </Group>
 
         <Group id="playerOverlay" visible="false">
             <Rectangle
@@ -102,5 +115,6 @@
 
         <Timer id="overlayHideTimer" duration="5" repeat="false" />
         <Timer id="toastHideTimer" duration="1.5" repeat="false" />
+        <Timer id="stopWatchdog" duration="3" repeat="false" />
     </children>
 </component>
