@@ -10,12 +10,13 @@
 ' doesn't. Each chip ContentNode maps to a stored action id, and a single
 ' selection observer dispatches on that id.
 '
-' Params: { addonAddress, meta } for a hero rendered from the catalog/CW data
+' Params: { addonAddress, meta } for a hero rendered from the catalog data
 ' immediately (no fetch needed; series browsing happens on EpisodesScreen),
 ' plus an optional resume hint { videoId, season, episode, position } from the
-' Continue-Watching row. When no hint arrives, the local LibraryStore supplies
-' the most recent position for the meta, so a catalog-opened show still offers
-' to pick up where the user left off.
+' Continue-Watching row. CW tiles fetch their own full meta by id before this
+' screen opens, so the hero there matches a catalog-opened title. When no hint
+' arrives, the local LibraryStore supplies the most recent position for the
+' meta, so a catalog-opened show still offers to pick up where the user left off.
 
 sub init()
     m.heroPoster = m.top.FindNode("heroPoster")
@@ -240,7 +241,7 @@ sub ToggleLibrary()
     if m.stores.library.IsSaved(m.meta.id)
         m.stores.library.RemoveSaved(m.meta.id)
     else
-        m.stores.library.AddSaved(m.meta.id, m.meta.type, m.meta.name, m.meta.poster, m.meta.logo)
+        m.stores.library.AddSaved(m.meta.id, m.meta.type, m.meta.name, m.meta.poster)
     end if
     label = LibraryActionLabel()
     for i = 0 to m.chips.Count() - 1

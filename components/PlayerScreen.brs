@@ -446,10 +446,7 @@ sub SavePosition()
     if params.name <> invalid then name = params.name
     poster = ""
     if params.poster <> invalid then poster = params.poster
-    logo = ""
-    if params.logo <> invalid then logo = params.logo
-    if logo = "" then logo = poster
 
-    m.stores.library.SetPosition(params.videoId, params.metaId, params.metaType, season, episode, name, poster, logo, Int(position), Int(duration))
+    m.stores.library.SetPosition(params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration))
     m.saved = true
 end sub

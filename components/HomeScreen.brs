@@ -155,7 +155,6 @@ function LibraryRow() as dynamic
             type: entry.metaType
             name: entry.name
             poster: entry.poster
-            logo: entry.logo
             videoId: entry.videoId
             season: entry.season
             episode: entry.episode
@@ -248,8 +247,11 @@ end function
 ' rowItemSelected is a field observer, so this receives the roSGNodeEvent. Its
 ' data is a [row, itemIndex] pair; the selected name comes from the row's own
 ' data (the tiles only know their parsed label). A catalog tile opens Details
-' for its meta; a Continue-Watching tile adds the resume hint and points the
-' meta fetch at the Cinemeta built-in.
+' for its meta. A Continue-Watching tile adds the resume hint and, like any
+' other tile, fetches its full meta from the Cinemeta built-in by id first (the
+' local record stores only what the Home row shows — id, name, poster, resume)
+' so Details renders the same full hero as a catalog-opened title. On fetch
+' failure the slim record falls back, so the row still opens.
 sub onRowItemSelected(event as object)
     data = event.GetData()
     if data = invalid or data.Count() < 2 then return
@@ -262,11 +264,19 @@ sub onRowItemSelected(event as object)
 
     item = metas[index]
     if m.gridRows[row].source = "library"
+        meta = {
+            id: item.id
+            type: item.type
+            name: item.name
+            poster: item.poster
+        }
+        answer = m.stores.episodes.GetMeta(MetaAddress(), item.type, item.id)
+        if answer.ok and answer.meta <> invalid then meta = answer.meta
         m.top.pushRequest = {
             screen: "detailsScreen"
             params: {
                 addonAddress: MetaAddress()
-                meta: { id: item.id, type: item.type, name: item.name, poster: item.poster, logo: item.logo }
+                meta: meta
                 resume: {
                     videoId: item.videoId
                     season: item.season
