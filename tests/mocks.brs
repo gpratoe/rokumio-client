@@ -41,5 +41,10 @@ function ScriptedTransport(script as object) as object
     transport.PostLong = function(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
         return m._respond("POST", url, body)
     end function
+    transport.EndpointUrl = function(storedAddress as string, endpointPath as string) as string
+        at = storedAddress.InStr("?")
+        if at < 0 then return storedAddress + endpointPath
+        return storedAddress.Left(at) + endpointPath + storedAddress.Mid(at)
+    end function
     return transport
 end function

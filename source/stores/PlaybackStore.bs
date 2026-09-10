@@ -36,7 +36,7 @@ class PlaybackStore
             return result
         end if
 
-        url = addonAddress + "/stream/" + metaType + "/" + videoId + ".json"
+        url = m.transport.EndpointUrl(addonAddress, "/stream/" + metaType + "/" + videoId + ".json")
         response = m.transport.Get(url)
         if not response.ok or response.json = invalid
             result.error = response.error

@@ -204,7 +204,11 @@ end sub
 function HasResource(resources as object, name as string) as boolean
     if resources = invalid then return false
     for each resource in resources
-        if resource = name then return true
+        if Type(resource) = "roAssociativeArray"
+            if resource.name <> invalid and resource.name = name then return true
+        else
+            if resource = name then return true
+        end if
     end for
     return false
 end function

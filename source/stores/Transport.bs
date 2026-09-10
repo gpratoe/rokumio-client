@@ -138,6 +138,16 @@ class Transport
         return m.Result(m.client.requestLong("POST", url, headers, body))
     end function
 
+    ' Build a full add-on endpoint URL from a stored address that may carry a
+    ' query string (the user's add-on config, e.g. torrentio's ?provider=...).
+    ' The endpoint path is inserted BEFORE the query so the request hits the
+    ' right resource with the user's args intact.
+    function EndpointUrl(storedAddress as string, endpointPath as string) as string
+        at = storedAddress.InStr("?")
+        if at < 0 then return storedAddress + endpointPath
+        return storedAddress.Left(at) + endpointPath + storedAddress.Mid(at)
+    end function
+
     ' Normalize a raw client result into the transport result: parse JSON when
     ' the body is non-empty, and demote a 2xx with a broken body to a failure.
     function Result(raw as object) as object

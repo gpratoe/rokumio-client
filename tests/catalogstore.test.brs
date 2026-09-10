@@ -48,6 +48,25 @@ sub Test_Catalog_ManifestRejectsMissingId()
     Harness_Equal(result.error, "manifest missing id or name", "error names the missing field")
 end sub
 
+sub Test_Catalog_FetchPreservesQuery()
+    Harness_Suite("CatalogStore.Catalog keeps user query args in the URL")
+    script = [
+        {
+            method: "GET"
+            url: "https://addon.example.com/catalog/movie/top/skip=0.json?provider=yts"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0000001", type: "movie", name: "One" } ] }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog("https://addon.example.com?provider=yts", "movie", "top")
+
+    Harness_Ok(result.ok, "catalog ok")
+    Harness_Equal(result.metas.Count(), 1, "one meta returned")
+end sub
+
 sub Test_Catalog_Fetch()
     Harness_Suite("CatalogStore.Catalog fetches a catalog row")
     address = "https://v3-cinemeta.strem.io"

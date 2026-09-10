@@ -89,17 +89,91 @@ class AddonsStore
         m.Save()
     end sub
 
-    ' Fetch {address}/manifest.json and register the addon. Returns a record
-    ' keyed by the manifest id, or an error when the manifest is missing its
-    ' id/name or the request fails.
+    ' Validate that user input is a complete manifest URL (http(s)://...).
+    ' Returns the trimmed URL when valid, "" otherwise. Does NOT modify the URL
+    ' beyond trimming — the caller fetches exactly what is returned.
+    function SanitizeUrl(url as string) as string
+        candidate = url.Trim()
+        if candidate = "" then return ""
+        parts = candidate.Split("://")
+        if parts.Count() < 2 then return ""
+        if parts[0] <> "http" and parts[0] <> "https" then return ""
+        rest = parts[1]
+        if rest = "" then return ""
+        host = rest
+        colon = rest.InStr(":")
+        if colon >= 0
+            host = rest.Left(colon)
+            portStr = rest.Mid(colon + 1)
+            if portStr = "" then return ""
+            for i = 0 to portStr.Len() - 1
+                if portStr.Mid(i, 1) < "0" or portStr.Mid(i, 1) > "9" then return ""
+            end for
+        end if
+        if host = "" then return ""
+        return candidate
+    end function
+
+    ' Extract the stored addon address from a manifest URL: strip the
+    ' /manifest.json file segment but KEEP anything after it that starts with "?"
+    ' — those query args are the user's add-on config (e.g. torrentio's
+    ' ?provider=...) and must ride along on every later request. Returns "" when
+    ' the URL carries no /manifest.json.
+    function BaseFromManifestUrl(url as string) as string
+        at = url.InStr("/manifest.json")
+        if at < 0 then return ""
+        base = url.Left(at)
+        while base.Right(1) = "/"
+            base = base.Left(base.Len() - 1)
+        end while
+        query = url.Mid(at + 14)
+        if query <> "" and query.Left(1) = "?" then base = base + query
+        return base
+    end function
+
+    ' Manifest resources may be strings or {name, types, idPrefixes} objects per
+    ' the Stremio spec (torrentio returns objects). Normalize to a flat array of
+    ' names so every consumer can compare strings safely.
+    function NormalizeResources(resources as dynamic) as object
+        list = []
+        if resources = invalid or Type(resources) <> "roArray" then return list
+        for each resource in resources
+            if Type(resource) = "roString" or Type(resource) = "String"
+                name = resource
+                if name <> "" then list.Push(name)
+            else if Type(resource) = "roAssociativeArray" and resource.name <> invalid
+                list.Push(resource.name)
+            end if
+        end for
+        return list
+    end function
+
+    ' Fetch the manifest URL the user provides and register the addon. The user
+    ' supplies the full URL (including /manifest.json and any query args); we
+    ' fetch it directly and extract the base address for later use. Returns a
+    ' record keyed by the manifest id, or an error when the URL is malformed,
+    ' the manifest is missing its id/name, the id is already installed, or the
+    ' request fails.
     function Install(addonAddress as string) as object
         result = { ok: false, id: "", error: "" }
-        if addonAddress = ""
-            result.error = "no addon address"
+
+        manifestUrl = m.SanitizeUrl(addonAddress)
+        if manifestUrl = ""
+            if addonAddress.Trim() = ""
+                result.error = "no addon address"
+            else
+                result.error = "invalid addon address"
+            end if
             return result
         end if
 
-        response = m.transport.Get(addonAddress + "/manifest.json")
+        base = m.BaseFromManifestUrl(manifestUrl)
+        if base = ""
+            result.error = "invalid addon address"
+            return result
+        end if
+
+        response = m.transport.Get(manifestUrl)
         if not response.ok or response.json = invalid
             result.error = response.error
             return result
@@ -111,14 +185,19 @@ class AddonsStore
             return result
         end if
 
+        if m.HasKey(m.installed, json.id)
+            result.error = "addon already installed"
+            return result
+        end if
+
         m.installed[json.id] = {
             id: json.id
             name: json.name
             version: json.version
             types: json.types
             catalogs: json.catalogs
-            resources: json.resources
-            address: addonAddress
+            resources: m.NormalizeResources(json.resources)
+            address: base
             builtin: false
         }
         m.Save()
@@ -196,6 +275,14 @@ class AddonsStore
         raw = m.registry.Read("addons")
         if raw = "" then return
         parsed = ParseJson(raw)
-        if parsed <> invalid and Type(parsed) = "roAssociativeArray" then m.installed = parsed
+        if parsed <> invalid and Type(parsed) = "roAssociativeArray"
+            m.installed = parsed
+            ' Records persisted before resources normalization may carry object
+            ' resources (torrentio-style manifests) — fix them in memory.
+            for each id in m.installed
+                record = m.installed[id]
+                if record.resources <> invalid then record.resources = m.NormalizeResources(record.resources)
+            end for
+        end if
     end sub
 end class

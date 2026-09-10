@@ -105,3 +105,12 @@ sub Test_Transport_PostLong_RoutesLongRequest()
     Harness_Equal(log[0].url, "http://host/abc/create", "url forwarded")
     Harness_Equal(log[0].body.guessFileIdx, 7, "body forwarded to the client")
 end sub
+
+sub Test_Transport_EndpointUrl()
+    Harness_Suite("Transport.EndpointUrl inserts the endpoint path before the query string")
+    transport = Transport(ScriptedHttpClient([], []))
+
+    Harness_Equal(transport.EndpointUrl("https://host", "/catalog/movie/top/skip=0.json"), "https://host/catalog/movie/top/skip=0.json", "no query: plain append")
+    Harness_Equal(transport.EndpointUrl("https://host?provider=yts,ezrv", "/stream/movie/tt1.json"), "https://host/stream/movie/tt1.json?provider=yts,ezrv", "query preserved after the endpoint path")
+    Harness_Equal(transport.EndpointUrl("https://host/path?provider=yts&quality=1080p", "/manifest.json"), "https://host/path/manifest.json?provider=yts&quality=1080p", "multi-arg query preserved")
+end sub

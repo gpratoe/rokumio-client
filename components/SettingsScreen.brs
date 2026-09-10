@@ -1,12 +1,10 @@
 ' SettingsScreen — app preferences.
 '
 ' One column of PrefRows backed by SettingsStore: streaming server address
-' (edited through a system KeyboardDialog), UI language and UI scale (cycled on
-' OK), plus a Test-server row that hearts the configured streaming server so a
-' playback dead-end is caught before pressing play. Every value is rebuilt on
-' entry so the rows always reflect the persisted values. A successful scale
-' change flips scaleChanged, which MainScene observes to reapply the live
-' uiRoot scale.
+' (edited through a system KeyboardDialog), UI language (cycled on OK), plus a
+' Test-server row that hearts the configured streaming server so a playback
+' dead-end is caught before pressing play. Every value is rebuilt on entry so
+' the rows always reflect the persisted values.
 
 sub init()
     m.title = m.top.FindNode("settingsTitle")
@@ -18,7 +16,6 @@ sub init()
 
     m.rows = []
     m.languages = ["en", "es", "fr", "de", "it", "pt"]
-    m.scales = [100, 125, 150]
     m.heartbeatTask = invalid
 end sub
 
@@ -60,11 +57,6 @@ sub BuildRows()
         value: LanguageValue()
     })
     m.rows.Push({
-        action: "scale"
-        title: "UI scale"
-        value: ScaleValue()
-    })
-    m.rows.Push({
         action: "testServer"
         title: "Test server"
         value: "Check streaming server"
@@ -94,11 +86,6 @@ function LanguageValue() as string
     return ""
 end function
 
-function ScaleValue() as string
-    if m.stores <> invalid and m.stores.settings <> invalid then return m.stores.settings.GetUiScale().ToStr() + "%"
-    return ""
-end function
-
 sub onRowSelected()
     data = m.list.rowItemSelected
     if data = invalid or data.Count() < 2 then return
@@ -109,8 +96,6 @@ sub onRowSelected()
         EditServer()
     else if action = "language"
         CycleLanguage()
-    else if action = "scale"
-        CycleScale()
     else if action = "testServer"
         TestServer()
     end if
@@ -161,23 +146,6 @@ sub CycleLanguage() as void
     nextLanguage = m.languages[(index + 1) mod m.languages.Count()]
     if m.stores.settings.SetLanguage(nextLanguage)
         m.stores.settings.Save()
-        BuildRows()
-    end if
-end sub
-
-' UI scale: cycle 100/125/150 (all within SettingsStore's 0-200 bounds). On
-' success, flip scaleChanged so MainScene reapplies uiRoot.scale live.
-sub CycleScale() as void
-    current = m.stores.settings.GetUiScale()
-    index = 0
-    for i = 0 to m.scales.Count() - 1
-        if m.scales[i] = current then index = i
-    end for
-    nextScale = m.scales[(index + 1) mod m.scales.Count()]
-    if m.stores.settings.SetUiScale(nextScale)
-        m.stores.settings.Save()
-        m.status.text = "UI scale updated."
-        m.top.scaleChanged = not m.top.scaleChanged
         BuildRows()
     end if
 end sub

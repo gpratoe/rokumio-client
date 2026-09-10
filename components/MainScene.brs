@@ -28,10 +28,8 @@ sub init()
     m.streamsScreen = m.top.FindNode("streamsScreen")
     m.streamsScreen.ObserveField("pushRequest", "onStreamsAction")
 
-    ' SettingsScreen is content-focused (no pushes); MainScene only needs its
-    ' live UI-scale signal. AddonsScreen is also content-only.
+    ' SettingsScreen and AddonsScreen are content-focused (no pushes).
     m.settingsScreen = m.top.FindNode("settingsScreen")
-    m.settingsScreen.ObserveField("scaleChanged", "onScaleChanged")
     m.addonsScreen = m.top.FindNode("addonsScreen")
     m.uiRoot = m.top.FindNode("uiRoot")
 
@@ -61,8 +59,6 @@ sub init()
     m.streamsScreen.callFunc("SetStores", m.stores)
     m.settingsScreen.callFunc("SetStores", m.stores)
     m.addonsScreen.callFunc("SetStores", m.stores)
-
-    ApplyScale()
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -125,26 +121,6 @@ sub onConfirmExitClose()
         if m.stack.count() > 1 then m.stack.pop()
         m.confirmExit.closeRequest = ""
     end if
-end sub
-
-' Apply the persisted UI scale to the whole uiRoot (100 default = no scaling).
-' Scaling rotates around the screen center so a scale-up clips edges symmetrically
-' instead of growing off the top-left corner. SceneGraph handles the transformed
-' focus math, so scaling the root is all it takes for every screen to scale.
-sub ApplyScale() as void
-    scale = 1.0
-    if m.settingsStore <> invalid
-        value = m.settingsStore.GetUiScale()
-        if value > 0 then scale = value / 100.0
-    end if
-    m.uiRoot.scaleRotateCenter = [960, 540]
-    m.uiRoot.scale = [scale, scale]
-end sub
-
-' The Settings screen flipped scaleChanged after a successful scale change:
-' reapply uiRoot.scale live so the new size takes effect immediately.
-sub onScaleChanged()
-    ApplyScale()
 end sub
 
 ' Bootstrap the stack once the roSGScreen is shown. A field observer would not

@@ -8,13 +8,11 @@
 class SettingsStore
     registry as dynamic
     serverAddress as string
-    uiScale as integer
     language as string
 
     sub new(registry = invalid as dynamic)
         m.registry = registry
         m.serverAddress = ""
-        m.uiScale = 100
         m.language = "en"
         m.Load()
     end sub
@@ -67,16 +65,6 @@ class SettingsStore
         m.Save()
     end function
 
-    function SetUiScale(value as integer) as boolean
-        if value < 0 or value > 200 then return false
-        m.uiScale = value
-        return true
-    end function
-
-    function GetUiScale() as integer
-        return m.uiScale
-    end function
-
     function SetLanguage(value as string) as boolean
         if value = "" then return false
         m.language = value
@@ -90,7 +78,6 @@ class SettingsStore
     sub Save()
         if m.registry = invalid then return
         m.registry.Write("serverAddress", m.serverAddress)
-        m.registry.Write("uiScale", m.uiScale.ToStr())
         m.registry.Write("language", m.language)
         m.registry.Flush()
     end sub
@@ -99,8 +86,6 @@ class SettingsStore
         if m.registry = invalid then return
         address = m.registry.Read("serverAddress")
         if address <> "" then m.serverAddress = address
-        scale = m.registry.Read("uiScale")
-        if scale <> "" then m.uiScale = scale.ToInt()
         language = m.registry.Read("language")
         if language <> "" then m.language = language
     end sub

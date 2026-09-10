@@ -26,7 +26,7 @@ class EpisodesStore
             return result
         end if
 
-        url = addonAddress + "/meta/" + metaType + "/" + id + ".json"
+        url = m.transport.EndpointUrl(addonAddress, "/meta/" + metaType + "/" + id + ".json")
         response = m.transport.Get(url)
         if not response.ok or response.json = invalid
             result.error = response.error
