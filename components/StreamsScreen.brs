@@ -4,14 +4,13 @@
 ' series, synopsis, Cinemeta background artwork — deliberately no poster). The
 ' right side lists every stream candidate from the installed add-ons that
 ' advertise the "stream" resource (Torrentio, the mock add-on, …), one card per
-' stream. OK resolves a card to a playable URL and pushes the PlayerScreen; a
-' resolution failure (e.g. "request timed out") lands on the status line.
+' stream. OK drops straight into the PlayerScreen: the torrent is resolved
+' there (logo pulse while its engine warms up), so the picker answers instantly
+' and a resolution failure stays on the player with a message instead of
+' bouncing back here.
 '
 ' Nothing here blocks the render thread: meta + every add-on's stream list load
-' through StreamsLoaderTask, and every OK resolves through StreamResolveTask (a
-' direct URL returns as-is, the create call for a torrent can park for the full
-' 120s long timeout on a cold engine). The screen only does cheap formatting in
-' its own thread.
+' through StreamsLoaderTask only. The player owns playback resolution.
 '
 ' Params: { addonAddress, metaType, metaId, videoId, season, episode, position,
 '           name, poster }.
@@ -28,7 +27,6 @@ sub init()
 
     m.streams = []
     m.loadTask = invalid
-    m.resolveTask = invalid
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -266,67 +264,25 @@ function FormatRuntime(runtime as dynamic) as string
     return runtime.ToStr().Trim()
 end function
 
-' OK on a stream card resolves playback through StreamResolveTask: ResolvePlayback
-' passes a direct URL through as-is and creates the torrent engine on the
-' streaming server (up to the 120s long timeout on a cold engine) off the render
-' thread. A re-entry guard swallows repeat OKs until the resolve reports back.
+' OK on a stream card drops straight into the player with the raw stream and the
+' streaming-server address. The PlayerScreen resolves it (ResolvePlayback passes
+' a direct URL through as-is and creates a torrent engine on the server, up to
+' the 120s long timeout on a cold engine) while its logo pulses, so the picker
+' answers instantly and stays the place a failed source lands back on.
 sub onStreamSelected()
     data = m.streamsList.rowItemSelected
     if data = invalid or data.Count() < 2 then return
     index = data[0]
     if m.streams = invalid or index < 0 or index >= m.streams.Count() then return
-    if m.resolveTask <> invalid then return
 
     serverAddress = ""
     if m.stores <> invalid and m.stores.settings <> invalid then serverAddress = m.stores.settings.GetServerAddress()
 
-    m.status.text = "Resolving stream…"
-    task = CreateObject("roSGNode", "StreamResolveTask")
-    task.id = "streamResolve"
-    m.top.AppendChild(task)
-    task.serverAddress = serverAddress
-    task.stream = m.streams[index]
-    task.observeField("result", "onResolveResult")
-    m.resolveTask = task
-    task.control = "RUN"
-end sub
-
-' The resolve finished. Success pushes the player; a failure (e.g. "request
-' timed out") surfaces on the status line. Results that land after a Back-out
-' are dropped by the m.resolveTask guard.
-sub onResolveResult()
-    if m.resolveTask = invalid then return
-    task = m.resolveTask
-    m.resolveTask = invalid
-    result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
-
-    if result = invalid or not result.ok
-        error = ""
-        if result <> invalid then error = result.error
-        m.status.text = "Could not play this stream: " + error
-        return
-    end if
-
-    StartPlayback(result.url)
-end sub
-
-sub CancelResolve()
-    if m.resolveTask <> invalid
-        m.resolveTask.unobserveField("result")
-        m.resolveTask.control = "STOP"
-        if m.resolveTask.getParent() <> invalid then m.top.RemoveChild(m.resolveTask)
-        m.resolveTask = invalid
-    end if
-end sub
-
-sub StartPlayback(url as string)
-    m.status.text = "Starting playback…"
     m.top.pushRequest = {
         screen: "playerScreen"
         params: {
-            url: url
+            stream: m.streams[index]
+            serverAddress: serverAddress
             metaType: m.params.metaType
             metaId: m.params.metaId
             videoId: m.params.videoId
@@ -352,7 +308,6 @@ end sub
 
 function OnExit() as void
     CancelStreamsLoad()
-    CancelResolve()
 end function
 
 function OnBackPressed() as boolean

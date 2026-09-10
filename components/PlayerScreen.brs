@@ -1,11 +1,19 @@
-' PlayerScreen — minimal video playback for a resolved stream URL.
+' PlayerScreen — minimal video playback for a stream handed over by StreamsScreen.
 '
-' Plays the direct/HLS URL handed over by StreamsScreen, tracks position, and on
-' Back (or exit) records where the user stopped through LibraryStore.SetPosition
-' so Continue Watching / Resume can pick it up. Resume positions are stored in
-' seconds and carried into the content node's playStart field; playback state is
-' surfaced through the status label so a broken stream is a message, not a black
-' screen.
+' StreamsScreen pushes { stream, serverAddress, … } and playback resolution
+' (ResolvePlayback) happens HERE, not on the picker: ResolvePlayback passes a
+' direct URL through as-is and creates a torrent engine on the streaming server
+' (up to the 120s long timeout on a cold engine) off the render thread. While it
+' waits the media logo beats from transparent to solid (the Stremio pre-buffer
+' pulse); on success the video starts, on failure the player stays with the
+' Stremio wording and Back returns to the stream list.
+'
+' Tracks position, and on Back (or exit) records where the user stopped through
+' LibraryStore.SetPosition so Continue Watching / Resume can pick it up. Leaving
+' during the resolve phase never saves — hasPlayed guards the write. Resume
+' positions are stored in seconds and carried into the content node's playStart
+' field; playback state is surfaced through the status label so a broken stream
+' is a message, not a black screen.
 '
 ' Transport is entirely this screen's own because the Video runs with
 ' enableUI=false — the platform never draws a pause screen or trick-play
@@ -13,8 +21,8 @@
 ' ±10s and FF/RW ±30s, and the custom bottom bar shows progress. The bar hides
 ' after a few seconds of playing but stays up while paused/error.
 '
-' Params: { url, metaType, metaId, videoId, season, episode, position, name,
-'           poster, logo }.
+' Params: { stream, serverAddress, metaType, metaId, videoId, season, episode,
+'           position, name, poster, logo }.
 
 sub init()
     m.videoSurface = m.top.FindNode("videoSurface")
@@ -31,6 +39,7 @@ sub init()
     m.bufferingGroup = m.top.FindNode("bufferingGroup")
     m.logoBack = m.top.FindNode("logoBack")
     m.logoFront = m.top.FindNode("logoFront")
+    m.resolvePulse = m.top.FindNode("resolvePulse")
 
     m.hideTimer.ObserveField("fire", "onOverlayHideTimerFire")
     m.toastTimer.ObserveField("fire", "onToastHideTimerFire")
@@ -38,6 +47,112 @@ sub init()
     m.stopWatchdog.ObserveField("fire", "onStopWatchdogFire")
     m.pendingStop = false
     m.seekPending = 0
+    m.resolveTask = invalid
+end sub
+
+function SetStores(stores as object) as void
+    m.stores = stores
+end function
+
+function OnEnter(params as object) as void
+    if params = invalid or params.stream = invalid then return
+    m.playParams = params
+    m.saved = false
+    m.hasPlayed = false
+
+    title = params.name
+    if title = invalid then title = ""
+    m.title.text = title
+
+    ' The pre-buffer pulse (logo beating transparent to solid, Stremio-style)
+    ' only has something to show when a logo URL is available; otherwise the
+    ' bare screen waits out the resolve. No status label here — the pulse IS
+    ' the indicator.
+    logo = params.logo
+    if logo = invalid or logo = "" then logo = params.poster
+    if logo <> invalid and logo <> ""
+        m.logoBack.uri = logo
+        m.logoFront.uri = logo
+        m.bufferingGroup.visible = true
+        StartResolvePulse()
+    else
+        m.bufferingGroup.visible = false
+    end if
+
+    StartResolve(params.stream, params.serverAddress)
+end function
+
+' Kick the stream resolution off the render thread. The task frees the UI as the
+' create/torrent warm-up parks (up to the long timeout); a direct URL resolves
+' instantly through the same path.
+sub StartResolve(stream as object, serverAddress as dynamic)
+    if stream = invalid then
+        m.status.text = "This source is poorly available or your internet connection is not fast enough."
+        return
+    end if
+    if serverAddress = invalid then serverAddress = ""
+    task = CreateObject("roSGNode", "StreamResolveTask")
+    task.id = "playerResolve"
+    m.top.AppendChild(task)
+    task.stream = stream
+    task.serverAddress = serverAddress
+    task.observeField("result", "onResolveResult")
+    m.resolveTask = task
+    task.control = "RUN"
+end sub
+
+sub StartResolvePulse()
+    if m.resolvePulse = invalid then return
+    ' The pulse is logoBack alone — the front (reveal) copy is hidden so it can't
+    ' sit solid on top and mask the beat. StopResolvePulse brings it back for the
+    ' buffering fill.
+    if m.logoFront <> invalid then m.logoFront.visible = false
+    m.resolvePulse.control = "stop"
+    m.resolvePulse.control = "start"
+end sub
+
+' Freeze the pulse and restore the resting buffering pose: the back returns to
+' its faint opacity (0.22), the solid front is back on top but fully clipped so
+' it is "not shown" yet — onBufferingStatusChanged reveals it from the left as
+' buffering % arrives.
+sub StopResolvePulse()
+    if m.resolvePulse <> invalid then m.resolvePulse.control = "stop"
+    if m.logoFront <> invalid
+        m.logoFront.visible = true
+        m.logoFront.clippingRect = [0, 0, 0, 506]
+    end if
+    if m.logoBack <> invalid then m.logoBack.opacity = 0.22
+end sub
+
+' The resolve finished. Success starts playback; a failure (e.g. "request timed
+' out") stays on the player with the Stremio wording and Back returns to the
+' stream list. Results that land after a Back-out are dropped by the
+' m.resolveTask guard.
+sub onResolveResult()
+    if m.resolveTask = invalid then return
+    task = m.resolveTask
+    m.resolveTask = invalid
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    StopResolvePulse()
+
+    if result = invalid or not result.ok or result.url = invalid or result.url = ""
+        m.status.text = "This source is poorly available or your internet connection is not fast enough."
+        return
+    end if
+    StartPlayback(result.url)
+end sub
+
+sub CancelResolve()
+    if m.resolveTask <> invalid
+        m.resolveTask.unobserveField("result")
+        m.resolveTask.control = "STOP"
+        if m.resolveTask.getParent() <> invalid then m.top.RemoveChild(m.resolveTask)
+        m.resolveTask = invalid
+    end if
+    StopResolvePulse()
 end sub
 
 ' The Video node is a per-play instance: created fresh on every enter and torn
@@ -45,7 +160,8 @@ end sub
 ' has begun (content swaps and control="stop" are ignored mid-buffer) — on top
 ' of that, a still-running player keeps decoding/downloading invisibly after the
 ' screen is gone. A from-scratch node each play guarantees a clean player and
-' silence on exit, at no cost beyond node creation.
+' silence on exit, at no cost beyond node creation. Only created once the stream
+' has resolved to a URL.
 sub CreateVideo()
     m.video = CreateObject("roSGNode", "Video")
     m.video.width = 1920
@@ -60,39 +176,24 @@ sub CreateVideo()
     m.video.ObserveField("bufferingStatus", "onBufferingStatusChanged")
 end sub
 
-function SetStores(stores as object) as void
-    m.stores = stores
-end function
-
-function OnEnter(params as object) as void
-    if params = invalid or params.url = invalid then return
-    m.playParams = params
-    m.saved = false
-    m.hasPlayed = false
+' The resolved URL is the only thing that ever touches the Video node: build the
+' content (title, resume offset, sniffed stream format), then play.
+sub StartPlayback(url as string)
     CreateVideo()
 
-    logo = params.logo
-    if logo = invalid or logo = "" then logo = params.poster
-    if logo <> invalid and logo <> ""
-        m.logoBack.uri = logo
-        m.logoFront.uri = logo
-    else
-        m.bufferingGroup.visible = false
-    end if
-
     content = CreateObject("roSGNode", "ContentNode")
-    content.url = params.url
+    content.url = url
+    params = m.playParams
     title = params.name
     if title = invalid then title = ""
     content.title = title
-    m.title.text = title
     startOffset = 0
     if params.position <> invalid and params.position > 0 then startOffset = params.position
     if startOffset > 0 then content.playStart = startOffset
-    streamFormat = DetectStreamFormat(params.url)
+    streamFormat = DetectStreamFormat(url)
     if streamFormat <> "" then content.streamFormat = streamFormat
 
-    print "[rokumio] PlayerScreen url='" + params.url + "' format='" + streamFormat + "' playStart=" + startOffset.ToStr()
+    print "[rokumio] PlayerScreen url='" + url + "' format='" + streamFormat + "' playStart=" + startOffset.ToStr()
 
     m.video.enablePositionTracking = true
     m.video.content = content
@@ -100,7 +201,7 @@ function OnEnter(params as object) as void
     m.video.control = "play"
     m.playButton.uri = "pkg:/images/icon_pause.png"
     ShowOverlay()
-end function
+end sub
 
 ' The stream format has to be told to the Video node — Roku does not reliably
 ' sniff media from a bare contentUri, and a format-less HLS manifest is the
@@ -151,6 +252,7 @@ sub onVideoStateChanged()
         m.playButton.uri = "pkg:/images/icon_play.png"
         HideBuffering()
     else if state = "buffering"
+        StopResolvePulse()
         if HasLogo() then m.bufferingGroup.visible = true
     else if state = "finished" or state = "stopped"
         m.overlay.visible = false
@@ -159,12 +261,18 @@ sub onVideoStateChanged()
     refreshOverlay()
 end sub
 
-' All transport keys land here. OK/Play/Pause/Replay all mean the same thing
-' (toggle), so there is no state where a press does something unexpected;
-' Left/Right and FF/RW seek immediately. Everything else falls through (Back
-' reaches the stack → stop + save + pop).
+' All transport keys land here while a video exists. OK/Play/Pause/Replay all
+' mean the same thing (toggle), so there is no state where a press does
+' something unexpected; Left/Right and FF/RW seek immediately. Before the stream
+' resolves (or after a failure) there is no video: Back still pops (OnBackPressed
+' returns false) and every other key is swallowed so a press routes nowhere else.
+' Everything else falls through (Back reaches the stack → stop + save + pop).
 function OnKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    if m.video = invalid
+        if key = "back" then return false
+        return true
+    end if
     ' Mid-teardown: every key is swallowed until the player actually reports
     ' "stopped" (see RequestStopAndWait) so nothing can interrupt the stop.
     if m.pendingStop then return true
@@ -340,12 +448,16 @@ end sub
 ' we swallow Back until the OS confirms "stopped" (or the watchdog gives up),
 ' then the stack pops. Either way this never pops itself — closeRequest is how
 ' the real pop is asked for, so the pop lands only after playback truly ended.
+' Before the stream resolves there is no video to save or stop: just let the
+' stack pop (the resolve task is cancelled by OnExit).
 function OnBackPressed() as boolean
+    if m.video = invalid then return false
     SavePosition()
     return RequestStopAndWait()
 end function
 
 function OnExit() as void
+    CancelResolve()
     SavePosition()
     if not m.pendingStop then TeardownVideo()
 end function

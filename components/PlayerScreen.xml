@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="PlayerScreen" extends="Group">
-    <!-- Minimal player pushed from StreamsScreen with { url, metaType, metaId,
-         videoId, season, episode, position, name, poster }. Pops on Back and
-         records the watched position through LibraryStore.SetPosition. Native
-         video UI is disabled entirely; transport (play/pause, seek, progress)
-         lives in this screen's own overlay so no platform overlay can ever
-         collide with it. OK and the play/pause buttons behave identically. -->
+    <!-- Minimal player pushed from StreamsScreen with { stream, serverAddress,
+         metaType, metaId, videoId, season, episode, position, name, poster,
+         logo, ... }. The stream is resolved here (logo pulse while the torrent
+         engine warms up), then playback. Pops on Back and records the watched
+         position through LibraryStore.SetPosition. Native video UI is disabled
+         entirely; transport (play/pause, seek, progress) lives in this screen's
+         own overlay so no platform overlay can ever collide with it. OK and the
+         play/pause buttons behave identically. -->
     <interface>
         <function name="SetStores" />
         <function name="OnEnter" />
@@ -46,6 +48,20 @@
                 loadDisplayMode="scaleToFit"
                 clippingRect="[0, 0, 0, 506]" />
         </Group>
+
+        <!-- The Stremio-style pre-buffer pulse: while the stream resolves, the
+             logo behind the (empty) reveal clip beats from almost invisible to
+             solid. Stopped and reset to solid the moment resolution reports in;
+             the same pair then carries the buffering reveal (logoFront clipping
+             from left to right as % arrives). -->
+        <Animation id="resolvePulse" duration="3" repeat="true">
+            <FloatFieldInterpolator
+                id="resolvePulseOpacity"
+                fieldToInterp="logoBack.opacity"
+                key="[0.0, 0.35, 0.5, 0.65, 1.0]"
+                keyValue="[0.15, 0.35, 1.0, 0.35, 0.15]"
+                easeFunction="linear" />
+        </Animation>
 
         <Group id="playerOverlay" visible="false">
             <Rectangle
