@@ -43,23 +43,17 @@ sub init()
     ' Stores are constructed once at the Scene and handed to screens later by
     ' reference. SettingsStore and AddonsStore Load() their persisted state on
     ' construction.
-    m.transport = Transport()
+    http = Transport()
     m.settingsStore = SettingsStore(CreateObject("roRegistrySection", "settings"))
-    m.authStore = AuthStore()
-    m.addonsStore = AddonsStore(m.transport, CreateObject("roRegistrySection", "addons"))
-    m.catalogStore = CatalogStore(m.transport)
-    m.episodesStore = EpisodesStore(m.transport)
-    m.libraryStore = LibraryStore(CreateObject("roRegistrySection", "library"))
-    m.playbackStore = PlaybackStore(m.transport)
     m.stores = {
-        transport: m.transport
+        transport: http
         settings: m.settingsStore
-        auth: m.authStore
-        addons: m.addonsStore
-        catalog: m.catalogStore
-        episodes: m.episodesStore
-        library: m.libraryStore
-        playback: m.playbackStore
+        auth: AuthStore()
+        addons: AddonsStore(http, CreateObject("roRegistrySection", "addons"))
+        catalog: CatalogStore(http)
+        episodes: EpisodesStore(http)
+        library: LibraryStore(CreateObject("roRegistrySection", "library"))
+        playback: PlaybackStore(http)
     }
     m.homeScreen.callFunc("SetStores", m.stores)
     m.detailsScreen.callFunc("SetStores", m.stores)

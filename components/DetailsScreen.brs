@@ -192,9 +192,9 @@ sub PlayMedia()
                 metaType: "series"
                 metaId: m.meta.id
                 videoId: m.stores.episodes.ResolveVideoId(m.meta.id, 1, 1)
-season: 1
-            episode: 1
-            position: ResumePosition()
+                season: 1
+                episode: 1
+                position: ResumePosition()
             name: m.meta.name
             poster: m.meta.poster
             logo: m.meta.logo

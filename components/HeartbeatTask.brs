@@ -3,12 +3,12 @@
 ' when the server address points nowhere. The task builds its own store +
 ' transport inside the task scope so that wait never parks the render thread.
 sub init()
-    m.top.functionName="resolve"
+    m.top.functionName = "heartbeat"
 end sub
-sub resolve()
+sub heartbeat()
     print "[rokumio] HeartbeatTask starting"
     try
-        http = Transport(CreateSyncHttpClient())
+        http = Transport()
         store = PlaybackStore(http)
         m.top.result = store.Heartbeat(m.top.address)
         print "[rokumio] HeartbeatTask done ok=" + m.top.result.ok.ToStr() + " alive=" + m.top.result.alive.ToStr()

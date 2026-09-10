@@ -5,13 +5,13 @@
 ' right side lists every stream candidate from the installed add-ons that
 ' advertise the "stream" resource (Torrentio, the mock add-on, …), one card per
 ' stream. OK resolves a card to a playable URL and pushes the PlayerScreen; a
-' resolution failure (torrent streams need the streaming server, which is not
-' configured until the settings screen exists) lands on the status line.
+' resolution failure (e.g. "request timed out") lands on the status line.
 '
 ' Nothing here blocks the render thread: meta + every add-on's stream list load
-' through StreamsLoaderTask, and every torrent resolve runs through
-' StreamResolveTask (the create call can park for the full 120s long timeout on
-' a cold engine). The screen only does cheap formatting in its own thread.
+' through StreamsLoaderTask, and every OK resolves through StreamResolveTask (a
+' direct URL returns as-is, the create call for a torrent can park for the full
+' 120s long timeout on a cold engine). The screen only does cheap formatting in
+' its own thread.
 '
 ' Params: { addonAddress, metaType, metaId, videoId, season, episode, position,
 '           name, poster }.
@@ -29,7 +29,6 @@ sub init()
     m.streams = []
     m.loadTask = invalid
     m.resolveTask = invalid
-    m.resolving = false
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -56,6 +55,7 @@ function OnEnter(params as object) as void
     m.headSub.text = ""
     m.bgPoster.uri = ""
     m.streams = []
+    m.loadError = ""
     m.streamsList.content = invalid
     m.status.text = "Looking for streams…"
 
@@ -100,17 +100,19 @@ sub onStreamsLoaded()
     task = m.loadTask
     m.loadTask = invalid
     result = task.result
-    'print "[rokumio] onStreamsLoaded result ok=" + (result <> invalid).ToStr() + " streams=" + (result.streams <> invalid and result.streams.Count()).ToStr() + " error=" + (result.error <> invalid and result.error or "")
     task.unobserveField("result")
     if task.getParent() <> invalid then m.top.RemoveChild(task)
 
     if result <> invalid then ApplyMeta(m.params, result.meta)
 
     m.streams = []
+    m.loadError = ""
     if result <> invalid and result.streams <> invalid
         for each stream in result.streams
-            m.streams.Push({ stream: stream })
+            m.streams.Push(stream)
         end for
+    else if result <> invalid
+        if result.error <> invalid and result.error <> "" then m.loadError = result.error
     end if
     PopulateStreams()
 end sub
@@ -165,11 +167,14 @@ function EpisodeFor(meta as object, season as object, episode as object) as dyna
     return invalid
 end function
 
-' Build the right-side list from the loaded m.streams (already wrapped one card
-' per stream).
+' Build the right-side list from the loaded m.streams (one card per stream).
 sub PopulateStreams()
     if m.streams.Count() = 0
-        m.status.text = "No streams found for this title."
+        if m.loadError <> ""
+            m.status.text = "Could not load streams: " + m.loadError
+        else
+            m.status.text = "No streams found for this title."
+        end if
         return
     end if
     m.status.text = ""
@@ -178,7 +183,7 @@ sub PopulateStreams()
     for i = 0 to m.streams.Count() - 1
         row = content.CreateChild("ContentNode")
         item = row.CreateChild("ContentNode")
-        stream = m.streams[i].stream
+        stream = m.streams[i]
         item.title = StreamLabel(stream)
         lines = StreamTitleLines(stream)
         if lines.Count() > 0
@@ -257,34 +262,26 @@ function FormatRuntime(runtime as dynamic) as string
     return runtime.ToStr().Trim()
 end function
 
-' OK on a stream card: direct-URL streams play as-is (nothing blocking); torrent
-' streams resolve through StreamResolveTask, which owns the streaming-server
-' create call (up to the 120s long timeout on a cold engine) off the render
+' OK on a stream card resolves playback through StreamResolveTask: ResolvePlayback
+' passes a direct URL through as-is and creates the torrent engine on the
+' streaming server (up to the 120s long timeout on a cold engine) off the render
 ' thread. A re-entry guard swallows repeat OKs until the resolve reports back.
 sub onStreamSelected()
     data = m.streamsList.rowItemSelected
     if data = invalid or data.Count() < 2 then return
     index = data[0]
     if m.streams = invalid or index < 0 or index >= m.streams.Count() then return
-    if m.resolving or m.resolveTask <> invalid then return
-
-    stream = m.streams[index].stream
-    url = stream.url
-    if url <> invalid and url.Trim() <> ""
-        StartPlayback(url.Trim())
-        return
-    end if
+    if m.resolveTask <> invalid then return
 
     serverAddress = ""
     if m.stores <> invalid and m.stores.settings <> invalid then serverAddress = m.stores.settings.GetServerAddress()
 
-    m.resolving = true
     m.status.text = "Resolving stream…"
     task = CreateObject("roSGNode", "StreamResolveTask")
     task.id = "streamResolve"
     m.top.AppendChild(task)
     task.serverAddress = serverAddress
-    task.stream = stream
+    task.stream = m.streams[index]
     task.observeField("result", "onResolveResult")
     m.resolveTask = task
     task.control = "RUN"
@@ -295,13 +292,11 @@ end sub
 ' are dropped by the m.resolveTask guard.
 sub onResolveResult()
     if m.resolveTask = invalid then return
-    if not m.resolving then return
     task = m.resolveTask
     m.resolveTask = invalid
     result = task.result
     task.unobserveField("result")
     if task.getParent() <> invalid then m.top.RemoveChild(task)
-    m.resolving = false
 
     if result = invalid or not result.ok
         error = ""
@@ -320,7 +315,6 @@ sub CancelResolve()
         if m.resolveTask.getParent() <> invalid then m.top.RemoveChild(m.resolveTask)
         m.resolveTask = invalid
     end if
-    m.resolving = false
 end sub
 
 sub StartPlayback(url as string)

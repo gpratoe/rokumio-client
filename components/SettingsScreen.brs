@@ -20,7 +20,6 @@ sub init()
     m.languages = ["en", "es", "fr", "de", "it", "pt"]
     m.scales = [100, 125, 150]
     m.heartbeatTask = invalid
-    m.testing = false
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -195,9 +194,8 @@ sub TestServer() as void
         m.status.text = "Set a streaming server address first."
         return
     end if
-    if m.testing or m.heartbeatTask <> invalid then return
+    if m.heartbeatTask <> invalid then return
 
-    m.testing = true
     m.status.text = "Testing server…"
     task = CreateObject("roSGNode", "HeartbeatTask")
     task.id = "heartbeatTask"
@@ -212,13 +210,11 @@ end sub
 ' dropped by the m.heartbeatTask guard.
 sub onTestServerResult()
     if m.heartbeatTask = invalid then return
-    if not m.testing then return
     task = m.heartbeatTask
     m.heartbeatTask = invalid
     result = task.result
     task.unobserveField("result")
     if task.getParent() <> invalid then m.top.RemoveChild(task)
-    m.testing = false
 
     print "[rokumio] TestServer /heartbeat -> ok=" + result.ok.ToStr() + " alive=" + result.alive.ToStr() + " error='" + result.error + "'"
     if result.alive
@@ -235,5 +231,4 @@ sub CancelTestServer()
         if m.heartbeatTask.getParent() <> invalid then m.top.RemoveChild(m.heartbeatTask)
         m.heartbeatTask = invalid
     end if
-    m.testing = false
 end sub

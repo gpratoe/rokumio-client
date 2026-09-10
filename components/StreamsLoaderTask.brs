@@ -6,12 +6,12 @@
 ' in. The stores are built fresh inside the task scope — no object created on
 ' the render thread is shared across the thread boundary.
 sub init()
-    m.top.functionName = "resolve"
+    m.top.functionName = "load"
 end sub
-sub resolve()
-    print "[rokumio] StreamsLoaderTask run() starting"
+sub load()
+    print "[rokumio] StreamsLoaderTask load() starting"
     try
-        http = Transport(CreateSyncHttpClient())
+        http = Transport()
         playback = PlaybackStore(http)
 
         meta = invalid
