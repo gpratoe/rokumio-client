@@ -1,10 +1,18 @@
 ' AddonsScreen — installed add-on manager.
 '
 ' One column of PrefRows: an "Add add-on" row on top (installs by fetching a
-' manifest URL through a system KeyboardDialog, AddonsStore.Install), then one
-' row per installed add-on from AddonsStore.GetAll(). Removing a non-built-in
-' requires a confirmation dialog; protected built-ins are read-only. The list is
-' rebuilt after every install/remove so it always reflects the store.
+' manifest URL through a system KeyboardDialog), then one row per installed
+' add-on from AddonsStore.GetAll(). Removing a non-built-in requires a
+' confirmation dialog; protected built-ins are read-only. The list is rebuilt
+' after every install/remove so it always reflects the store.
+'
+' The manifest fetch happens on AddonsInstallTask (off the render thread — the
+' request can park up to the 15s default timeout). The task validates against a
+' registry-less store and returns the installed record; on success the real
+' store adopts it through AddonsStore.Register, which applies the same duplicate
+' rule and persists. "Installing…" sits on the status line while it runs; a
+' stale result that lands after exit/cancel is dropped by the m.installTask
+' guard.
 
 sub init()
     m.title = m.top.FindNode("addonsTitle")
@@ -15,6 +23,7 @@ sub init()
     m.list.ObserveField("rowItemSelected", "onRowSelected")
 
     m.rows = []
+    m.installTask = invalid
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -24,12 +33,14 @@ function SetStores(stores as object) as void
 end function
 
 function OnEnter(params as object) as void
+    CancelInstall()
     BuildRows()
     m.status.text = ""
     m.list.SetFocus(true)
 end function
 
 function OnExit() as void
+    CancelInstall()
 end function
 
 function OnBackPressed() as boolean
@@ -87,7 +98,7 @@ sub onRowSelected()
     end if
 end sub
 
-' Install flow: a KeyboardDialog whose OK feeds AddonsStore.Install.
+' Install flow: a KeyboardDialog whose OK kicks AddonsInstallTask.
 sub ShowAddDialog()
     dialog = CreateObject("roSGNode", "KeyboardDialog")
     dialog.title = "Add add-on"
@@ -105,16 +116,65 @@ sub onAddChoice()
         address = dialog.text
         m.top.getScene().dialog = invalid
         if index = 0
-            result = m.stores.addons.Install(address.Trim())
-            if result.ok
-                m.status.text = "Installed " + result.id + "."
-            else
-                m.status.text = "Could not install: " + result.error
-            end if
-            BuildRows()
+            StartInstall(address.Trim())
         end if
     end if
     m.list.SetFocus(true)
+end sub
+
+' Kick the manifest fetch off the render thread. AddonsInstallTask runs
+' AddonsStore.Install against a registry-less store and returns the installed
+' record (or a validation/fetch error); the real store adopts it on success.
+sub StartInstall(address as string)
+    if m.stores = invalid or m.stores.addons = invalid then return
+    if m.installTask <> invalid then return
+    if address = ""
+        m.status.text = "Could not install: no addon address"
+        return
+    end if
+
+    m.status.text = "Installing…"
+    task = CreateObject("roSGNode", "AddonsInstallTask")
+    task.id = "addonsInstall"
+    m.top.AppendChild(task)
+    task.address = address
+    task.observeField("result", "onInstallResult")
+    m.installTask = task
+    task.control = "RUN"
+end sub
+
+' The install finished. A stale result that landed after CancelInstall (or
+' exit) is dropped by the m.installTask guard. Success adopts the returned
+' record through the real store (duplicate rule enforced again there).
+sub onInstallResult()
+    if m.installTask = invalid then return
+    task = m.installTask
+    m.installTask = invalid
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result <> invalid and result.ok and result.record <> invalid
+        if m.stores <> invalid and m.stores.addons.Register(result.record)
+            m.status.text = "Installed " + result.id + "."
+        else
+            m.status.text = "Could not install: addon already installed"
+        end if
+    else
+        error = ""
+        if result <> invalid and result.error <> invalid then error = result.error
+        m.status.text = "Could not install: " + error
+    end if
+    BuildRows()
+end sub
+
+sub CancelInstall()
+    if m.installTask <> invalid
+        m.installTask.unobserveField("result")
+        m.installTask.control = "STOP"
+        if m.installTask.getParent() <> invalid then m.top.RemoveChild(m.installTask)
+        m.installTask = invalid
+    end if
 end sub
 
 ' Confirm removal of a non-built-in add-on. Built-ins are protected and just

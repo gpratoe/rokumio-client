@@ -206,6 +206,17 @@ class AddonsStore
         return result
     end function
 
+    ' Adopt a record that was fetched + validated off-thread (AddonsInstallTask
+    ' ran Install against its own registry-less store). Applies the same
+    ' duplicate rule as Install and persists through THIS store's registry.
+    function Register(record as object) as boolean
+        if record = invalid or record.id = invalid or record.id = "" then return false
+        if m.HasKey(m.installed, record.id) then return false
+        m.installed[record.id] = record
+        m.Save()
+        return true
+    end function
+
     ' Remove an installed add-ons. Built-ins are protected and always refused.
     function Uninstall(id as string) as boolean
         if m.IsBuiltin(id) then return false

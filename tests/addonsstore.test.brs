@@ -257,6 +257,33 @@ sub Test_Addons_PersistsViaRegistry()
     Harness_Equal(reopened.Get("com.example.addon").address, "https://addon.example.com", "address reloaded")
 end sub
 
+sub Test_Addons_RegisterAdoptsRecord()
+    Harness_Suite("AddonsStore.Register adopts an off-thread fetched record")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry)
+    record = {
+        id: "com.example.addon"
+        name: "Example"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: [
+            { type: "movie", id: "top", name: "Top" }
+            { type: "series", id: "top", name: "Top Series" }
+        ]
+        resources: ["catalog", "meta"]
+        address: "https://addon.example.com"
+        builtin: false
+    }
+
+    Harness_Ok(addons.Register(record), "register ok")
+    Harness_Equal(addons.Get("com.example.addon").name, "Example", "record stored")
+    Harness_Equal(addons.GetAll().Count(), 4, "built-ins + seeded torrentio + the new one")
+
+    Harness_Ok(not addons.Register(record), "duplicate register refused")
+    reopened = AddonsStore(ScriptedTransport([]), registry)
+    Harness_Ok(reopened.Get("com.example.addon") <> invalid, "registered record persisted")
+end sub
+
 sub Test_Addons_CatalogsFlatten()
     Harness_Suite("AddonsStore.Catalogs flattens advertised catalogs")
     manifestUrl = "https://addon.example.com/manifest.json"
