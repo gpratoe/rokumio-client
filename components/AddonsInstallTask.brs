@@ -3,8 +3,9 @@
 ' 15s), so a hung add-on costs the worker thread, not a frozen channel. The task
 ' builds its own store inside the task scope — no object created on the render
 ' thread crosses the thread boundary. The task's store has no registry (a fresh,
-' in-memory instance), so it only validates and fetches; the WORK is returned as
-' the installed record and the AddonsScreen applies it to the real store.
+' in-memory instance), so Install's duplicate check always passes here; the real
+' duplicate guard runs in AddonsStore.Register when AddonsScreen adopts the
+' record. That is deliberate — keep it that way.
 sub init()
     m.top.functionName = "install"
 end sub

@@ -190,7 +190,7 @@ class AddonsStore
             return result
         end if
 
-        m.installed[json.id] = {
+        record = {
             id: json.id
             name: json.name
             version: json.version
@@ -200,15 +200,20 @@ class AddonsStore
             address: base
             builtin: false
         }
-        m.Save()
+        if not m.Register(record)
+            result.error = "addon already installed"
+            return result
+        end if
         result.ok = true
         result.id = json.id
         return result
     end function
 
-    ' Adopt a record that was fetched + validated off-thread (AddonsInstallTask
-    ' ran Install against its own registry-less store). Applies the same
-    ' duplicate rule as Install and persists through THIS store's registry.
+    ' Adopt a record into m.installed and persist it. Enforces the duplicate
+    ' rule (id must not already be installed) and is the single write path for
+    ' both Install and off-thread adoption (AddonsInstallTask returns a
+    ' validated record, AddonsScreen hands it to Register here so the screen's
+    ' store stays the single writer with the real registry).
     function Register(record as object) as boolean
         if record = invalid or record.id = invalid or record.id = "" then return false
         if m.HasKey(m.installed, record.id) then return false

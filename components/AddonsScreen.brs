@@ -128,10 +128,6 @@ end sub
 sub StartInstall(address as string)
     if m.stores = invalid or m.stores.addons = invalid then return
     if m.installTask <> invalid then return
-    if address = ""
-        m.status.text = "Could not install: no addon address"
-        return
-    end if
 
     m.status.text = "Installing…"
     task = CreateObject("roSGNode", "AddonsInstallTask")
