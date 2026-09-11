@@ -99,18 +99,32 @@ sub Test_Catalog_Search()
     script = [
         {
             method: "GET"
-            url: address + "/catalog/movie/search/matrix.json"
+            url: address + "/catalog/movie/top/search=matrix.json"
             ok: true
             status: 200
             json: { metas: [ { id: "tt0133093", type: "movie", name: "The Matrix" } ] }
+            error: ""
+        }
+        {
+            method: "GET"
+            url: address + "/catalog/series/top/search=percy%20jackson.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt1489428", type: "series", name: "Percy Jackson" } ] }
             error: ""
         }
     ]
     store = CatalogStore(ScriptedTransport(script))
     result = store.Search(address, "movie", "matrix")
 
-    Harness_Ok(result.ok, "search ok")
-    Harness_Equal(result.metas.Count(), 1, "one meta returned")
+    Harness_Ok(result.ok, "movie search ok")
+    Harness_Equal(result.metas.Count(), 1, "one movie meta returned")
+    Harness_Equal(store.transport.log[0].url, address + "/catalog/movie/top/search=matrix.json", "movie query hits /top/search=")
+
+    result = store.Search(address, "series", "percy jackson")
+    Harness_Ok(result.ok, "series search ok")
+    Harness_Equal(result.metas.Count(), 1, "one series meta returned")
+    Harness_Equal(store.transport.log[1].url, address + "/catalog/series/top/search=percy%20jackson.json", "query percent-encoded in the URL")
 end sub
 
 sub Test_Catalog_RejectsMissingMetas()
@@ -132,4 +146,62 @@ sub Test_Catalog_NoAddress()
 
     Harness_Ok(not result.ok, "catalog rejected")
     Harness_Equal(result.error, "no addon address", "error names the missing address")
+end sub
+
+sub Test_Catalog_AcceptsGatewayWrappedJson()
+    Harness_Suite("CatalogStore accepts a gateway-status response carrying JSON metas")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/search=matrix.json"
+            ok: false
+            status: 504
+            json: { metas: [ { id: "tt0133093", type: "movie", name: "The Matrix" } ] }
+            error: "HTTP 504"
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Search(address, "movie", "matrix")
+
+    Harness_Ok(result.ok, "504-wrapped metas accepted")
+    Harness_Equal(result.metas.Count(), 1, "gateway meta returned")
+end sub
+
+sub Test_Catalog_RejectsGatewayHtml()
+    Harness_Suite("CatalogStore rejects a gateway response with an unparseable body")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/search=matrix.json"
+            ok: false
+            status: 504
+            body: "<!DOCTYPE html><html><body>error code: 504</body></html>"
+            error: "HTTP 504"
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Search(address, "movie", "matrix")
+
+    Harness_Ok(not result.ok, "gateway HTML rejected")
+end sub
+
+sub Test_Catalog_RejectsNonGatewayWithMetas()
+    Harness_Suite("CatalogStore rejects a non-gateway error even with JSON metas")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/search=matrix.json"
+            ok: false
+            status: 404
+            json: { metas: [ { id: "tt0133093", type: "movie", name: "The Matrix" } ] }
+            error: "HTTP 404"
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Search(address, "movie", "matrix")
+
+    Harness_Ok(not result.ok, "404 with metas still rejected")
 end sub

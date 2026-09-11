@@ -28,9 +28,13 @@ sub init()
     m.streamsScreen = m.top.FindNode("streamsScreen")
     m.streamsScreen.ObserveField("pushRequest", "onStreamsAction")
 
-    ' SettingsScreen and AddonsScreen are content-focused (no pushes).
+    ' SettingsScreen, AddonsScreen and SearchScreen are content-focused (no
+    ' pushes of their own; Search pushes Details like the others). SearchScreen
+    ' reports its pushes through its own channel.
     m.settingsScreen = m.top.FindNode("settingsScreen")
     m.addonsScreen = m.top.FindNode("addonsScreen")
+    m.searchScreen = m.top.FindNode("searchScreen")
+    m.searchScreen.ObserveField("pushRequest", "onSearchAction")
     m.uiRoot = m.top.FindNode("uiRoot")
 
     ' Bottom-of-stack Back pushes the confirm-exit dialog; the dialog's
@@ -59,6 +63,7 @@ sub init()
     m.streamsScreen.callFunc("SetStores", m.stores)
     m.settingsScreen.callFunc("SetStores", m.stores)
     m.addonsScreen.callFunc("SetStores", m.stores)
+    m.searchScreen.callFunc("SetStores", m.stores)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -79,6 +84,13 @@ end sub
 ' EpisodesScreen's action channel; same one-action routing.
 sub onEpisodesAction()
     request = m.episodesScreen.pushRequest
+    if request = invalid or request.screen = invalid then return
+    m.stack.push(request.screen, request.params)
+end sub
+
+' SearchScreen's action channel; same one-action routing.
+sub onSearchAction()
+    request = m.searchScreen.pushRequest
     if request = invalid or request.screen = invalid then return
     m.stack.push(request.screen, request.params)
 end sub

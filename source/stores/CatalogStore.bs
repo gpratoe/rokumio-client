@@ -1,7 +1,7 @@
 ' CatalogStore — on-demand catalog, manifest and search against an add-on
 ' server. Pure transport, no state: nothing is saved, every call hits the
-' add-on's HTTP API (Cinemeta and friends). Search is just the catalog endpoint
-' with catalogId "search" and the query as the extra segment.
+' add-on's HTTP API (Cinemeta and friends). Search is the add-on's search
+' catalog for one type: /catalog/{type}/top/search={query}.json.
 
 class CatalogStore
     transport as object
@@ -58,7 +58,15 @@ class CatalogStore
 
         url = m.transport.EndpointUrl(addonAddress, "/catalog/" + metaType + "/" + catalogId + "/" + extra + ".json")
         response = m.transport.Get(url)
-        if not response.ok or response.json = invalid
+
+        ' Cinemeta's CDN sometimes wraps a real payload in a gateway status
+        ' (502/503/504) — the search endpoint in particular returns valid results
+        ' on HTTP 504 from a browser, and 200 vs 504 can flip per edge + UA. A
+        ' JSON body behind a gateway status is still used; a genuine failure (a
+        ' non-gateway status, or an HTML error body json can't parse) fails
+        ' below.
+        gatewayWrapped = response.json <> invalid and (response.status = 502 or response.status = 503 or response.status = 504)
+        if not response.ok and not gatewayWrapped
             result.error = response.error
             return result
         end if
@@ -74,9 +82,40 @@ class CatalogStore
         return result
     end function
 
-    ' Search is a catalog call against the add-on's "search" catalog with the
-    ' query as the extra segment — nothing is stored locally.
+    ' Search is a catalog call against the add-on's search catalog for one
+    ' type. Cinemeta resolves a query as /catalog/{type}/top/search={query}.json
+    ' — the "top" catalog id with "search=" as the extra segment — so the query
+    ' is percent-encoded before it becomes a URL path segment. Nothing is stored
+    ' locally.
     function Search(addonAddress as string, metaType as string, query as string) as object
-        return m.Catalog(addonAddress, metaType, "search", query)
+        return m.Catalog(addonAddress, metaType, "top", "search=" + UrlEncode(query))
     end function
 end class
+
+' Percent-encode a string for a URL path segment. The platform owns the real
+' encoder: roUrlTransfer.Escape percent-encodes per RFC 3986, including proper
+' UTF-8 for accented characters, and Search always runs inside a Task node
+' where roUrlTransfer is available. The byte loop below is only the fallback for
+' environments without the component (the brs interpreter in `npm test`), where
+' ASCII queries encode identically.
+function UrlEncode(value as string) as string
+    try
+        transfer = CreateObject("roUrlTransfer")
+        return transfer.Escape(value)
+    catch e
+    end try
+
+    result = ""
+    HEX = "0123456789ABCDEF"
+    i = 1
+    while i <= Len(value)
+        b = Asc(Mid(value, i, 1))
+        if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b = 45 or b = 95 or b = 46 or b = 126
+            result = result + Chr(b)
+        else
+            result = result + "%" + Mid(HEX, b \ 16 + 1, 1) + Mid(HEX, (b mod 16) + 1, 1)
+        end if
+        i = i + 1
+    end while
+    return result
+end function

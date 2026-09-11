@@ -227,6 +227,7 @@ end sub
 ' can be dropped pre-Show, so it happens on first OnEnter like the catalog).
 sub BuildRail()
     entries = [
+        { glyph: "pkg:/images/search.png", screen: "searchScreen" }
         { glyph: "pkg:/images/settings.png", screen: "settingsScreen" }
         { glyph: "pkg:/images/puzzle.png", screen: "addonsScreen" }
     ]

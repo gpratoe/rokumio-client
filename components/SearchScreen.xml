@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="SearchScreen" extends="Group">
+    <!-- Search: Cinemeta only. A KeyboardDialog prompt on entry, then results
+         as poster rows grouped by type (Movies / Series). OK on a result
+         publishes a pushRequest the Scene routes to Details. The * (options)
+         key reopens the keyboard prefilled with the last query. -->
+    <interface>
+        <!-- The one action Search reports upward: a push request. -->
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+
+        <!-- Screen contract: called by ScreenStack for show/hide/focus/back. -->
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/SearchScreen.brs" />
+
+    <children>
+        <Rectangle id="searchBg" width="1920" height="1080" color="0x0" />
+        <Label
+            id="searchTitle"
+            translation="[150, 48]"
+            width="1760"
+            height="70"
+            text="Search"
+            font="font:LargeBoldSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="searchSub"
+            translation="[150, 128]"
+            width="1760"
+            height="40"
+            text="Type a title, then OK · * to search again · Back to exit"
+            font="font:SmallSystemFont"
+            color="0x8FA399FF" />
+
+        <Label
+            id="searchStatus"
+            translation="[150, 180]"
+            width="1760"
+            height="40"
+            font="font:SmallSystemFont"
+            color="0x2BD675FF" />
+
+        <!-- Results grid: poster rows grouped by type. numRows is set in code
+             based on how many non-empty type groups a query produced. -->
+        <RowList
+            id="searchResults"
+            translation="[150, 230]"
+            numRows="2"
+            itemSize="[1780, 400]"
+            itemSpacing="[0, 8]"
+            rowItemSize="[[270, 378]]"
+            rowItemSpacing="[[18, 0]]"
+            showRowLabel="[true]"
+            rowLabelOffset="[0, 10]"
+            rowLabelFont="font:MediumBoldSystemFont"
+            rowLabelTextColor="0x8FA399FF"
+            drawFocusFeedback="false"
+            itemComponentName="PosterTile" />
+    </children>
+</component>
