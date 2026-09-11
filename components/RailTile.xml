@@ -16,17 +16,14 @@
     <children>
         <!-- railBorder is the frame, railFace the inset face so focus draws a
              border instead of painting over the tile. -->
-        <Rectangle id="railBorder" width="120" height="120" color="0x2BD67500">
-            <Rectangle id="railFace" width="112" height="112" translation="[4, 4]" color="0x0B110DFF" />
-            <Label
+        <Rectangle id="railBorder" width="80" height="80" color="0x2BD67500">
+            <Poster
                 id="railGlyph"
-                width="112"
-                height="112"
-                translation="[4, 4]"
+                width="80"
+                height="80"
+                translation="[20, 20]"
                 horizAlign="center"
-                vertAlign="center"
-                font="font:MediumBoldSystemFont"
-                color="0x8FA399FF" />
+                vertAlign="center" />
         </Rectangle>
     </children>
 </component>

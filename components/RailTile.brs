@@ -5,7 +5,6 @@
 
 sub init()
     m.border = m.top.FindNode("railBorder")
-    m.face = m.top.FindNode("railFace")
     m.glyph = m.top.FindNode("railGlyph")
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
@@ -19,22 +18,18 @@ end sub
 ' dimming into a fresh row).
 sub UpdateLook()
     if m.top.itemHasFocus
-        m.border.color = "0x5BEF95FF"
-        m.face.color = "0x233329FF"
-        m.glyph.color = "0xE9F2ECFF"
         m.top.scale = [1.08, 1.08]
+        m.glyph.blendColor = "0x2BD675FF"
     else
-        m.border.color = "0x2BD67500"
-        m.face.color = "0x0B110DFF"
-        m.glyph.color = "0x8FA399FF"
+        m.glyph.blendColor = "0x8FA399FF"
         m.top.scale = [1.0, 1.0]
     end if
-    if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
+    if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.30
 end sub
 
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
-    m.glyph.text = m.top.itemContent.title
+    m.glyph.uri = m.top.itemContent.title
     UpdateLook()
 end sub
 

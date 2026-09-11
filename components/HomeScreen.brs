@@ -227,8 +227,8 @@ end sub
 ' can be dropped pre-Show, so it happens on first OnEnter like the catalog).
 sub BuildRail()
     entries = [
-        { glyph: "⚙️", screen: "settingsScreen" }
-        { glyph: "➕", screen: "addonsScreen" }
+        { glyph: "pkg:/images/settings.png", screen: "settingsScreen" }
+        { glyph: "pkg:/images/puzzle.png", screen: "addonsScreen" }
     ]
     m.railEntries = entries
     content = CreateObject("roSGNode", "ContentNode")

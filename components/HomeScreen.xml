@@ -19,7 +19,7 @@
     <script type="text/brightscript" uri="pkg:/components/HomeScreen.brs" />
 
     <children>
-        <Rectangle id="homeBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
         <Label
             id="homeTitle"
             translation="[150, 48]"
@@ -42,11 +42,11 @@
              Scene routes. Focus reaches it from the grid via Left/Right. -->
         <RowList
             id="rail"
-            translation="[15, 210]"
+            translation="[15, 420]"
             numRows="2"
             itemSize="[120, 132]"
-            itemSpacing="[0, 12]"
-            rowItemSize="[[120, 120]]"
+            itemSpacing="[0, 0]"
+            rowItemSize="[[80, 80]]"
             rowItemSpacing="[[0, 0]]"
             showRowLabel="[false]"
             drawFocusFeedback="false"
