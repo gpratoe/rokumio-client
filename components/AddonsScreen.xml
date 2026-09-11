@@ -16,7 +16,7 @@
     <script type="text/brightscript" uri="pkg:/components/AddonsScreen.brs" />
 
     <children>
-        <Rectangle id="addonsBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Rectangle id="addonsBg" width="1920" height="1080" color="0x0" />
 
         <Label
             id="addonsTitle"
@@ -44,7 +44,8 @@
             rowItemSize="[[1000, 110]]"
             showRowLabel="[false]"
             drawFocusFeedback="false"
-            itemComponentName="PrefRow" />
+            itemComponentName="PrefRow"
+            vertFocusAnimationStyle="floatingFocus"/>
 
         <Label
             id="addonsStatus"
