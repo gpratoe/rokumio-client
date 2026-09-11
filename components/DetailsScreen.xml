@@ -23,7 +23,7 @@
              text stay readable. -->
         <Rectangle id="detailsBg" width="1920" height="1080" color="0x0A0F0CFF" />
         <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
-        <Rectangle id="bgScrim" width="1920" height="1080" color="0x0A0F0C99" />
+        <Rectangle id="bgScrim" width="1920" height="1080" color="0x00000099" />
 
         <!-- Hero: left poster, right name/type/description. -->
         <Poster id="heroPoster" translation="[80, 120]" width="360" height="510" failBackgroundColor="0x0B110DFF" />
