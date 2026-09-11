@@ -50,7 +50,8 @@
             rowItemSpacing="[[0, 0]]"
             showRowLabel="[false]"
             drawFocusFeedback="false"
-            itemComponentName="RailTile" />
+            itemComponentName="RailTile"
+            vertFocusAnimationStyle="floatingFocus"/>
 
         <!-- Poster rows: a single RowList owns the whole grid physics (vertical
              row scrolling/clipping, horizontal per-row tiles, row labels). Each
