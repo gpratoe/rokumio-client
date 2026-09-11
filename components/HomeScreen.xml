@@ -22,7 +22,7 @@
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0A0F0CFF" />
         <Label
             id="homeTitle"
-            translation="[80, 48]"
+            translation="[150, 48]"
             width="1760"
             height="70"
             text="Rokumio"
@@ -30,7 +30,7 @@
             color="0x2BD675FF" />
         <Label
             id="homeSub"
-            translation="[80, 128]"
+            translation="[150, 128]"
             width="1760"
             height="40"
             text="Move between rows, OK for details, Back to exit"
@@ -42,7 +42,7 @@
              Scene routes. Focus reaches it from the grid via Left/Right. -->
         <RowList
             id="rail"
-            translation="[40, 220]"
+            translation="[15, 210]"
             numRows="2"
             itemSize="[120, 132]"
             itemSpacing="[0, 12]"
@@ -58,14 +58,14 @@
              item renders as a PosterTile component. Content is set in code. -->
         <RowList
             id="catalog"
-            translation="[220, 210]"
+            translation="[150, 210]"
             numRows="2"
-            itemSize="[1680, 400]"
+            itemSize="[1780, 400]"
             itemSpacing="[0, 8]"
             rowItemSize="[[270, 378]]"
             rowItemSpacing="[[18, 0]]"
             showRowLabel="[true]"
-            rowLabelOffset="[0, 0]"
+            rowLabelOffset="[0, 10]"
             rowLabelFont="font:MediumBoldSystemFont"
             rowLabelTextColor="0x8FA399FF"
             drawFocusFeedback="false"
