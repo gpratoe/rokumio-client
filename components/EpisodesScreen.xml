@@ -20,6 +20,7 @@
     <children>
         <Rectangle id="epBg" width="1920" height="1080" color="0x0" />
         <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
+        <Rectangle id="bgScrim" width="1920" height="1080" color="0x00000099" />
         <Poster id="bgMask" width="1920" height="1080" loadDisplayMode="scaleToCrop" uri="pkg:/images/mask.png" />
         <!-- Header: series name, then the focused episode's label and synopsis. -->
         <Label
