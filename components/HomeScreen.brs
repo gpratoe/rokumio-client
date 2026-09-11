@@ -15,8 +15,10 @@
 '
 ' Content is built lazily on first OnEnter, not in init(): init runs during
 ' CreateScene, before screen.Show(), and nodes created pre-Show can be dropped
-' by the renderer. The catalog rows are fetched once; the visible grid is
-' rebuilt on every OnEnter so Continue Watching reflects the latest progress.
+' by the renderer. The catalog rows are fetched once and the grid is assembled
+' exactly once; later visits either leave the tree alone (nothing changed) or
+' refresh only the Continue Watching row in place (progress was made elsewhere).
+' The RowList's own scroll + focus therefore survive every trip away and back.
 
 sub init()
     m.catalog = m.top.FindNode("catalog")
@@ -26,9 +28,9 @@ sub init()
     m.catalogRowsBuilt = false
     m.catalogRows = []
     m.gridRows = []
+    m.gridBuilt = false
+    m.cwSignature = ""
     m.railBuilt = false
-    m.pinnedGridRow = -1
-    m.pinnedGridItem = -1
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -105,9 +107,11 @@ sub BuildCatalogRows()
     m.catalogRowsBuilt = true
 end sub
 
-' Assemble the visible grid: Continue Watching (when the local library has
-' entries) first, then the catalog rows. Called on every OnEnter so the CW row
-' tracks progress made since last visit.
+' Assemble the visible grid once: Continue Watching (when the local library has
+' entries) first, then the catalog rows. The content tree is set exactly once;
+' later visits refresh only the live Continue Watching row in place (see
+' RefreshContinueWatching) so the rest of the grid keeps the RowList's own
+' scroll + focus.
 sub BuildRows()
     m.gridRows = []
     cw = LibraryRow()
@@ -125,23 +129,31 @@ sub BuildRows()
 
     content = CreateObject("roSGNode", "ContentNode")
     for r = 0 to m.gridRows.Count() - 1
-        row = content.CreateChild("ContentNode")
-        label = m.gridRows[r].title
-        if counts[label] > 1 then label = label + " " + TypeLabel(m.gridRows[r].metaType)
-        row.title = label
-        metas = m.gridRows[r].metas
-        for c = 0 to metas.Count() - 1
-            item = row.CreateChild("ContentNode")
-            name = metas[c].name
-            if name = invalid then name = ""
-            item.title = name
-            poster = metas[c].poster
-            if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
-        end for
+        content.AppendChild(MakeRowNode(m.gridRows[r], counts))
     end for
     m.catalog.content = content
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
 end sub
+
+' Build the ContentNode for one grid row: a titled group of poster children.
+' counts carries the merged name histogram so duplicated catalog labels get
+' their type suffix (it is invalid for rows outside the first assembly, e.g. a
+' freshly inserted Continue Watching row — the label is unique anyway).
+function MakeRowNode(row as object, counts = invalid as object) as object
+    node = CreateObject("roSGNode", "ContentNode")
+    label = row.title
+    if counts <> invalid and counts[label] > 1 then label = label + " " + TypeLabel(row.metaType)
+    node.title = label
+    for each meta in row.metas
+        item = node.CreateChild("ContentNode")
+        name = meta.name
+        if name = invalid then name = ""
+        item.title = name
+        poster = meta.poster
+        if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
+    end for
+    return node
+end function
 
 ' The top row when the user has watched something: one tile per local
 ' continue-watching entry, carrying its resume hint so Details can reopen on
@@ -166,6 +178,70 @@ function LibraryRow() as dynamic
     return { source: "library", title: "Continue Watching", metaType: "", metas: metas }
 end function
 
+function ContinueWatchingSignature() as string
+    if m.stores = invalid or m.stores.library = invalid then return ""
+    entries = m.stores.library.ContinueWatching()
+    if entries = invalid or entries.Count() = 0 then return ""
+    parts = []
+    for each entry in entries
+        parts.Push(entry.metaId + "|" + entry.videoId + "|" + entry.season.toStr() + "|" + entry.episode.toStr() + "|" + entry.position.toStr())
+    end for
+    parts.Sort("i")
+    return parts.Join(";")
+end function
+
+' Live-update the Continue Watching row after progress was made elsewhere,
+' without touching the rest of the grid. The catalog rows' nodes stay bit-for-bit
+' intact, so the RowList's own scroll + focus survive the visit; only the top
+' row's posters/titles change. A row appearing (first watch) or disappearing
+' (history cleared) is handled by inserting/removing precisely that one row —
+' which may clamp focus to the top, an acceptable reset confined to those rare
+' transitions.
+sub RefreshContinueWatching()
+    if m.catalog.content = invalid then return
+    content = m.catalog.content
+    haveCw = m.gridRows.Count() > 0 and m.gridRows[0].source = "library"
+    live = LibraryRow()
+    if live <> invalid
+        if haveCw
+            SyncContinueWatchingRow(content.GetChild(0), live.metas)
+            m.gridRows[0] = live
+        else
+            content.InsertChild(MakeRowNode(live, invalid), 0)
+            m.gridRows.Insert(0, live)
+            m.catalog.numRows = m.gridRows.Count()
+        end if
+    else if haveCw
+        content.RemoveChildIndex(0)
+        m.gridRows.Delete(0)
+        m.catalog.numRows = m.gridRows.Count()
+    end if
+end sub
+
+' Refresh a row node's poster children to match a fresh meta list, reusing the
+' existing child nodes by index so the RowList sees no structural change in the
+' common case: no flicker, and focus holds even when entries reorder (a watched
+' title rises to the front). Surplus children are trimmed from the tail.
+sub SyncContinueWatchingRow(node as object, metas as object)
+    existing = node.getChildCount()
+    for c = 0 to metas.Count() - 1
+        item = invalid
+        if c < existing
+            item = node.GetChild(c)
+        else
+            item = node.CreateChild("ContentNode")
+        end if
+        name = metas[c].name
+        if name = invalid then name = ""
+        item.title = name
+        poster = metas[c].poster
+        if poster <> invalid and poster <> "" then item.hdPosterUrl = poster else item.hdPosterUrl = invalid
+    end for
+    while node.getChildCount() > metas.Count()
+        node.RemoveChildIndex(node.getChildCount() - 1)
+    end while
+end sub
+
 ' Where the meta for a library-sourced tile comes from. The library records no
 ' addon origin, so the Cinemeta built-in (the meta authority) is the default.
 function MetaAddress() as string
@@ -185,9 +261,15 @@ end function
 function OnEnter(params as object) as void
     if not m.railBuilt then BuildRail()
     if not m.catalogRowsBuilt then BuildCatalogRows()
-    BuildRows()
+    sig = ContinueWatchingSignature()
+    if not m.gridBuilt
+        BuildRows()
+        m.gridBuilt = true
+    else if sig <> m.cwSignature
+        RefreshContinueWatching()
+    end if
+    m.cwSignature = sig
     m.catalog.SetFocus(true)
-    RestoreGridFocus()
 end function
 
 function OnExit() as void
@@ -198,29 +280,10 @@ function OnBackPressed() as boolean
 end function
 
 ' Remember where the grid sits when another screen takes focus. ScreenStack
-' calls BlurFocus on every push, so the tile that was selected (or arrow-navigated
-' to) survives the trip; OnEnter restores it after the rebuild.
+' calls BlurFocus on every push; nothing needs saving because the content tree
+' is never replaced after first entry, so the RowList keeps its own scroll +
+' focus across every trip away and back.
 sub BlurFocus()
-    if m.catalog = invalid then return
-    data = m.catalog.rowItemFocused
-    if data = invalid or data.Count() < 2 then return
-    m.pinnedGridRow = data[0]
-    m.pinnedGridItem = data[1]
-end sub
-
-' Jump the rebuilt grid back to the pinned tile. Nothing to do on first boot
-' (nothing was pinned); bounds are clamped because the Continue Watching row can
-' appear, reorder or disappear between visits.
-sub RestoreGridFocus()
-    if m.pinnedGridRow < 0 or m.pinnedGridItem < 0 then return
-    row = m.pinnedGridRow
-    if row >= m.gridRows.Count() then row = m.gridRows.Count() - 1
-    if row < 0 then return
-    item = m.pinnedGridItem
-    count = m.gridRows[row].metas.Count()
-    if item >= count then item = count - 1
-    if item < 0 then return
-    m.catalog.jumpToRowItem = [row, item]
 end sub
 
 ' The left rail: a fixed one-column icon menu. Built once (nodes created in init
