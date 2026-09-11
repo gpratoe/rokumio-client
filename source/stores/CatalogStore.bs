@@ -44,9 +44,11 @@ class CatalogStore
     end function
 
     ' Fetch one catalog row: GET {address}/catalog/{type}/{catalogId}/{extra}.json
-    ' with the extra segment defaulting to "skip=0".
+    ' with the extra segment defaulting to "skip=0". hasMore (the Stremio "there
+    ' is another skip page" flag) rides along for clients that paginate; a
+    ' response without it reports false.
     function Catalog(addonAddress as string, metaType as string, catalogId as string, extra = "skip=0" as string) as object
-        result = { ok: false, metas: invalid, error: "" }
+        result = { ok: false, metas: invalid, hasMore: false, error: "" }
         if addonAddress = ""
             result.error = "no addon address"
             return result
@@ -78,6 +80,7 @@ class CatalogStore
         end if
 
         result.metas = metas
+        result.hasMore = response.json.hasMore = true
         result.ok = true
         return result
     end function

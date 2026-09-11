@@ -44,7 +44,7 @@
         <RowList
             id="rail"
             translation="[15, 420]"
-            numRows="3"
+            numRows="4"
             itemSize="[120, 132]"
             itemSpacing="[0, 0]"
             rowItemSize="[[80, 80]]"

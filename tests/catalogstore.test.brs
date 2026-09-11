@@ -93,6 +93,133 @@ sub Test_Catalog_Fetch()
     Harness_Equal(result.metas[0].name, "One", "meta fields intact")
 end sub
 
+sub Test_Catalog_DiscoverTop()
+    Harness_Suite("CatalogStore builds the Discover Popular catalog URL")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/skip=0.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0000001", type: "movie", name: "One" } ] }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "movie", "top", "skip=0")
+
+    Harness_Ok(result.ok, "popular catalog ok")
+    Harness_Equal(store.transport.log[0].url, address + "/catalog/movie/top/skip=0.json", "Defaults to the Popular + All + skip=0 shape")
+end sub
+
+sub Test_Catalog_DiscoverGenre()
+    Harness_Suite("CatalogStore builds a Discover genre catalog URL")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/series/top/genre=Action&skip=0.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0000002", type: "series", name: "Two" } ] }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "series", "top", "genre=Action&skip=0")
+
+    Harness_Ok(result.ok, "genre catalog ok")
+    Harness_Equal(store.transport.log[0].url, address + "/catalog/series/top/genre=Action&skip=0.json", "Genre joins the skip param in the extra segment")
+end sub
+
+sub Test_Catalog_DiscoverYear()
+    Harness_Suite("CatalogStore builds a Discover New/this-year catalog URL")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/year/genre=2026&skip=0.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0000003", type: "movie", name: "Three" } ] }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "movie", "year", "genre=2026&skip=0")
+
+    Harness_Ok(result.ok, "year catalog ok")
+    Harness_Equal(store.transport.log[0].url, address + "/catalog/movie/year/genre=2026&skip=0.json", "New chart pins the current year")
+end sub
+
+sub Test_Catalog_DiscoverFeatured()
+    Harness_Suite("CatalogStore builds a Discover Featured catalog URL")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/series/imdbRating/skip=0.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0000004", type: "series", name: "Four" } ] }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "series", "imdbRating", "skip=0")
+
+    Harness_Ok(result.ok, "featured catalog ok")
+    Harness_Equal(store.transport.log[0].url, address + "/catalog/series/imdbRating/skip=0.json", "Featured uses imdbRating")
+end sub
+
+sub Test_Catalog_DiscoverNextPage()
+    Harness_Suite("CatalogStore advances a Discover page via its own skip")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/genre=Sci-Fi&skip=50.json"
+            ok: true
+            status: 200
+            json: {
+                metas: [
+                    { id: "tt0000005", type: "movie", name: "Five" }
+                    { id: "tt0000006", type: "movie", name: "Six" }
+                ]
+                hasMore: true
+            }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "movie", "top", "genre=Sci-Fi&skip=50")
+
+    Harness_Ok(result.ok, "next page ok")
+    Harness_Equal(store.transport.log[0].url, address + "/catalog/movie/top/genre=Sci-Fi&skip=50.json", "skip advances past the metas already shown")
+    Harness_Ok(result.hasMore, "hasMore rides along when the server says so")
+end sub
+
+sub Test_Catalog_HasMoreFlag()
+    Harness_Suite("CatalogStore reports hasMore=false when the server omits it")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/skip=100.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0000007", type: "movie", name: "Seven" } ] }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "movie", "top", "skip=100")
+
+    Harness_Ok(result.ok, "final page ok")
+    Harness_Equal(result.hasMore, false, "a response without hasMore stops pagination")
+end sub
+
 sub Test_Catalog_Search()
     Harness_Suite("CatalogStore.Search hits the add-on search catalog")
     address = "https://v3-cinemeta.strem.io"

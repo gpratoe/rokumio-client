@@ -35,6 +35,8 @@ sub init()
     m.addonsScreen = m.top.FindNode("addonsScreen")
     m.searchScreen = m.top.FindNode("searchScreen")
     m.searchScreen.ObserveField("pushRequest", "onSearchAction")
+    m.discoverScreen = m.top.FindNode("discoverScreen")
+    m.discoverScreen.ObserveField("pushRequest", "onDiscoverAction")
     m.uiRoot = m.top.FindNode("uiRoot")
 
     ' Bottom-of-stack Back pushes the confirm-exit dialog; the dialog's
@@ -64,6 +66,7 @@ sub init()
     m.settingsScreen.callFunc("SetStores", m.stores)
     m.addonsScreen.callFunc("SetStores", m.stores)
     m.searchScreen.callFunc("SetStores", m.stores)
+    m.discoverScreen.callFunc("SetStores", m.stores)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -91,6 +94,13 @@ end sub
 ' SearchScreen's action channel; same one-action routing.
 sub onSearchAction()
     request = m.searchScreen.pushRequest
+    if request = invalid or request.screen = invalid then return
+    m.stack.push(request.screen, request.params)
+end sub
+
+' DiscoverScreen's action channel; same one-action routing.
+sub onDiscoverAction()
+    request = m.discoverScreen.pushRequest
     if request = invalid or request.screen = invalid then return
     m.stack.push(request.screen, request.params)
 end sub
