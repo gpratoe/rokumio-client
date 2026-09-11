@@ -37,7 +37,7 @@
             translation="[150, 128]"
             width="1760"
             height="40"
-            text="OK on a chip to open its menu · Up/Down to reach the results · Back to exit"
+            text="OK on a chip to open its menu · Up/Down to reach the results · Back to exit · * Focus filters"
             font="font:SmallSystemFont"
             color="0x8FA399FF" />
 
