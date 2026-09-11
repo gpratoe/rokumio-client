@@ -8,7 +8,9 @@
 // Exercised by:   node tools/mock-addon-server/server.test.js (wired into npm test)
 "use strict";
 
+const fs = require("fs");
 const http = require("http");
+const path = require("path");
 
 const manifest = {
     id: "stremio.rokumio.mock",
@@ -20,7 +22,7 @@ const manifest = {
         { type: "series", id: "top", name: "Top Series" },
     ],
     types: ["movie", "series"],
-    resources: ["catalog", "meta", "stream"],
+    resources: ["catalog", "meta", "stream", "subtitles"],
 };
 
 function sendJson(res, status, body) {
@@ -92,30 +94,60 @@ function streamResponse(type, id) {
     return { streams };
 }
 
+// Caption tracks for the playing video. The download URLs are built from the
+// Host header of the request (the address the client used to reach this server),
+// so the Roku can fetch the .srt bodies over the LAN instead of pointing at a
+// fake https host that cannot be reached.
+function subtitleResponse(type, id, host) {
+    const base = host ? `http://${host}` : "http://mock.invalid";
+    return {
+        subtitles: [
+            { id: "en", url: `${base}/subtitles/files/en.srt`, lang: "en", langName: "English" },
+            { id: "es", url: `${base}/subtitles/files/es.srt`, lang: "es", langName: "Spanish" },
+            { id: "de", url: `${base}/subtitles/files/de.srt`, lang: "de", langName: "German" },
+        ],
+    };
+}
+
 function createAddonServer() {
     const server = http.createServer((req, res) => {
-        const path = new URL(req.url, "http://localhost").pathname;
+        const pathname = new URL(req.url, "http://localhost").pathname;
 
-        if (req.method === "GET" && path === "/health") {
+        if (req.method === "GET" && pathname === "/health") {
             return sendJson(res, 200, { ok: true });
         }
-        if (req.method === "GET" && (path === "/" || path === "/manifest.json")) {
+        if (req.method === "GET" && (pathname === "/" || pathname === "/manifest.json")) {
             return sendJson(res, 200, manifest);
         }
 
-        const catalogMatch = path.match(/^\/catalog\/([^/]+)\/([^/]+)\/[\w=+%-]+\.json$/);
+        const catalogMatch = pathname.match(/^\/catalog\/([^/]+)\/([^/]+)\/[\w=+%-]+\.json$/);
         if (req.method === "GET" && catalogMatch) {
             return sendJson(res, 200, catalogResponse(catalogMatch[1], catalogMatch[2]));
         }
 
-        const metaMatch = path.match(/^\/meta\/([^/]+)\/([^/]+)\.json$/);
+        const metaMatch = pathname.match(/^\/meta\/([^/]+)\/([^/]+)\.json$/);
         if (req.method === "GET" && metaMatch) {
             return sendJson(res, 200, metaResponse(metaMatch[1], metaMatch[2]));
         }
 
-        const streamMatch = path.match(/^\/stream\/([^/]+)\/([^/]+)\.json$/);
+        const streamMatch = pathname.match(/^\/stream\/([^/]+)\/([^/]+)\.json$/);
         if (req.method === "GET" && streamMatch) {
             return sendJson(res, 200, streamResponse(streamMatch[1], streamMatch[2]));
+        }
+
+        const subtitleMatch = pathname.match(/^\/subtitles\/([^/]+)\/([^/]+)\.json$/);
+        if (req.method === "GET" && subtitleMatch) {
+            return sendJson(res, 200, subtitleResponse(subtitleMatch[1], subtitleMatch[2], req.headers.host));
+        }
+
+        const subtitleFile = pathname.match(/^\/subtitles\/files\/([a-z]{2})\.srt$/);
+        if (req.method === "GET" && subtitleFile) {
+            const file = path.join(__dirname, "srt", subtitleFile[1] + ".srt");
+            if (fs.existsSync(file)) {
+                res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+                return res.end(fs.readFileSync(file));
+            }
+            return sendJson(res, 404, { error: "not found" });
         }
 
         sendJson(res, 404, { error: "not found" });

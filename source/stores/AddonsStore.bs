@@ -148,6 +148,20 @@ class AddonsStore
         return list
     end function
 
+    ' Whether an add-on's resources advertise a resource name. Tolerant of the
+    ' normalized string names and raw object resources from a live manifest.
+    function HasResource(resources as dynamic, name as string) as boolean
+        if resources = invalid or Type(resources) <> "roArray" then return false
+        for each resource in resources
+            if Type(resource) = "roAssociativeArray"
+                if resource.name <> invalid and resource.name = name then return true
+            else
+                if resource = name then return true
+            end if
+        end for
+        return false
+    end function
+
     ' Fetch the manifest URL the user provides and register the addon. The user
     ' supplies the full URL (including /manifest.json and any query args); we
     ' fetch it directly and extract the base address for later use. Returns a

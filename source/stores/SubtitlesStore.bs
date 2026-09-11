@@ -1,0 +1,88 @@
+' SubtitlesStore — caption tracks for a movie/episode from an add-on server.
+'
+' Subtitles(...) speaks the Stremio add-on protocol: GET
+' {addonAddress}/subtitles/{type}/{videoId}.json returns the available tracks
+' (each a { id, url, lang, langName, … } entry) for that video. The list is
+' passed through as the add-on provides it; picking a single default track
+' lives in PickTrack so it is unit-testable without a transport. Nothing here
+' renders subtitles — building Roku SubtitleTracks ContentNodes is the
+' player's job — so the store stays pure data like its siblings.
+'
+' Stateless like CatalogStore/PlaybackStore: every call passes the addresses
+' in, nothing is persisted here.
+
+class SubtitlesStore
+    transport as object
+
+    sub new(http as object)
+        m.transport = http
+    end sub
+
+    ' GET {address}/subtitles/{type}/{videoId}.json — the caption candidates for
+    ' a movie or episode. The response must carry a subtitles array.
+    function Subtitles(addonAddress as string, metaType as string, videoId as string) as object
+        result = { ok: false, subtitles: invalid, error: "" }
+        if addonAddress = ""
+            result.error = "no addon address"
+            return result
+        end if
+        if metaType = "" or videoId = ""
+            result.error = "type or video id missing"
+            return result
+        end if
+
+        url = m.transport.EndpointUrl(addonAddress, "/subtitles/" + metaType + "/" + videoId + ".json")
+        response = m.transport.Get(url)
+        if not response.ok or response.json = invalid
+            result.error = response.error
+            return result
+        end if
+
+        subtitles = response.json.subtitles
+        if subtitles = invalid or Type(subtitles) <> "roArray"
+            result.error = "subtitles response missing subtitles"
+            return result
+        end if
+
+        result.subtitles = subtitles
+        result.ok = true
+        print "[rokumio] SubtitlesStore subtitles=" + subtitles.Count().ToStr() + " url='" + url + "'"
+        return result
+    end function
+
+    ' Index of the track to show by default: the one whose language starts with
+    ' the device locale's two-letter prefix, else an English track, else the
+    ' first track. -1 when there is nothing to pick from; a blank locale simply
+    ' skips the first pass.
+    function PickTrack(subtitles as object, locale as string) as integer
+        if subtitles = invalid or Type(subtitles) <> "roArray" then return -1
+
+        prefix = ""
+        if locale <> invalid and locale.Trim() <> "" then prefix = LCase(locale.Trim().Left(2))
+
+        if m.TrackMatchesLang(subtitles, prefix) >= 0 then return m.TrackMatchesLang(subtitles, prefix)
+        if m.TrackMatchesLang(subtitles, "en") >= 0 then return m.TrackMatchesLang(subtitles, "en")
+        if subtitles.Count() > 0 then return 0
+        return -1
+    end function
+
+    ' Index of the first track whose language code starts with code, or -1. A
+    ' blank code never matches (so empty-language tracks survive a match pass).
+    function TrackMatchesLang(subtitles as object, code as string) as integer
+        if subtitles = invalid or Type(subtitles) <> "roArray" then return -1
+        if code = "" then return -1
+        for i = 0 to subtitles.Count() - 1
+            if m.TrackLang(subtitles[i]).Left(2) = code then return i
+        end for
+        return -1
+    end function
+
+    ' The track's language code lowercased, or "" when the track carries none.
+    ' Matching keys off lang (the Stremio field every subtitle add-on sets);
+    ' langName is a display label, never a reliable code ("Spanish" is not "es").
+    function TrackLang(track as object) as string
+        if track = invalid or Type(track) <> "roAssociativeArray" then return ""
+        if track.lang <> invalid and track.lang.Trim() <> "" then return LCase(track.lang.Trim())
+        return ""
+    end function
+end class

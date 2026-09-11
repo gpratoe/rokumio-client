@@ -299,3 +299,14 @@ sub Test_Addons_CatalogsFlatten()
     Harness_Equal(catalogs[0].type, "movie", "catalog type propagated")
     Harness_Equal(catalogs[0].catalogId, "top", "catalog id propagated")
 end sub
+
+sub Test_Addons_HasResource()
+    Harness_Suite("AddonsStore.HasResource spots a resource name in any entry shape")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+
+    Harness_Ok(addons.HasResource(["stream", "meta"], "stream"), "string resources matched")
+    Harness_Ok(addons.HasResource([{ name: "subtitles" }], "subtitles"), "object resources matched")
+    Harness_Ok(not addons.HasResource(["catalog"], "stream"), "absent name not matched")
+    Harness_Ok(not addons.HasResource(invalid, "stream"), "invalid resources not matched")
+    Harness_Ok(not addons.HasResource([], "stream"), "empty resources not matched")
+end sub

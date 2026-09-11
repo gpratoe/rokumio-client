@@ -15,39 +15,42 @@
 ' field; playback state is surfaced through the status label so a broken stream
 ' is a message, not a black screen.
 '
-' Transport is entirely this screen's own because the Video runs with
-' enableUI=false — the platform never draws a pause screen or trick-play
-' timeline. OK and the play/pause buttons all toggle playback, Left/Right step
-' ±10s and FF/RW ±30s, and the custom bottom bar shows progress. The bar hides
-' after a few seconds of playing but stays up while paused/error.
+' Transport is the platform's: the Video runs with enableUI and enableTrickPlay
+' on, so OK/play-pause show the native pause screen, Left/Right and FF/RW use
+' the native seek/trick-play UI, and "*" opens Roku's Options overlay with its
+' certification-mandated captions dialog. The screen only owns the resolve
+' (pre-video) phase and teardown; Back records the position and pops.
+'
+' Subtitle captions are fetched off-thread (SubtitleLoaderTask) from an add-on
+' advertising the "subtitles" resource (OpenSubtitles v3 is the built-in, an
+' installed add-on wins) and attached to the video through SubtitleTracks /
+' SubtitleConfig. The per-video caption mode is forced on so a device captions
+' setting cannot keep them hidden, and a track list already in hand when the
+' stream starts rides on the ContentNode (Roku's documented home for
+' SubtitleTracks) before play. The native Options dialog lists Off + every
+' track from SubtitleTracks, so the Roku OS owns track selection from there.
+' Auto-pick is by device locale, else English, else the first track.
 '
 ' Params: { stream, serverAddress, metaType, metaId, videoId, season, episode,
 '           position, name, poster, logo }.
 
 sub init()
-    m.videoSurface = m.top.FindNode("videoSurface")
+    m.video = m.top.FindNode("video")
     m.status = m.top.FindNode("playerStatus")
-    m.overlay = m.top.FindNode("playerOverlay")
-    m.title = m.top.FindNode("overlayTitle")
-    m.playButton = m.top.FindNode("playButton")
-    m.fill = m.top.FindNode("progressFill")
-    m.timeLabel = m.top.FindNode("timeLabel")
-    m.seekToast = m.top.FindNode("seekToast")
-    m.seekToastText = m.top.FindNode("seekToastText")
-    m.hideTimer = m.top.FindNode("overlayHideTimer")
-    m.toastTimer = m.top.FindNode("toastHideTimer")
     m.bufferingGroup = m.top.FindNode("bufferingGroup")
     m.logoBack = m.top.FindNode("logoBack")
     m.logoFront = m.top.FindNode("logoFront")
     m.resolvePulse = m.top.FindNode("resolvePulse")
 
-    m.hideTimer.ObserveField("fire", "onOverlayHideTimerFire")
-    m.toastTimer.ObserveField("fire", "onToastHideTimerFire")
     m.stopWatchdog = m.top.FindNode("stopWatchdog")
     m.stopWatchdog.ObserveField("fire", "onStopWatchdogFire")
     m.pendingStop = false
-    m.seekPending = 0
     m.resolveTask = invalid
+    m.subtitleTask = invalid
+    m.subtitleTracks = invalid
+    m.subtitleIndex = -1
+    m.subtitleNodesApplied = false
+    m.subtitlePicker = SubtitlesStore(invalid)
 end sub
 
 function SetStores(stores as object) as void
@@ -59,10 +62,6 @@ function OnEnter(params as object) as void
     m.playParams = params
     m.saved = false
     m.hasPlayed = false
-
-    title = params.name
-    if title = invalid then title = ""
-    m.title.text = title
 
     ' The pre-buffer pulse (logo beating transparent to solid, Stremio-style)
     ' only has something to show when a logo URL is available; otherwise the
@@ -80,6 +79,7 @@ function OnEnter(params as object) as void
     end if
 
     StartResolve(params.stream, params.serverAddress)
+    StartSubtitles(params)
 end function
 
 ' Kick the stream resolution off the render thread. The task frees the UI as the
@@ -155,29 +155,238 @@ sub CancelResolve()
     StopResolvePulse()
 end sub
 
-' The Video node is a per-play instance: created fresh on every enter and torn
-' down on exit, because a reused node refuses to abandon a stream once playback
-' has begun (content swaps and control="stop" are ignored mid-buffer) — on top
-' of that, a still-running player keeps decoding/downloading invisibly after the
-' screen is gone. A from-scratch node each play guarantees a clean player and
-' silence on exit, at no cost beyond node creation. Only created once the stream
-' has resolved to a URL.
-sub CreateVideo()
-    m.video = CreateObject("roSGNode", "Video")
-    m.video.width = 1920
-    m.video.height = 1080
-    m.video.enableUI = false
-    m.video.enableTrickPlay = false
-    m.videoSurface.AppendChild(m.video)
+' Kick the caption fetch off the render thread. Subtitles never gate playback:
+' StartPlayback applies whatever had arrived by then and a late result applies
+' to the live Video node the moment it reports in. The add-on scan prefers an
+' installed (non-built-in) add-on so a locally installed mock beats the
+' internet-bound OpenSubtitles built-in; OpenSubtitles is only used when
+' nothing else advertises the resource.
+sub StartSubtitles(params as object)
+    if m.stores = invalid or m.stores.addons = invalid then return
+    if m.subtitleTask <> invalid then return
+    if params.metaType = invalid or params.videoId = invalid then return
+    if params.metaType = "" or params.videoId = "" then return
 
+    address = FindSubtitlesAddress(m.stores.addons.GetAll())
+    if address = "" then return
+
+    task = CreateObject("roSGNode", "SubtitleLoaderTask")
+    task.id = "playerSubtitles"
+    m.top.AppendChild(task)
+    task.addonAddress = address
+    task.metaType = params.metaType
+    task.videoId = params.videoId
+    task.observeField("result", "onSubtitleResult")
+    m.subtitleTask = task
+    task.control = "RUN"
+    print "[rokumio] PlayerScreen subtitle task started address='" + address + "'"
+end sub
+
+' Address of the add-on to ask for captions: the first installed (non-built-in)
+' add-on advertising "subtitles", else the built-in that does.
+function FindSubtitlesAddress(addons as object) as string
+    builtin = ""
+    for each addon in addons
+        if addon <> invalid and addon.address <> invalid and addon.address <> ""
+            if addon.resources <> invalid and m.stores.addons.HasResource(addon.resources, "subtitles")
+                if addon.builtin = true
+                    if builtin = "" then builtin = addon.address
+                else
+                    return addon.address
+                end if
+            end if
+        end if
+    end for
+    return builtin
+end function
+
+' The caption list landed. The raw add-on tracks become the SubtitleTracks
+' source and a pick index selects the active one; a failure leaves the player
+' caption-free, which is fine (no subs is never an error). Results that land
+' after a Back-out are dropped by the m.subtitleTask guard.
+sub onSubtitleResult()
+    if m.subtitleTask = invalid then return
+    task = m.subtitleTask
+    m.subtitleTask = invalid
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result = invalid or not result.ok or result.subtitles = invalid or result.subtitles.Count() = 0
+        ClearSubtitles()
+        return
+    end if
+
+    m.subtitleTracks = result.subtitles
+    m.subtitleNodesApplied = false
+    m.subtitleIndex = m.subtitlePicker.PickTrack(result.subtitles, DeviceLocale())
+    print "[rokumio] PlayerScreen subtitles=" + result.subtitles.Count().ToStr() + " pick=" + m.subtitleIndex.ToStr()
+    ' Playback never waits for this fetch, so a list that lands here applies to
+    ' the live content node (and writes video.subtitleTrack) mid-play; the
+    ' native Options dialog picks the tracks up from the updated SubtitleTracks.
+    ApplySubtitleIndex(invalid)
+end sub
+
+sub CancelSubtitles()
+    if m.subtitleTask <> invalid
+        m.subtitleTask.unobserveField("result")
+        m.subtitleTask.control = "STOP"
+        if m.subtitleTask.getParent() <> invalid then m.top.RemoveChild(m.subtitleTask)
+        m.subtitleTask = invalid
+    end if
+end sub
+
+' Drop the caption state back to none without touching the Video node's current
+' config — a per-play node starts clean, so there is nothing to undo.
+sub ClearSubtitles()
+    m.subtitleTracks = invalid
+    m.subtitleIndex = -1
+    m.subtitleNodesApplied = false
+end sub
+
+' Push the current subtitle selection onto the video's content. SubtitleTracks is
+' content metadata on the ContentNode the Video plays. Roku's native player
+' expects each entry as an associative array with TrackName set to the
+' downloadable subtitle URL; tracks already in hand ride the node pre-play (the
+' reliable sideloaded path), and a list that arrives later targets the live
+' content node instead. Selection is matched from the raw list by URL because
+' BuildSubtitleTracks drops entries without one, so the pick index does not
+' always line up with the built array. Visibility is driven through
+' globalCaptionMode (the per-video switch that overrides the device caption
+' setting); the native Options dialog takes over track selection from there.
+sub ApplySubtitleIndex(content as object)
+    if content = invalid then content = CurrentContent()
+    if content = invalid then return
+
+    if m.subtitleTracks = invalid or m.subtitleTracks.Count() = 0
+        content.subtitleTracks = []
+        content.subtitleConfig = {}
+        SetCaptionMode("off")
+        return
+    end if
+
+    if not m.subtitleNodesApplied
+        content.subtitleTracks = BuildSubtitleTracks()
+        m.subtitleNodesApplied = true
+    end if
+
+    selected = SelectedSubtitleTrack()
+    if selected = ""
+        content.subtitleConfig = {}
+        SetCaptionMode("off")
+        return
+    end if
+
+    content.subtitleConfig = { TrackName: selected }
+    SelectSubtitleTrack(selected)
+    ' Force captions on when we have tracks so the user sees them by default
+    SetCaptionMode("on")
+end sub
+
+' The TrackName URL of the picked raw track — the same URL BuildSubtitleTracks
+' wrote into the built array — or "" when there is nothing to select.
+function SelectedSubtitleTrack() as string
+    if m.subtitleTracks = invalid then return ""
+    if m.subtitleIndex < 0 or m.subtitleIndex >= m.subtitleTracks.Count() then return ""
+    rawTrack = m.subtitleTracks[m.subtitleIndex]
+    if rawTrack = invalid then return ""
+    url = ""
+    if rawTrack.DoesExist("url") and rawTrack.url <> invalid then url = rawTrack.url
+    if url = "" and rawTrack.DoesExist("downloadUrl") and rawTrack.downloadUrl <> invalid then url = rawTrack.downloadUrl
+    return url
+end function
+
+' The content node currently driving the player, or invalid before StartPlayback.
+function CurrentContent() as object
+    if m.video <> invalid then return m.video.content
+    return invalid
+end function
+
+' The per-video caption switch. This is the Video node's globalCaptionMode
+' ("On"/"Off"); Roku expects apps to write it whenever captions are toggled, so
+' the chosen state applies even when the device-level caption setting says the
+' opposite.
+sub SetCaptionMode(mode as string)
+    if m.video = invalid then return
+    if not m.video.HasField("globalCaptionMode") then return
+    value = "Off"
+    if mode = "on" then value = "On"
+    m.video.globalCaptionMode = value
+end sub
+
+' Live-node track switch for lists applied after playback has begun:
+' Video.subtitleTrack is the documented write field that re-selects a track on
+' the fly. Before play the ContentNode carries the tracks, so this is a no-op
+' there.
+sub SelectSubtitleTrack(trackName as string)
+    if m.video = invalid then return
+    if not m.video.HasField("subtitleTrack") then return
+    if trackName = "" then return
+    m.video.subtitleTrack = trackName
+end sub
+
+function BuildSubtitleTracks() as object
+    tracks = []
+    if m.subtitleTracks = invalid then return tracks
+    languageCounts = {}
+    for each track in m.subtitleTracks
+        subtitleUrl = ""
+        if track.DoesExist("url") and track.url <> invalid then subtitleUrl = track.url
+        if subtitleUrl = "" and track.DoesExist("downloadUrl") and track.downloadUrl <> invalid then subtitleUrl = track.downloadUrl
+        if subtitleUrl = "" then
+            continue for
+        end if
+
+        language = TrackDisplayName(track)
+        count = 1
+        if languageCounts.DoesExist(language) then count = languageCounts[language] + 1
+        languageCounts[language] = count
+
+        ' Roku's native Video expects subtitleTracks as an array of associative
+        ' arrays. TrackName must be the downloadable subtitle URL; Url plus
+        ' ContentNode children are not reliably enumerated by the native menu.
+        tracks.Push({
+            Language: m.subtitlePicker.TrackLang(track)
+            Description: language + " " + count.ToStr()
+            TrackName: subtitleUrl
+        })
+    end for
+    return tracks
+end function
+
+function TrackDisplayName(track as object) as string
+    if track <> invalid
+        if track.langName <> invalid and track.langName.Trim() <> "" then return track.langName.Trim()
+        if track.lang <> invalid and track.lang.Trim() <> "" then return track.lang.Trim()
+    end if
+    return "Captions"
+end function
+
+' The Roku locale for the default caption pick, e.g. "es_ES"; a two-letter
+' prefix is what SubtitlesStore.PickTrack matches against the tracks.
+function DeviceLocale() as string
+    device = CreateObject("roDeviceInfo")
+    if device <> invalid
+        locale = device.GetCurrentLocale()
+        if locale <> invalid then return locale.ToStr()
+    end if
+    return ""
+end function
+
+' The Video node is declared in XML so Roku owns its native UI lifecycle. Each
+' player screen is a fresh component instance; the node is reused only for the
+' single stream played by that screen and is cleared during teardown.
+sub CreateVideo()
+    if m.video = invalid then return
+    m.video.visible = true
     m.video.ObserveField("state", "onVideoStateChanged")
-    m.video.ObserveField("position", "onPositionChanged")
-    m.video.ObserveField("duration", "refreshOverlay")
     m.video.ObserveField("bufferingStatus", "onBufferingStatusChanged")
 end sub
 
 ' The resolved URL is the only thing that ever touches the Video node: build the
-' content (title, resume offset, sniffed stream format), then play.
+' content (title, resume offset, sniffed stream format), then play. Captions do
+' not gate playback — a list already in hand rides the content pre-play, and a
+' result still in flight applies to the live node the moment it lands.
 sub StartPlayback(url as string)
     CreateVideo()
 
@@ -193,14 +402,12 @@ sub StartPlayback(url as string)
     streamFormat = DetectStreamFormat(url)
     if streamFormat <> "" then content.streamFormat = streamFormat
 
-    print "[rokumio] PlayerScreen url='" + url + "' format='" + streamFormat + "' playStart=" + startOffset.ToStr()
-
     m.video.enablePositionTracking = true
+    ApplySubtitleIndex(content)
     m.video.content = content
     m.video.SetFocus(true)
     m.video.control = "play"
-    m.playButton.uri = "pkg:/images/icon_pause.png"
-    ShowOverlay()
+    print "[rokumio] PlayerScreen url='" + url + "' format='" + streamFormat + "' playStart=" + startOffset.ToStr()
 end sub
 
 ' The stream format has to be told to the Video node — Roku does not reliably
@@ -217,9 +424,9 @@ function DetectStreamFormat(url as string) as string
     return ""
 end function
 
-' Surface playback state on the status line and drive the play/pause icon: a
-' broken stream is a message, not a silent black frame. The overlay hides on
-' finished/stopped but otherwise follows the hide timer.
+' Surface playback state on the status line for the grab-before-video resolve
+' phase and for failures: a broken stream is a message, not a silent black
+' frame. The native chrome owns everything once the platform has a stream.
 sub onVideoStateChanged()
     if m.video = invalid then return
     state = m.video.state
@@ -242,31 +449,27 @@ sub onVideoStateChanged()
     if state = "playing"
         m.hasPlayed = true
         m.status.text = ""
-        m.playButton.uri = "pkg:/images/icon_pause.png"
         HideBuffering()
-        restartHideTimer()
-    else if state = "paused"
-        m.playButton.uri = "pkg:/images/icon_play.png"
     else if state = "error"
         m.status.text = "Playback failed: check the stream and server."
-        m.playButton.uri = "pkg:/images/icon_play.png"
         HideBuffering()
     else if state = "buffering"
         StopResolvePulse()
         if HasLogo() then m.bufferingGroup.visible = true
     else if state = "finished" or state = "stopped"
-        m.overlay.visible = false
         HideBuffering()
     end if
-    refreshOverlay()
 end sub
 
-' All transport keys land here while a video exists. OK/Play/Pause/Replay all
-' mean the same thing (toggle), so there is no state where a press does
-' something unexpected; Left/Right and FF/RW seek immediately. Before the stream
-' resolves (or after a failure) there is no video: Back still pops (OnBackPressed
-' returns false) and every other key is swallowed so a press routes nowhere else.
-' Everything else falls through (Back reaches the stack → stop + save + pop).
+' Native playback owns every remote key once a Video exists: the platform's
+' pause screen, seek/trick-play, and Options (captions) dialog all handle their
+' own keys when this handler lets them through, so nothing is intercepted and
+' every key except Back falls through to the focused Video node.
+'
+' Before the stream resolves (or after a failure) there is no video: Back still
+' pops (OnBackPressed returns false) and every other key is swallowed so a
+' press routes nowhere else. Everything else falls through (Back reaches the
+' stack → stop + save + pop).
 function OnKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if m.video = invalid
@@ -276,140 +479,7 @@ function OnKeyEvent(key as string, press as boolean) as boolean
     ' Mid-teardown: every key is swallowed until the player actually reports
     ' "stopped" (see RequestStopAndWait) so nothing can interrupt the stop.
     if m.pendingStop then return true
-    if key = "OK" or key = "play" or key = "pause" or key = "replay"
-        togglePlayPause()
-        return true
-    end if
-    if key = "left" or key = "right"
-        if key = "left" then seekBy(-10) else seekBy(10)
-        return true
-    end if
-    if key = "fastforward" or key = "rewind"
-        if key = "rewind" then seekBy(-30) else seekBy(30)
-        return true
-    end if
     return false
-end function
-
-sub togglePlayPause()
-    state = m.video.state
-    if state = "paused"
-        m.video.control = "resume"
-        m.playButton.uri = "pkg:/images/icon_pause.png"
-        print "[rokumio] PlayerScreen toggle -> resume (state=" + state.ToStr() + ")"
-    else if state = "playing"
-        m.video.control = "pause"
-        m.playButton.uri = "pkg:/images/icon_play.png"
-        print "[rokumio] PlayerScreen toggle -> pause (state=" + state.ToStr() + ")"
-    else
-        m.video.control = "play"
-        m.playButton.uri = "pkg:/images/icon_pause.png"
-        print "[rokumio] PlayerScreen toggle -> play (state=" + state.ToStr() + ")"
-    end if
-    ShowOverlay()
-end sub
-
-sub seekBy(seconds as integer)
-    duration = m.video.duration
-    position = m.video.position
-    if position = invalid then position = 0
-    if m.seekPending = invalid then m.seekPending = 0
-    m.seekPending = m.seekPending + seconds
-    target = position + m.seekPending
-    if duration <> invalid and duration > 0 and target > duration then target = duration
-    if target < 0 then target = 0
-    m.video.seek = target
-    print "[rokumio] PlayerScreen seek " + seconds.ToStr() + "s -> " + target.ToStr() + " (pending=" + m.seekPending.ToStr() + ")"
-    ShowOverlay()
-    UpdateProgress(target, duration)
-    ShowSeekToast(target)
-end sub
-
-' A real playback-progress event means the last seek has landed and the video is
-' moving again; the next press starts a fresh accumulation instead of stacking on
-' a position that has not caught up yet.
-sub onPositionChanged()
-    if m.video = invalid then return
-    m.seekPending = 0
-    refreshOverlay()
-end sub
-
-sub ShowSeekToast(target as integer)
-    if m.seekToast = invalid then return
-    m.seekToastText.text = FormatTime(target)
-    m.seekToast.visible = true
-    m.toastTimer.control = "stop"
-    m.toastTimer.control = "start"
-end sub
-
-sub onToastHideTimerFire()
-    if m.seekToast <> invalid then m.seekToast.visible = false
-end sub
-
-sub ShowOverlay()
-    if m.overlay = invalid then return
-    m.overlay.visible = true
-    refreshOverlay()
-    restartHideTimer()
-end sub
-
-sub restartHideTimer()
-    if m.hideTimer = invalid then return
-    m.hideTimer.control = "stop"
-    m.hideTimer.control = "start"
-end sub
-
-' The bar hides after the timeout only while genuinely playing; while paused,
-' stale, or still buffering it stays so transport state stays visible.
-sub onOverlayHideTimerFire()
-    if m.video = invalid then return
-    state = m.video.state
-    if state = "playing" then m.overlay.visible = false
-end sub
-
-' Keep the progress fill and time text current; position/duration are float
-' seconds, and the fill spans the 1640px track.
-sub refreshOverlay()
-    if m.video = invalid then return
-    if m.overlay = invalid or not m.overlay.visible then return
-    position = m.video.position
-    duration = m.video.duration
-    if position = invalid then position = 0.0
-    UpdateProgress(position, duration)
-end sub
-
-' Set the fill width and time text for an absolute position. Driven both by live
-' playback and immediately by seeks, so the bar and clock follow the presses
-' instead of waiting for the position field to catch up after a seek.
-sub UpdateProgress(position as float, duration as dynamic)
-    if duration = invalid then duration = 0.0
-    if duration < 0 then duration = 0.0
-    if position < 0 then position = 0.0
-
-    m.timeLabel.text = FormatTime(position) + " / " + FormatTime(duration)
-
-    width = 0
-    if duration > 0 then width = Int(1640 * (position / duration))
-    if width > 1640 then width = 1640
-    if width < 0 then width = 0
-    m.fill.width = width
-end sub
-
-function FormatTime(seconds as dynamic) as string
-    total = Int(seconds)
-    if total < 0 then total = 0
-    h = total \ 3600
-    m = (total mod 3600) \ 60
-    s = total mod 60
-    if h > 0
-        return h.ToStr() + ":" + Pad2Time(m) + ":" + Pad2Time(s)
-    end if
-    return Pad2Time(m) + ":" + Pad2Time(s)
-end function
-
-function Pad2Time(value as integer) as string
-    if value < 10 then return "0" + value.ToStr()
-    return value.ToStr()
 end function
 
 ' The buffering logo tracks Video.bufferingStatus for real: percentage (0-100)
@@ -458,6 +528,7 @@ end function
 
 function OnExit() as void
     CancelResolve()
+    CancelSubtitles()
     SavePosition()
     if not m.pendingStop then TeardownVideo()
 end function
@@ -515,13 +586,10 @@ end sub
 sub TeardownVideo()
     if m.video = invalid then return
     m.video.UnobserveField("state")
-    m.video.UnobserveField("position")
-    m.video.UnobserveField("duration")
     m.video.UnobserveField("bufferingStatus")
     m.video.control = "stop"
     m.video.content = invalid
-    m.videoSurface.RemoveChild(m.video)
-    m.video = invalid
+    m.video.visible = false
     HideBuffering()
 end sub
 

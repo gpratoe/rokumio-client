@@ -70,7 +70,7 @@ sub LoadStreams(params as object)
 
     addresses = []
     for each addon in m.stores.addons.GetAll()
-        if addon.resources <> invalid and HasResource(addon.resources, "stream")
+        if m.stores.addons.HasResource(addon.resources, "stream")
             if addon.address <> invalid and addon.address <> "" then addresses.Push(addon.address)
         end if
     end for
@@ -198,18 +198,6 @@ sub PopulateStreams()
     m.streamsList.jumpToRowItem = [0, 0]
     m.streamsList.SetFocus(true)
 end sub
-
-function HasResource(resources as object, name as string) as boolean
-    if resources = invalid then return false
-    for each resource in resources
-        if Type(resource) = "roAssociativeArray"
-            if resource.name <> invalid and resource.name = name then return true
-        else
-            if resource = name then return true
-        end if
-    end for
-    return false
-end function
 
 ' The card's primary line: the add-on's stream name (Torrentio names already
 ' carry quality, e.g. "Torrentio\n4K"), then title, then a generic label.

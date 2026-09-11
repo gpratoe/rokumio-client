@@ -38,7 +38,7 @@ function httpRequest(options, resolve, reject) {
             } catch (err) {
                 json = { error: "unparseable body" };
             }
-            resolve({ status: res.statusCode, json });
+            resolve({ status: res.statusCode, json, raw });
         });
     });
     req.on("error", reject);
@@ -75,6 +75,10 @@ server.listen(0, "127.0.0.1", async () => {
         check(
             "manifest advertises the stream resource",
             Array.isArray(manifestJson.json.resources) && manifestJson.json.resources.includes("stream")
+        );
+        check(
+            "manifest advertises the subtitles resource",
+            Array.isArray(manifestJson.json.resources) && manifestJson.json.resources.includes("subtitles")
         );
 
         const catalog = await request(port, "GET", "/catalog/movie/top/skip=0.json");
@@ -132,6 +136,37 @@ server.listen(0, "127.0.0.1", async () => {
                         s.title.includes("🇬🇧 / 🇷🇺 / 🇺🇦")
                 )
         );
+
+        const subtitles = await request(port, "GET", "/subtitles/movie/tt0133093.json");
+        check(
+            "subtitles returns a caption list for the video",
+            subtitles.status === 200 &&
+                Array.isArray(subtitles.json.subtitles) &&
+                subtitles.json.subtitles.length >= 3 &&
+                typeof subtitles.json.subtitles[0].url === "string" &&
+                typeof subtitles.json.subtitles[0].lang === "string" &&
+                typeof subtitles.json.subtitles[0].langName === "string"
+        );
+        check(
+            "caption urls point at reachable srt bodies on the request host",
+            Array.isArray(subtitles.json.subtitles) &&
+                subtitles.json.subtitles.every(
+                    (s) => s.url === `http://127.0.0.1:${port}/subtitles/files/${s.lang}.srt`
+                )
+        );
+
+        const enSrt = await request(port, "GET", "/subtitles/files/en.srt");
+        check(
+            "srt endpoint serves a subrip body starting with a cue number",
+            enSrt.status === 200 && /^1\r?\n\d{2}:\d{2}:\d{2},\d{3} --> /.test(enSrt.raw || "")
+        );
+        const deSrt = await request(port, "GET", "/subtitles/files/de.srt");
+        check(
+            "each advertised language has a distinct srt body",
+            deSrt.status === 200 && enSrt.raw !== deSrt.raw && deSrt.raw.includes("Untertitel")
+        );
+        const unknownSrt = await request(port, "GET", "/subtitles/files/xx.srt");
+        check("unknown caption language is 404", unknownSrt.status === 404);
 
         const missing = await request(port, "GET", "/nope");
         check("unknown path is 404", missing.status === 404);
