@@ -37,6 +37,7 @@
             id="settingsList"
             translation="[80, 210]"
             numRows="3"
+            itemSize="[1000, 118]"
             itemSpacing="[0, 8]"
             rowItemSize="[[1000, 110]]"
             showRowLabel="[false]"
