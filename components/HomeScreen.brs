@@ -27,6 +27,8 @@ sub init()
     m.catalogRows = []
     m.gridRows = []
     m.railBuilt = false
+    m.pinnedGridRow = -1
+    m.pinnedGridItem = -1
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -185,6 +187,7 @@ function OnEnter(params as object) as void
     if not m.catalogRowsBuilt then BuildCatalogRows()
     BuildRows()
     m.catalog.SetFocus(true)
+    RestoreGridFocus()
 end function
 
 function OnExit() as void
@@ -194,7 +197,30 @@ function OnBackPressed() as boolean
     return false
 end function
 
+' Remember where the grid sits when another screen takes focus. ScreenStack
+' calls BlurFocus on every push, so the tile that was selected (or arrow-navigated
+' to) survives the trip; OnEnter restores it after the rebuild.
 sub BlurFocus()
+    if m.catalog = invalid then return
+    data = m.catalog.rowItemFocused
+    if data = invalid or data.Count() < 2 then return
+    m.pinnedGridRow = data[0]
+    m.pinnedGridItem = data[1]
+end sub
+
+' Jump the rebuilt grid back to the pinned tile. Nothing to do on first boot
+' (nothing was pinned); bounds are clamped because the Continue Watching row can
+' appear, reorder or disappear between visits.
+sub RestoreGridFocus()
+    if m.pinnedGridRow < 0 or m.pinnedGridItem < 0 then return
+    row = m.pinnedGridRow
+    if row >= m.gridRows.Count() then row = m.gridRows.Count() - 1
+    if row < 0 then return
+    item = m.pinnedGridItem
+    count = m.gridRows[row].metas.Count()
+    if item >= count then item = count - 1
+    if item < 0 then return
+    m.catalog.jumpToRowItem = [row, item]
 end sub
 
 ' The left rail: a fixed one-column icon menu. Built once (nodes created in init
