@@ -155,6 +155,28 @@ sub BuildRows()
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
 end sub
 
+' Rebuild the grid from the current add-on set — called by the Scene after a
+' deep-link import registered new add-ons (see MainScene FinishImport). Mirrors
+' a fresh launch: drop any in-flight catalog walk first so no stale result can
+' apply, clear the accumulated descriptors, rebuild the content from Continue
+' Watching only, then restart the walk so imported catalogs appear without an
+' app relaunch. Safe to run while Home is under a dialog: the walk re-fills the
+' rows one at a time behind it, and the existing guards (gridBuilt /
+' catalogRowsBuilt / catalogTask) keep later OnEnter visits consistent.
+function RebuildRows() as void
+    if m.catalogTask <> invalid
+        m.catalogTask.UnobserveField("result")
+        m.top.RemoveChild(m.catalogTask)
+        m.catalogTask = invalid
+    end if
+    m.catalogRows = []
+    m.catalogRowsBuilt = false
+    m.gridRows = []
+    m.gridBuilt = false
+    BuildRows()
+    StartCatalogLoad()
+end function
+
 ' Rebuild the title histogram across the current grid rows; used to decide the
 ' duplicated-name type suffix.
 function DuplicateCounts() as object

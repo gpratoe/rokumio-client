@@ -193,6 +193,232 @@ sub Start()
     m.stack.push("homeScreen")
 end sub
 
+' An ECP deep link (see reference/ecp-integration.md) arrived with the launch
+' args. main.brs calls this after Start(), so the stack is up and Home is
+' under everything; the flow reports back through a dialog and never replaces
+' the Home screen.
+'
+' Rokumio-import runs sequentially — one AddonsInstallTask per manifest URL,
+' each parked off the render thread (a hung add-on costs a worker, not the UI,
+' exactly like the Addons screen) — then applies serverAddress and shows a
+' single summary. m.import doubles as the re-entrancy guard: a second deep link
+' while one runs is dropped.
+sub HandleDeepLink(args as object)
+    if args = invalid
+        print "[rokumio] HandleDeepLink: args invalid"
+        return
+    end if
+    if m.import <> invalid
+        print "[rokumio] HandleDeepLink: import already running, dropping"
+        return
+    end if
+
+    keys = ""
+    for each key in args
+        if keys <> "" then keys = keys + ","
+        keys = keys + key
+    end for
+    print "[rokumio] HandleDeepLink args keys: " + keys
+
+    parse = DeepLinkStore().Parse(args)
+    print "[rokumio] HandleDeepLink kind=" + parse.kind + " verb='" + parse.verb + "' ok=" + parse.ok.ToStr() + " error='" + parse.error + "' addons=" + parse.addons.Count().ToStr() + " settings=" + (parse.settings <> invalid).ToStr()
+
+    if parse.kind = "none"
+        print "[rokumio] HandleDeepLink: not a rokumio deep link, ignoring"
+        return
+    end if
+    if parse.kind = "unknown"
+        ShowImportDialog("Rokumio import", ["Unsupported request: " + parse.error + "."])
+        return
+    end if
+    if not parse.ok
+        ShowImportDialog("Rokumio import", ["Could not import: " + parse.error + "."])
+        return
+    end if
+
+    m.import = {
+        pending: []
+        added: 0
+        skipped: 0
+        failed: 0
+        failures: []
+        task: invalid
+        settings: parse.settings
+        requested: parse.addons.Count()
+    }
+    for each url in parse.addons
+        m.import.pending.Push(url)
+    end for
+    PumpImport()
+end sub
+
+' Start the next queued manifest fetch, or finish when the queue is empty.
+sub PumpImport()
+    if m.import = invalid then return
+    if m.import.task <> invalid then return
+    if m.import.pending.Count() > 0
+        url = m.import.pending.Shift()
+        print "[rokumio] PumpImport: fetching " + url
+        task = CreateObject("roSGNode", "AddonsInstallTask")
+        task.id = "deepLinkInstall"
+        m.top.AppendChild(task)
+        task.address = url
+        task.observeField("result", "onImportTaskResult")
+        m.import.task = task
+        task.control = "RUN"
+        return
+    end if
+    FinishImport()
+end sub
+
+' One manifest fetch settled. The task validated against a registry-less store,
+' so an already-installed id still comes back ok — the real duplicate gate runs
+' here, in AddonsStore.Register. That orders the counts: added, skipped
+' (duplicate/built-in), or failed.
+sub onImportTaskResult()
+    if m.import = invalid then return
+    task = m.import.task
+    if task = invalid then return
+    m.import.task = invalid
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    resultId = ""
+    resultError = ""
+    if result <> invalid
+        if result.id <> invalid then resultId = result.id
+        if result.error <> invalid then resultError = result.error
+    end if
+    print "[rokumio] import task ok=" + (result <> invalid and result.ok).ToStr() + " id='" + resultId + "' error='" + resultError + "'"
+
+    if result <> invalid and result.ok and result.record <> invalid
+        registered = false
+        if m.stores <> invalid and m.stores.addons <> invalid
+            registered = m.stores.addons.Register(result.record)
+        end if
+        print "[rokumio] AddonsStore.Register('" + resultId + "') = " + registered.ToStr()
+        if registered
+            m.import.added = m.import.added + 1
+        else
+            m.import.skipped = m.import.skipped + 1
+        end if
+    else
+        m.import.failed = m.import.failed + 1
+        line = resultError
+        if line = "" then line = "could not be installed"
+        if resultId <> "" then line = resultId + ": " + line
+        m.import.failures.Push(line)
+    end if
+    print "[rokumio] import counts added=" + m.import.added.ToStr() + " skipped=" + m.import.skipped.ToStr() + " failed=" + m.import.failed.ToStr()
+    PumpImport()
+end sub
+
+' All manifest fetches are done. Apply the settings through the same path the
+' Settings screen uses (invalid values are rejected, not stored), then report
+' the outcome in one dialog — the channel is the authority on the result; ECP
+' only ever said "delivered".
+sub FinishImport()
+    if m.import = invalid then return
+
+    print "[rokumio] FinishImport requested=" + m.import.requested.ToStr() + " added=" + m.import.added.ToStr() + " skipped=" + m.import.skipped.ToStr() + " failed=" + m.import.failed.ToStr()
+
+    blocks = []
+    bullets = []
+
+    if m.import.requested > 0
+        if m.import.failed = 0
+            if m.import.added = 0
+                blocks.Push("Add-ons already installed.")
+            else
+                blocks.Push(m.import.added.ToStr() + " " + AddonWord(m.import.added) + " added.")
+            end if
+        else if m.import.added = 0
+            if m.import.failed = 1
+                blocks.Push("Add-on import failed.")
+            else
+                blocks.Push(m.import.failed.ToStr() + " add-ons could not be installed.")
+            end if
+            for each line in m.import.failures
+                bullets.Push(line)
+            end for
+        else
+            blocks.Push(m.import.added.ToStr() + " " + AddonWord(m.import.added) + " added, " + m.import.failed.ToStr() + " failed.")
+            for each line in m.import.failures
+                bullets.Push(line)
+            end for
+        end if
+    end if
+
+    if m.import.settings <> invalid and m.import.settings.serverAddress <> invalid
+        print "[rokumio] FinishImport serverAddress sent"
+        if m.stores <> invalid and m.stores.settings <> invalid
+            if m.stores.settings.SetServerAddress(m.import.settings.serverAddress)
+                blocks.Push("Server linked.")
+            else
+                blocks.Push("Invalid server address was ignored.")
+            end if
+        end if
+    end if
+
+    if blocks.Count() = 0 then blocks.Push("No changes requested.")
+
+    ShowImportDialog("Rokumio import", blocks, bullets)
+
+    ' New add-ons landed: Home's grid was built from the pre-import catalog set,
+    ' so drop its rows and re-walk them now. The fill happens off the UI thread
+    ' behind the summary dialog; nothing to block on here.
+    if m.import.added > 0
+        print "[rokumio] FinishImport: invalidating Home rows"
+        if m.homeScreen <> invalid then m.homeScreen.callFunc("RebuildRows")
+    end if
+
+    m.import = invalid
+end sub
+
+' Singular/plural for the add-on count in the import summary.
+function AddonWord(count as integer) as string
+    if count = 1 then return "add-on"
+    return "add-ons"
+end function
+
+sub ShowImportDialog(title as string, blocks as object, bullets = invalid as object)
+    print "[rokumio] ShowImportDialog title='" + title + "' message=" + FormatJson(blocks)
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.id = "deepLinkImportDialog"
+    dialog.title = title
+    dialog.message = blocks
+    if bullets <> invalid and bullets.Count() > 0
+        dialog.bulletText = bullets
+    end if
+    dialog.buttons = ["OK"]
+    dialog.observeField("buttonSelected", "onImportButtonSelected")
+    dialog.observeField("wasClosed", "onImportDialogClosed")
+    m.top.dialog = dialog
+end sub
+
+' A button press does not dismiss a StandardMessageDialog on its own — it only
+' sets buttonSelected. Mirror ConfirmExitDialog: close through the dialog's own
+' close field, which funnels into the same wasClosed path the scene uses to
+' clear the slot and hand focus back to Home.
+sub onImportButtonSelected()
+    if m.top.dialog <> invalid and m.top.dialog.id = "deepLinkImportDialog"
+        m.top.dialog.close = true
+    end if
+end sub
+
+' The import dialog dismissed (OK, Back or Home). Clear the Scene's dialog slot
+' by id — roSGNode references cannot be compared with "=" — then give focus
+' back to Home.
+sub onImportDialogClosed()
+    if m.top.dialog <> invalid and m.top.dialog.id = "deepLinkImportDialog"
+        m.top.dialog = invalid
+    end if
+    if m.stack.top() <> invalid and m.stack.top().id = "homeScreen"
+        m.homeScreen.SetFocus(true)
+    end if
+end sub
+
 ' Back routing: the top screen gets first crack; if it declines and more screens
 ' remain, pop. On the bottom Home screen, Back opens the exit dialog.
 function onKeyEvent(key as string, press as boolean) as boolean

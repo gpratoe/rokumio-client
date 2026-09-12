@@ -185,7 +185,7 @@ sub ShowRemoveConfirm(row as object)
     nodeType = "StandardMessageDialog"
     dialog = CreateObject("roSGNode", nodeType)
     dialog.title = "Remove " + row.name + "?"
-    dialog.message = "You can add it back at any time from this screen."
+    dialog.message = ["You can add it back at any time from this screen."]
     dialog.buttons = ["Remove", "Cancel"]
     dialog.observeField("buttonSelected", "onRemoveChoice")
     m.top.getScene().dialog = dialog

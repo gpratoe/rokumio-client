@@ -3,6 +3,7 @@
     <interface>
         <field id="exitApp" type="boolean" alwaysNotify="true" value="false" />
         <function name="Start" />
+        <function name="HandleDeepLink" />
     </interface>
 
     <!-- Core + stores are included once here; Roku loads them for the whole
@@ -14,6 +15,7 @@
     <script type="text/brightscript" uri="pkg:/source/stores/AuthStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/AddonsStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/CatalogStore.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/DeepLinkStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/EpisodesStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/LibraryStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/PlaybackStore.bs" />

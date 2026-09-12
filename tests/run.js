@@ -28,6 +28,7 @@ async function writeCombinedScript() {
         'tests/authstore.test.brs',
         'tests/addonsstore.test.brs',
         'tests/catalogstore.test.brs',
+        'tests/deeplinkstore.test.brs',
         'tests/episodesstore.test.brs',
         'tests/librarystore.test.brs',
         'tests/playbackstore.test.brs',
@@ -46,6 +47,7 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'AuthStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'AddonsStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'CatalogStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'DeepLinkStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'LibraryStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'PlaybackStore.brs'),
@@ -99,6 +101,46 @@ function checkItemContract() {
 // here: it is built fresh per play in MainScene and destroyed on pop so the
 // device releases the media player (a static child would survive and keep
 // leaking audio). Its interface contract is still pinned by checkScreenContract.
+// main.brs calls scene.callFunc('Start') and — for an ECP deep link —
+// scene.callFunc('HandleDeepLink', args). callFunc only invokes functions
+// declared in a component's interface, so a missing declaration would quietly
+// no-op on device (Start exists today, so only HandleDeepLink is new). Pin
+// both here so the bootstrap contract stays honest.
+function checkMainSceneContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
+    const declared = new Set(
+        [...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1])
+    );
+    let ok = true;
+    for (const fn of ['Start', 'HandleDeepLink']) {
+        if (!declared.has(fn)) {
+            console.error(`MainScene.xml is missing <function name="${fn}" /> from its interface`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+// FinishImport calls m.homeScreen.callFunc('RebuildRows') after a deep-link
+// import lands new add-ons. Same callFunc interface-declaration trap as
+// MainScene above — pin it or a missing declaration silently no-ops on device.
+function checkHomeScreenContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'HomeScreen.xml'), 'utf8');
+    const declared = new Set(
+        [...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1])
+    );
+    let ok = true;
+    for (const fn of ['RebuildRows']) {
+        if (!declared.has(fn)) {
+            console.error(`HomeScreen.xml is missing <function name="${fn}" /> from its interface`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
@@ -140,7 +182,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract()) {
         process.exit(1);
     }
 
