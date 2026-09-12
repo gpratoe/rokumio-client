@@ -64,6 +64,8 @@
             rowLabelFont="font:MediumBoldSystemFont"
             rowLabelTextColor="0x8FA399FF"
             drawFocusFeedback="false"
-            itemComponentName="EpisodeTile" />
+            itemComponentName="EpisodeTile"
+            vertFocusAnimationStyle="fixedFocusWrap"
+          wrapDividerBitmapUri="pkg:/images/divider.9.png"/>
     </children>
 </component>
