@@ -18,7 +18,10 @@
 ' Params: { addonAddress, metaType, metaId, videoId, season, episode, position,
 '           name, poster, logo, background }, plus the panel's data where the
 '           pusher holds it: description + runtime (movie), and episodeName +
-'           episodeOverview (series from EpisodesScreen).
+'           episodeOverview (series from EpisodesScreen). A series push straight
+'           from Details (Play/Resume, so no video list travelled) enriches the
+'           panel with the same two fields via a parallel MetaLoaderTask — the
+'           right-side stream list never waits on it.
 
 sub init()
     m.headTitle = m.top.FindNode("headTitle")
@@ -32,6 +35,7 @@ sub init()
 
     m.streams = []
     m.loadTask = invalid
+    m.epMetaTask = invalid
 end sub
 
 ' Stores are class instances, which cannot cross components through an interface
@@ -49,6 +53,7 @@ function OnEnter(params as object) as void
     end if
 
     CancelStreamsLoad()
+    CancelEpisodeLoad()
     m.params = params
     ApplyParamsChrome(params)
 
@@ -58,6 +63,7 @@ function OnEnter(params as object) as void
     m.status.text = "Looking for streams…"
 
     LoadStreams(params)
+    StartEpisodeLoad(params)
 end function
 
 ' Build the left panel instantly from the params the pusher already had — title,
@@ -171,6 +177,71 @@ sub CancelStreamsLoad()
         m.loadTask = invalid
     end if
 end sub
+
+' Series opened straight from Details carry no episode name/overview in their
+' params (resume/Play-S1E1 never passed through EpisodesScreen). Spin a parallel
+' MetaLoaderTask so the panel can refine once the video land — the stream list
+' is not held back. Movies and EpisodesScreen-origin series (which already pass
+' both fields) skip this.
+sub StartEpisodeLoad(params as object)
+    if params = invalid or params.metaType <> "series" then return
+    if params.addonAddress = invalid or params.addonAddress = "" then return
+    if params.metaId = invalid or params.metaId = "" then return
+    if params.episodeName <> invalid and params.episodeName <> "" then return
+    if params.episodeOverview <> invalid and params.episodeOverview <> "" then return
+    if m.epMetaTask <> invalid then return
+
+    task = CreateObject("roSGNode", "MetaLoaderTask")
+    task.id = "episodeMetaLoader"
+    m.top.AppendChild(task)
+    task.addonAddress = ParamString(params.addonAddress)
+    task.metaType = "series"
+    task.metaId = ParamString(params.metaId)
+    task.observeField("result", "onEpisodeMetaLoaded")
+    m.epMetaTask = task
+    task.control = "RUN"
+end sub
+
+' The series meta came back. If it holds the target episode, fill the two panel
+' params the pusher couldn't supply and re-run the pure chrome builder — the
+' SxE line and synopsis refine in place, everything else stays. A stale result
+' that landed after CancelEpisodeLoad is dropped by the m.epMetaTask guard.
+sub onEpisodeMetaLoaded()
+    if m.epMetaTask = invalid then return
+    task = m.epMetaTask
+    m.epMetaTask = invalid
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    result = task.result
+    if result = invalid or not result.ok or result.meta = invalid then return
+    if m.params = invalid then return
+
+    episode = EpisodeInMeta(result.meta, m.params.season, m.params.episode)
+    if episode = invalid then return
+    if m.params.episodeName = invalid or m.params.episodeName = "" then m.params.episodeName = episode.name
+    if m.params.episodeOverview = invalid or m.params.episodeOverview = "" then m.params.episodeOverview = episode.overview
+    ApplyParamsChrome(m.params)
+end sub
+
+sub CancelEpisodeLoad()
+    if m.epMetaTask <> invalid
+        m.epMetaTask.unobserveField("result")
+        m.epMetaTask.control = "STOP"
+        if m.epMetaTask.getParent() <> invalid then m.top.RemoveChild(m.epMetaTask)
+        m.epMetaTask = invalid
+    end if
+end sub
+
+' Find the video for a (season, episode) inside a fetched series meta. The video
+' list mirrors the episode tiles EpisodesScreen builds from the same store.
+function EpisodeInMeta(meta as object, season as dynamic, episode as dynamic) as dynamic
+    if meta = invalid or meta.videos = invalid or season = invalid or episode = invalid then return invalid
+    for each video in meta.videos
+        if video.season <> invalid and video.season = season and video.episode <> invalid and video.episode = episode then return video
+    end for
+    return invalid
+end function
 
 ' Build the right-side list from the loaded m.streams (one card per stream).
 sub PopulateStreams()
@@ -302,6 +373,7 @@ end sub
 
 function OnExit() as void
     CancelStreamsLoad()
+    CancelEpisodeLoad()
 end function
 
 function OnBackPressed() as boolean
