@@ -1,13 +1,17 @@
 ' AddonsStore — the registry of installed add-ons, incl. the Stremio-built-ins.
 '
 ' Cinemeta and OpenSubtitles v3 are the Stremio official built-ins this client
-' needs and are protected (never uninstallable). No third-party add-ons ship by
-' default. Everything else is installed by fetching its manifest from
-' {address}/manifest.json and stored in the registry so a second instance
-' reconstructed over the same registry restores the state.
+' ships so a fresh install of the channel is already a working product. They are
+' NOT protected: removing one is the user's call (the device is theirs), and a
+' removal persists in its own registry key so a relaunch does not re-seed it.
+' Reinstall by adding the official URL again. A same-id mirror (e.g. a
+' self-hosted/translated clone that reuses "com.linvo.cinemeta") installs
+' normally on top of the shipped built-in, and the store tells one from the
+' other by the record's builtin flag. No third-party add-ons ship by default.
 '
-' Persistence is a single registry key "addons" (FormatJson of an AA keyed by
-' addon id). Records are plain data only — FormatJson drops unsupported values.
+' Persistence is the registry keys "addons" (FormatJson of an AA keyed by addon
+' id) and "addons_removed" (a JSON array of removed built-in ids). Records are
+' plain data only — FormatJson drops unsupported values.
 '
 ' Helpers live as instance methods, not file-scope functions: Roku scopes global
 ' functions per component, so a bare global called from a method that gets
@@ -21,11 +25,13 @@ class AddonsStore
     transport as object
     registry as dynamic
     installed as object
+    removed as object
 
     sub new(http as object, registry = invalid as dynamic)
         m.transport = http
         m.registry = registry
         m.installed = {}
+        m.removed = []
         m.Load()
     end sub
 
@@ -37,9 +43,11 @@ class AddonsStore
         return aa[key] <> invalid
     end function
 
-    ' The two protected built-in add-ons. Their catalogs/types are unknown until a
+    ' The two shipped built-in add-ons. Their catalogs/types are unknown until a
     ' manifest is fetched (CatalogStore.Manifest), so only the stable identity and
-    ' address are seeded here.
+    ' address are seeded here. They are virtual: they render through GetAll/Get
+    ' but live nowhere until installed, so a same-id clone can be installed on
+    ' top of one. Use HasKey/IsRemoved to respect user removal.
     function BuiltIns() as object
         return {
             "com.linvo.cinemeta": {
@@ -212,9 +220,21 @@ class AddonsStore
         return true
     end function
 
-    ' Remove an installed add-ons. Built-ins are protected and always refused.
-    function Uninstall(id as string) as boolean
-        if m.IsBuiltin(id) then return false
+    ' Remove an installed add-on, or a shipped built-in. The caller says which
+    ' row it is through builtin: a built-in row is a virtual seed and is hidden
+    ' (persistently) in its own registry key — deleting by id would be
+    ' ambiguous with a same-id installed clone; an installed row is deleted from
+    ' the registry outright. Defaults to installed-row semantics so single-arg
+    ' callers keep working.
+    function Uninstall(id as string, builtin = false as boolean) as boolean
+        if builtin = true
+            if m.IsBuiltin(id) and not m.IsRemoved(id)
+                m.removed.Push(id)
+                m.SaveRemoved()
+                return true
+            end if
+            return false
+        end if
         if m.HasKey(m.installed, id)
             m.installed.Delete(id)
             m.Save()
@@ -223,21 +243,24 @@ class AddonsStore
         return false
     end function
 
-    ' An installed add-ons wins over a built-in with the same id (e.g. a
-    ' self-hosted mirror of an official add-on).
+    ' An installed add-on wins over a built-in with the same id (e.g. a
+    ' self-hosted mirror of an official add-on). A removed built-in reports
+    ' invalid until it is reinstalled by URL.
     function Get(id as string) as dynamic
         if m.HasKey(m.installed, id) then return m.installed[id]
         builtins = m.BuiltIns()
-        if m.HasKey(builtins, id) then return builtins[id]
+        if m.HasKey(builtins, id) and not m.IsRemoved(id) then return builtins[id]
         return invalid
     end function
 
-    ' Built-ins first, then installed add-ons.
+    ' Shipped built-ins first (minus any the user removed), then installed
+    ' add-ons. A same-id clone therefore appears twice (its built-in seed and
+    ' itself) until one of them is removed.
     function GetAll() as object
         list = []
         builtins = m.BuiltIns()
         for each id in builtins
-            list.Push(builtins[id])
+            if not m.IsRemoved(id) then list.Push(builtins[id])
         end for
         for each id in m.installed
             list.Push(m.installed[id])
@@ -247,6 +270,16 @@ class AddonsStore
 
     function IsBuiltin(id as string) as boolean
         return m.HasKey(m.BuiltIns(), id)
+    end function
+
+    ' Whether the user removed the shipped built-in with this id. Checked
+    ' whenever a built-in would otherwise surface through Get/GetAll.
+    function IsRemoved(id as string) as boolean
+        if m.removed = invalid then return false
+        for each item in m.removed
+            if item = id then return true
+        end for
+        return false
     end function
 
     ' Flat list of the catalogs each add-on advertises — the Home row source.
@@ -276,19 +309,34 @@ class AddonsStore
         m.registry.Flush()
     end sub
 
+    sub SaveRemoved()
+        if m.registry = invalid then return
+        m.registry.Write("addons_removed", FormatJson(m.removed))
+        m.registry.Flush()
+    end sub
+
     sub Load()
         if m.registry = invalid then return
         raw = m.registry.Read("addons")
-        if raw = "" then return
-        parsed = ParseJson(raw)
-        if parsed <> invalid and Type(parsed) = "roAssociativeArray"
-            m.installed = parsed
-            ' Records persisted before resources normalization may carry object
-            ' resources from live manifests — fix them in memory.
-            for each id in m.installed
-                record = m.installed[id]
-                if record.resources <> invalid then record.resources = m.NormalizeResources(record.resources)
-            end for
+        if raw <> ""
+            parsed = ParseJson(raw)
+            if parsed <> invalid and Type(parsed) = "roAssociativeArray"
+                m.installed = parsed
+                ' Records persisted before resources normalization may carry object
+                ' resources from live manifests — fix them in memory.
+                for each id in m.installed
+                    record = m.installed[id]
+                    if record.resources <> invalid then record.resources = m.NormalizeResources(record.resources)
+                end for
+            end if
+        end if
+
+        removedRaw = m.registry.Read("addons_removed")
+        if removedRaw <> ""
+            parsedRemoved = ParseJson(removedRaw)
+            if parsedRemoved <> invalid and Type(parsedRemoved) = "roArray"
+                m.removed = parsedRemoved
+            end if
         end if
     end sub
 end class

@@ -31,13 +31,65 @@ sub Test_Addons_BuiltInsPresent()
     Harness_Equal(addons.Get("com.example.addon"), invalid, "no third-party add-ons installed by default")
 end sub
 
-sub Test_Addons_BuiltInsProtected()
-    Harness_Suite("AddonsStore refuses to uninstall built-ins")
+sub Test_Addons_BuiltInsRemovable()
+    Harness_Suite("AddonsStore.Uninstall hides a shipped built-in")
     addons = AddonsStore(ScriptedTransport([]), invalid)
 
-    Harness_Ok(not addons.Uninstall("com.linvo.cinemeta"), "cannot uninstall cinemeta")
-    Harness_Ok(not addons.Uninstall("org.stremio.opensubtitlesv3"), "cannot uninstall opensubtitles")
-    Harness_Equal(addons.GetAll().Count(), 2, "all built-ins remain")
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed")
+    Harness_Equal(addons.GetAll().Count(), 1, "cinemeta gone from the list")
+    Harness_Ok(addons.Get("com.linvo.cinemeta") = invalid, "cinemeta no longer resolves")
+    Harness_Ok(addons.Get("org.stremio.opensubtitlesv3") <> invalid, "opensubtitles still present")
+    Harness_Ok(not addons.Uninstall("com.linvo.cinemeta", true), "second removal fails")
+    Harness_Ok(not addons.Uninstall("com.linvo.cinemeta"), "installed-row form does not hide a built-in")
+    Harness_Equal(addons.Get("com.linvo.cinemeta"), invalid, "still hidden after both forms")
+end sub
+
+sub Test_Addons_BuiltInRemovalPersists()
+    Harness_Suite("AddonsStore built-in removal persists across reloads")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry)
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed")
+    Harness_Equal(addons.GetAll().Count(), 1, "one built-in left")
+
+    reopened = AddonsStore(ScriptedTransport([]), registry)
+    Harness_Equal(reopened.GetAll().Count(), 1, "removal survived reload")
+    Harness_Ok(reopened.Get("com.linvo.cinemeta") = invalid, "cinemeta still hidden after reload")
+    Harness_Ok(reopened.Get("org.stremio.opensubtitlesv3") <> invalid, "opensubtitles still present")
+end sub
+
+sub Test_Addons_RemovesInstalledCloneOfBuiltin()
+    Harness_Suite("AddonsStore removes a same-id clone independently of its built-in")
+    manifestUrl = "https://addon.example.com/manifest.json"
+    script = [
+        { method: "GET", url: manifestUrl, ok: true, status: 200, json: ManifestFixture("com.linvo.cinemeta", "Cinemeta ES"), error: "" }
+    ]
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport(script), registry)
+    Harness_Ok(addons.Install(manifestUrl).ok, "clone installed")
+    Harness_Equal(addons.GetAll().Count(), 3, "shipped seed + clone + opensubtitles")
+
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta"), "clone row removed")
+    Harness_Equal(addons.GetAll().Count(), 2, "clone gone, shipped seeds remain")
+    Harness_Equal(addons.Get("com.linvo.cinemeta").builtin, true, "shipped cinemeta still resolves")
+
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "built-in row removed")
+    Harness_Equal(addons.GetAll().Count(), 1, "only opensubtitles remains")
+end sub
+
+sub Test_Addons_ReinstallRemovedBuiltin()
+    Harness_Suite("AddonsStore reinstalls a removed built-in by URL")
+    manifestUrl = "https://v3-cinemeta.strem.io/manifest.json"
+    script = [
+        { method: "GET", url: manifestUrl, ok: true, status: 200, json: ManifestFixture("com.linvo.cinemeta", "Cinemeta"), error: "" }
+    ]
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport(script), registry)
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed")
+
+    Harness_Ok(addons.Install(manifestUrl).ok, "official URL reinstalls")
+    Harness_Equal(addons.GetAll().Count(), 2, "reinstalled copy + opensubtitles")
+    Harness_Ok(addons.Get("com.linvo.cinemeta") <> invalid, "cinemeta present again")
+    Harness_Equal(addons.Get("com.linvo.cinemeta").builtin, false, "reinstalled row is a normal add-on")
 end sub
 
 sub Test_Addons_EmptyFirstRun()

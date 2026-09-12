@@ -1,10 +1,12 @@
 ' AddonsScreen — installed add-on manager.
 '
 ' One column of PrefRows: an "Add add-on" row on top (installs by fetching a
-' manifest URL through a system KeyboardDialog), then one row per installed
-' add-on from AddonsStore.GetAll(). Removing a non-built-in requires a
-' confirmation dialog; protected built-ins are read-only. The list is rebuilt
-' after every install/remove so it always reflects the store.
+' manifest URL through a system KeyboardDialog), then one row per add-on from
+' AddonsStore.GetAll(). Removing any add-on — including a shipped built-in —
+' requires a confirmation dialog; the builtin flag is passed to
+' AddonsStore.Uninstall so a same-id mirror and its shipped seed are told
+' apart. The list is rebuilt after every install/remove so it always reflects
+' the store.
 '
 ' The manifest fetch happens on AddonsInstallTask (off the render thread — the
 ' request can park up to the 15s default timeout). The task validates against a
@@ -173,14 +175,10 @@ sub CancelInstall()
     end if
 end sub
 
-' Confirm removal of a non-built-in add-on. Built-ins are protected and just
-' report back, so removing an installed add-on is always a deliberate two-step
-' action.
+' Confirm removal of any add-on. Built-ins are shipped defaults, not sacred:
+' the device is the user's, so they get the same two-step confirmation and the
+' builtin flag disambiguates a shipped seed from a same-id installed mirror.
 sub ShowRemoveConfirm(row as object)
-    if row.builtin = true
-        m.status.text = row.name + " is a protected built-in and cannot be removed."
-        return
-    end if
     m.pendingRow = row
     nodeType = "StandardMessageDialog"
     dialog = CreateObject("roSGNode", nodeType)
@@ -197,7 +195,7 @@ sub onRemoveChoice()
         index = dialog.buttonSelected
         m.top.getScene().dialog = invalid
         if index = 0 and m.pendingRow <> invalid
-            removed = m.stores.addons.Uninstall(m.pendingRow.id)
+            removed = m.stores.addons.Uninstall(m.pendingRow.id, m.pendingRow.builtin)
             if removed
                 m.status.text = "Removed " + m.pendingRow.name + "."
             else
