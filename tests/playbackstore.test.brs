@@ -13,7 +13,7 @@ end function
 
 sub Test_Playback_Streams()
     Harness_Suite("PlaybackStore.Streams fetches the add-on stream list")
-    address = "https://torrentio.strem.fun"
+    address = "https://addon.example.com"
     script = [
         {
             method: "GET"
@@ -22,7 +22,7 @@ sub Test_Playback_Streams()
             status: 200
             json: {
                 streams: [
-                    { name: "Mock Torrent", infoHash: "abc123", fileIdx: 1 }
+                    { name: "Mock Stream", infoHash: "abc123", fileIdx: 1 }
                     { name: "Direct", url: "http://127.0.0.1:11470/mock/file.mp4" }
                 ]
             }

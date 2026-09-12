@@ -3,7 +3,7 @@
 ' The left panel renders the media from its full meta (title, episode line for
 ' series, synopsis, Cinemeta background artwork — deliberately no poster). The
 ' right side lists every stream candidate from the installed add-ons that
-' advertise the "stream" resource (Torrentio, the mock add-on, …), one card per
+' advertise the "stream" resource, one card per
 ' stream. OK drops straight into the PlayerScreen: the torrent is resolved
 ' there (logo pulse while its engine warms up), so the picker answers instantly
 ' and a resolution failure stays on the player with a message instead of
@@ -199,8 +199,8 @@ sub PopulateStreams()
     m.streamsList.SetFocus(true)
 end sub
 
-' The card's primary line: the add-on's stream name (Torrentio names already
-' carry quality, e.g. "Torrentio\n4K"), then title, then a generic label.
+' The card's primary line: the add-on's stream name, then title, then a generic
+' label.
 function StreamLabel(stream as object) as string
     label = stream.name
     if label = invalid or label.Trim() = "" then label = stream.title
@@ -209,9 +209,8 @@ function StreamLabel(stream as object) as string
 end function
 
 ' The card's lines below the name, straight from the stream title split at its
-' embedded line feeds exactly as Torrentio ships them — the release, then the
-' file path, then "👤 412 💾 54.2 GB ⚙️ RARBG", then a languages line when one
-' is present. Direct URLs and add-ons with no title get a "source · quality"
+' embedded line feeds — the release, then the file path, then
+' "👤 412 💾 54.2 GB ⚙️ RARBG", then a languages line when one is present. Direct URLs and add-ons with no title get a "source · quality"
 ' line so the card is never empty.
 function StreamTitleLines(stream as object) as object
     lines = []
@@ -231,8 +230,8 @@ function StreamTitleLines(stream as object) as object
     return lines
 end function
 
-' Torrentio names/titles carry embedded line feeds ("Torrentio\n4K"); the card
-' labels are single-line, so replace them with a space.
+' Stream names/titles carry embedded line feeds; the card labels are
+' single-line, so replace them with a space.
 function FlattenNewlines(text as string) as string
     if text = "" then return text
     pieces = text.Split(chr(10))

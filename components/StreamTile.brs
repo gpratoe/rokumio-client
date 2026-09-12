@@ -2,7 +2,7 @@
 '
 ' RowList feeds each item its ContentNode through `itemContent` and drives focus
 ' through `itemHasFocus`/`rowHasFocus`. The primary line is the stream name
-' (e.g. "Torrentio 4k DV | HDR10+"); the lines below are the stream title split
+' (e.g. "4k DV | HDR10+"); the lines below are the stream title split
 ' at its embedded line feeds (release / file / peers-size / languages). The
 ' description field carries the whole multi-line title, split right here into
 ' however many rows the card fits — never pre-mapped onto fixed fields.

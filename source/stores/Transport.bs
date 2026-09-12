@@ -139,7 +139,7 @@ class Transport
     end function
 
     ' Build a full add-on endpoint URL from a stored address that may carry a
-    ' query string (the user's add-on config, e.g. torrentio's ?provider=...).
+    ' query string (the user's add-on config, e.g. a ?token=... API key).
     ' The endpoint path is inserted BEFORE the query so the request hits the
     ' right resource with the user's args intact.
     function EndpointUrl(storedAddress as string, endpointPath as string) as string

@@ -174,8 +174,8 @@ sub CancelInstall()
 end sub
 
 ' Confirm removal of a non-built-in add-on. Built-ins are protected and just
-' report back, so removing the seeded Torrentio (or anything else) is always a
-' deliberate two-step action.
+' report back, so removing an installed add-on is always a deliberate two-step
+' action.
 sub ShowRemoveConfirm(row as object)
     if row.builtin = true
         m.status.text = row.name + " is a protected built-in and cannot be removed."

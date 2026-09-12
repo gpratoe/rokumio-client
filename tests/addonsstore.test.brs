@@ -28,7 +28,7 @@ sub Test_Addons_BuiltInsPresent()
     Harness_Ok(addons.Get("org.stremio.opensubtitlesv3") <> invalid, "opensubtitles v3 present")
     Harness_Equal(addons.Get("com.linvo.cinemeta").builtin, true, "cinemeta marked builtin")
     Harness_Equal(addons.Get("org.stremio.opensubtitlesv3").address, "https://opensubtitles-v3.strem.io", "opensubtitles address seeded")
-    Harness_Equal(addons.Get("com.stremio.torrentio"), invalid, "torrentio is not a built-in")
+    Harness_Equal(addons.Get("com.example.addon"), invalid, "no third-party add-ons installed by default")
 end sub
 
 sub Test_Addons_BuiltInsProtected()
@@ -40,25 +40,16 @@ sub Test_Addons_BuiltInsProtected()
     Harness_Equal(addons.GetAll().Count(), 2, "all built-ins remain")
 end sub
 
-sub Test_Addons_TorrentioSeededFirstRun()
-    Harness_Suite("AddonsStore seeds Torrentio on first run as a removable add-on")
+sub Test_Addons_EmptyFirstRun()
+    Harness_Suite("AddonsStore first run installs no third-party add-ons")
     registry = MockRegistry()
     addons = AddonsStore(ScriptedTransport([]), registry)
 
-    Harness_Equal(addons.GetAll().Count(), 3, "built-ins plus seeded torrentio")
-    torrentio = addons.Get("com.stremio.torrentio")
-    Harness_Ok(torrentio <> invalid, "torrentio present after first run")
-    Harness_Equal(torrentio.builtin, false, "seeded torrentio is not a built-in")
-    Harness_Equal(torrentio.address, "https://torrentio.strem.fun", "torrentio address seeded")
-    Harness_Equal(torrentio.resources[0], "stream", "torrentio streams stream links")
-
-    Harness_Ok(addons.Uninstall("com.stremio.torrentio"), "seeded torrentio can be removed")
-    Harness_Equal(addons.Get("com.stremio.torrentio"), invalid, "torrentio gone after removal")
-    Harness_Equal(addons.GetAll().Count(), 2, "back to built-ins only")
+    Harness_Equal(addons.GetAll().Count(), 2, "built-ins only on first run")
+    Harness_Ok(not addons.Uninstall("com.example.addon"), "nothing seeded to uninstall")
 
     reopened = AddonsStore(ScriptedTransport([]), registry)
-    Harness_Equal(reopened.Get("com.stremio.torrentio"), invalid, "removal is not undone on reload")
-    Harness_Equal(reopened.GetAll().Count(), 2, "no re-seed after a removal")
+    Harness_Equal(reopened.GetAll().Count(), 2, "built-ins only after reload")
 end sub
 
 sub Test_Addons_Install()
@@ -79,8 +70,8 @@ sub Test_Addons_Install()
     Harness_Equal(addons.GetAll().Count(), 3, "built-ins plus the new one")
 end sub
 
-sub Test_Addons_TorrentioNotBuiltInButSeeded()
-    Harness_Suite("AddonsStore.Install keeps the seeded torrentio")
+sub Test_Addons_InstallOnEmptyRegistry()
+    Harness_Suite("AddonsStore.Install adds to an empty first-run registry")
     manifestUrl = "https://addon.example.com/manifest.json"
     script = [
         { method: "GET", url: manifestUrl, ok: true, status: 200, json: ManifestFixture("com.example.addon", "Example"), error: "" }
@@ -89,9 +80,11 @@ sub Test_Addons_TorrentioNotBuiltInButSeeded()
     addons = AddonsStore(ScriptedTransport(script), registry)
 
     Harness_Ok(addons.Install(manifestUrl).ok, "install ok")
-    Harness_Ok(addons.Get("com.stremio.torrentio") <> invalid, "seeded torrentio still installed")
-    Harness_Equal(addons.Get("com.stremio.torrentio").builtin, false, "seeded torrentio is removable")
-    Harness_Equal(addons.GetAll().Count(), 4, "built-ins + torrentio + example")
+    Harness_Equal(addons.Get("com.example.addon").builtin, false, "installed add-on is removable")
+    Harness_Equal(addons.GetAll().Count(), 3, "built-ins + example")
+
+    Harness_Ok(addons.Uninstall("com.example.addon"), "installed add-on can be removed")
+    Harness_Equal(addons.GetAll().Count(), 2, "back to built-ins after removal")
 end sub
 
 sub Test_Addons_RejectsInvalidManifest()
@@ -277,7 +270,7 @@ sub Test_Addons_RegisterAdoptsRecord()
 
     Harness_Ok(addons.Register(record), "register ok")
     Harness_Equal(addons.Get("com.example.addon").name, "Example", "record stored")
-    Harness_Equal(addons.GetAll().Count(), 4, "built-ins + seeded torrentio + the new one")
+    Harness_Equal(addons.GetAll().Count(), 3, "built-ins plus the new one")
 
     Harness_Ok(not addons.Register(record), "duplicate register refused")
     reopened = AddonsStore(ScriptedTransport([]), registry)

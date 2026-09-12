@@ -1,12 +1,10 @@
 ' AddonsStore — the registry of installed add-ons, incl. the Stremio-built-ins.
 '
 ' Cinemeta and OpenSubtitles v3 are the Stremio official built-ins this client
-' needs and are protected (never uninstallable). Torrentio is not a built-in:
-' it is seeded on a first run as a regular add-on, so a fresh install still has
-' a real stream add-on out of the box while staying removable + reinstallable
-' from the Add-ons screen. Everything else is installed by fetching its
-' manifest from {address}/manifest.json and stored in the registry so a second
-' instance reconstructed over the same registry restores the state.
+' needs and are protected (never uninstallable). No third-party add-ons ship by
+' default. Everything else is installed by fetching its manifest from
+' {address}/manifest.json and stored in the registry so a second instance
+' reconstructed over the same registry restores the state.
 '
 ' Persistence is a single registry key "addons" (FormatJson of an AA keyed by
 ' addon id). Records are plain data only — FormatJson drops unsupported values.
@@ -18,7 +16,6 @@
 
 const CINEMETA_ADDRESS = "https://v3-cinemeta.strem.io"
 const OPENSUBTITLES_V3_ADDRESS = "https://opensubtitles-v3.strem.io"
-const TORRENTIO_ADDRESS = "https://torrentio.strem.fun"
 
 class AddonsStore
     transport as object
@@ -30,10 +27,6 @@ class AddonsStore
         m.registry = registry
         m.installed = {}
         m.Load()
-        if m.registry <> invalid
-            raw = m.registry.Read("addons")
-            if raw = "" then m.SeedFirstRun()
-        end if
     end sub
 
     ' A missing AA key reads back as invalid in BrightScript, so this stands in
@@ -72,23 +65,6 @@ class AddonsStore
         }
     end function
 
-    ' First run: no add-ons key in the registry, so seed Torrentio as a regular
-    ' (not built-in) add-on. A later uninstall leaves an empty "{}" record in the
-    ' registry, which reads back non-empty, so removal is preserved across runs.
-    sub SeedFirstRun()
-        m.installed["com.stremio.torrentio"] = {
-            id: "com.stremio.torrentio"
-            name: "Torrentio"
-            address: TORRENTIO_ADDRESS
-            version: ""
-            types: ["movie", "series"]
-            catalogs: []
-            resources: ["stream", "meta"]
-            builtin: false
-        }
-        m.Save()
-    end sub
-
     ' Validate that user input is a complete manifest URL (http(s)://...).
     ' Returns the trimmed URL when valid, "" otherwise. Does NOT modify the URL
     ' beyond trimming — the caller fetches exactly what is returned.
@@ -116,8 +92,8 @@ class AddonsStore
 
     ' Extract the stored addon address from a manifest URL: strip the
     ' /manifest.json file segment but KEEP anything after it that starts with "?"
-    ' — those query args are the user's add-on config (e.g. torrentio's
-    ' ?provider=...) and must ride along on every later request. Returns "" when
+    ' — those query args are the user's add-on config (e.g. a ?token=... API
+    ' key) and must ride along on every later request. Returns "" when
     ' the URL carries no /manifest.json.
     function BaseFromManifestUrl(url as string) as string
         at = url.InStr("/manifest.json")
@@ -132,7 +108,7 @@ class AddonsStore
     end function
 
     ' Manifest resources may be strings or {name, types, idPrefixes} objects per
-    ' the Stremio spec (torrentio returns objects). Normalize to a flat array of
+    ' the Stremio spec (some manifests return objects). Normalize to a flat array of
     ' names so every consumer can compare strings safely.
     function NormalizeResources(resources as dynamic) as object
         list = []
@@ -308,7 +284,7 @@ class AddonsStore
         if parsed <> invalid and Type(parsed) = "roAssociativeArray"
             m.installed = parsed
             ' Records persisted before resources normalization may carry object
-            ' resources (torrentio-style manifests) — fix them in memory.
+            ' resources from live manifests — fix them in memory.
             for each id in m.installed
                 record = m.installed[id]
                 if record.resources <> invalid then record.resources = m.NormalizeResources(record.resources)

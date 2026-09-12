@@ -118,7 +118,7 @@ server.listen(0, "127.0.0.1", async () => {
         check(
             "torrent stream embeds peers, size and indexer in the title",
             streams.status === 200 &&
-                streams.json.streams[0].name === "Torrentio\n4K" &&
+                streams.json.streams[0].name === "Mock\n4K" &&
                 streams.json.streams[0].title.includes("👤 412") &&
                 streams.json.streams[0].title.includes("💾 54.2 GB") &&
                 streams.json.streams[0].title.includes("🔗 RARBG")

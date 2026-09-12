@@ -70,7 +70,7 @@ function metaResponse(type, id) {
 function streamResponse(type, id) {
     const streams = [
         {
-            name: "Torrentio\n4K",
+            name: "Mock\n4K",
             title: "Interstellar.2014.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-FGT\n👤 412 💾 54.2 GB 🔗 RARBG",
             type: "torrent",
             infoHash: "6ae29a3a9bf8c1d5b123456789abcdef01234567",
@@ -80,7 +80,7 @@ function streamResponse(type, id) {
     ];
     if (type === "series") {
         streams.push({
-            name: "Torrentio\n4k DV | HDR10+",
+            name: "Mock\n4k DV | HDR10+",
             title:
                 "Breaking.Bad.S01.2008.2160P._Marjenbo\n" +
                 "Breaking Bad  S01E01  Pilot.mkv\n" +

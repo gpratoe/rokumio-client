@@ -3,7 +3,7 @@
 ' already-fetched meta so they unit-test without any transport.
 '
 ' Video ids follow the Stremio convention "{imdbId}:{season}:{episode}" that
-' stream add-ons (Torrentio-style) expect, so ResolveVideoId is the bridge from
+' stream add-ons expect, so ResolveVideoId is the bridge from
 ' a Details-selected episode to a Pass-2 stream lookup.
 
 class EpisodesStore
