@@ -53,7 +53,7 @@
              Content is built in code from the series meta. -->
         <RowList
             id="epList"
-            translation="[80, 306]"
+            translation="[80, 406]"
             numRows="2"
             itemSize="[1760, 230]"
             itemSpacing="[0, 8]"
