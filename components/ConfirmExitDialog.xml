@@ -1,65 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="ConfirmExitDialog" extends="Group">
-    <interface>
-        <!-- Screen contract: called by ScreenStack for show/hide/focus/back.
-             callFunc only runs for functions declared in the interface. -->
-        <field id="closeRequest" type="string" value="" alwaysNotify="true" />
-        <function name="OnEnter" />
-        <function name="OnExit" />
-        <function name="OnBackPressed" />
-        <function name="BlurFocus" />
-    </interface>
-
+<component name="ConfirmExitDialog" extends="StandardDialog" initialFocus="buttonArea">
     <script type="text/brightscript" uri="pkg:/components/ConfirmExitDialog.brs" />
 
     <children>
-        <!-- Dim scrim: Home stays dimly visible behind the card, which reads as
-             modal. Never focusable. -->
-        <Rectangle id="dialogScrim" width="1920" height="1080" color="0x000000B3" opacity="0.5" focusable="false" />
-
-        <Group id="dialogCard" translation="[660, 420]">
-            <Rectangle id="cardFrame" width="600" height="260" color="0x2BD67500">
-                <Rectangle id="cardBg" width="592" height="252" translation="[4, 4]" color="0x101813FF" />
-            </Rectangle>
-
-            <Label
-                id="dialogTitle"
-                translation="[0, 28]"
-                width="600"
-                height="44"
-                horizAlign="center"
-                vertAlign="center"
-                font="font:LargeBoldSystemFont"
-                color="0xE9F2ECFF"
-                text="Exit Rokumio?" />
-
-            <Group id="btnCancel" translation="[40, 180]" focusable="true">
-                <Rectangle id="btnCancelBorder" width="220" height="52" color="0x2BD67500">
-                    <Rectangle id="btnCancelFace" width="212" height="44" translation="[4, 4]" color="0x18231CFF" />
-                </Rectangle>
-                <Label
-                    width="220"
-                    height="52"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:MediumBoldSystemFont"
-                    color="0xE9F2ECFF"
-                    text="Cancel" />
-            </Group>
-
-            <Group id="btnExit" translation="[340, 180]" focusable="true">
-                <Rectangle id="btnExitBorder" width="220" height="52" color="0x2BD67500">
-                    <Rectangle id="btnExitFace" width="212" height="44" translation="[4, 4]" color="0x18231CFF" />
-                </Rectangle>
-                <Label
-                    width="220"
-                    height="52"
-                    horizAlign="center"
-                    vertAlign="center"
-                    font="font:MediumBoldSystemFont"
-                    color="0xE9F2ECFF"
-                    text="Exit" />
-            </Group>
-        </Group>
+        <StdDlgTitleArea primaryTitle="Exit Rokumio?" />
+        <StdDlgContentArea>
+            <StdDlgTextItem text="Are you sure you want to exit? Your Continue Watching progress is saved." />
+        </StdDlgContentArea>
+        <StdDlgButtonArea id="buttonArea">
+            <StdDlgButton text="Cancel" />
+            <StdDlgButton text="Exit" />
+        </StdDlgButtonArea>
     </children>
 </component>

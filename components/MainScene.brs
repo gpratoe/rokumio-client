@@ -39,10 +39,10 @@ sub init()
     m.discoverScreen.ObserveField("pushRequest", "onDiscoverAction")
     m.uiRoot = m.top.FindNode("uiRoot")
 
-    ' Bottom-of-stack Back pushes the confirm-exit dialog; the dialog's
-    ' closeRequest is how it asks the Scene to dismiss it.
+    ' Bottom-of-stack Back opens the native exit dialog through the Scene's dialog
+    ' field (a StandardDialog) rather than using the ScreenStack.
     m.confirmExit = m.top.FindNode("confirmExitDialog")
-    m.confirmExit.ObserveField("closeRequest", "onConfirmExitClose")
+    m.confirmExit.ObserveFieldScoped("wasClosed", "onExitDialogClosed")
 
     ' Stores are constructed once at the Scene and handed to screens later by
     ' reference. SettingsStore and AddonsStore Load() their persisted state on
@@ -138,12 +138,18 @@ sub onPlayerClose()
     end if
 end sub
 
-sub onConfirmExitClose()
-    if m.stack.top() <> invalid and m.stack.top().id = "confirmExitDialog"
-        if m.stack.count() > 1 then m.stack.pop()
-        m.confirmExit.closeRequest = ""
-    end if
-end sub
+' The exit dialog signals dismissal through wasClosed (Back, Home, or its own
+    ' close field). Clear the Scene's dialog slot so the next Back presents it
+    ' fresh, and hand focus back to Home. Only clear when the dialog is still
+    ' the one shown.
+    sub onExitDialogClosed()
+        if m.top.dialog <> invalid and m.top.dialog.id = "confirmExitDialog"
+            m.top.dialog = invalid
+        end if
+        if m.stack.top() <> invalid and m.stack.top().id = "homeScreen"
+            m.homeScreen.SetFocus(true)
+        end if
+    end sub
 
 ' Bootstrap the stack once the roSGScreen is shown. A field observer would not
 ' work here: Scene.visible is born true and never reassigned, so observing it
@@ -155,14 +161,14 @@ sub Start()
 end sub
 
 ' Back routing: the top screen gets first crack; if it declines and more screens
-' remain, pop. On the bottom Home screen, Back pushes the confirm-exit dialog.
+' remain, pop. On the bottom Home screen, Back opens the exit dialog.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
 
     if key = "back"
         if m.stack.onBackPressed() then return true
         if m.stack.count() > 1 then return m.stack.pop()
-        m.stack.push("confirmExitDialog", invalid, true)
+        m.top.dialog = m.confirmExit
         return true
     end if
 
