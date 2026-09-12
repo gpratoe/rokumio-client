@@ -6,16 +6,18 @@
 ' dimming. Each row item is a PosterTile (see its interface fields). OK on a
 ' poster publishes one pushRequest; the Scene does the stack work.
 '
-' Rows are served by the addon stores: each addon's manifest is resolved on
-' demand, then every advertisable catalog is fetched and rendered as a row. On
-' top sits a Continue Watching row built from the (local) LibraryStore whenever
-' the user has entries — guests included, since that state is local. Rows that
-' fail to load are skipped; on total failure the grid stays empty so a break in
-' the fetch pipeline is unambiguous.
+' Rows are served by the addon stores: a HomeCatalogsTask walks the add-ons off
+' the UI thread, fetching every advertisable catalog, and republishes the row
+' set after each completion so the grid fills in one row at a time instead of
+' blocking startup on the whole catalog set. On top sits a Continue Watching row
+' built from the (local) LibraryStore whenever the user has entries — guests
+' included, since that state is local. Rows that fail to load are skipped; on
+' total failure the grid stays empty so a break in the fetch pipeline is
+' unambiguous.
 '
-' Content is built lazily on first OnEnter, not in init(): init runs during
-' CreateScene, before screen.Show(), and nodes created pre-Show can be dropped
-' by the renderer. The catalog rows are fetched once and the grid is assembled
+' The grid tree is built lazily on first OnEnter, not in init(): init runs during
+' CreateScene, before screen.Show(), and nodes created pre-Show can be dropped by
+' the renderer. Rows are inserted as they arrive and the grid is assembled
 ' exactly once; later visits either leave the tree alone (nothing changed) or
 ' refresh only the Continue Watching row in place (progress was made elsewhere).
 ' The RowList's own scroll + focus therefore survive every trip away and back.
@@ -39,79 +41,100 @@ function SetStores(stores as object) as void
     m.stores = stores
 end function
 
-' Collect {addonAddress, type, catalogId, name} for every advertisable catalog.
-' Built-ins carry catalogs = invalid until their manifest is fetched, so the
-' manifest is resolved here on demand; addons serving no catalogs (e.g.
-' OpenSubtitles v3) contribute nothing.
-'
-' Catalogs whose required extras we cannot supply are skipped: a plain browse
-' only sends skip=0, so rows that need a library (Cinemeta's last-videos,
-' calendar-videos) or a chosen genre (year/"New") stay off the Home grid — the
-' same rows Stremio itself omits for a guest.
-function ResolveCatalogs() as object
-    catalogs = []
+' Kick off the catalog walk. The walking happens off the UI thread in a
+' HomeCatalogsTask (a hung add-on then costs the worker, not startup); it
+' republishes the row set after every completed catalog, and onCatalogState
+' slots each new row into the grid immediately. Only the plain addon descriptors
+' cross the thread boundary. A no-op once started or finished.
+sub StartCatalogLoad()
+    if m.catalogRowsBuilt or m.catalogTask <> invalid then return
+    if m.stores = invalid or m.stores.addons = invalid then
+        m.catalogRowsBuilt = true
+        return
+    end if
+    addons = []
     for each addon in m.stores.addons.GetAll()
-        list = addon.catalogs
-        if list = invalid or Type(list) <> "roArray"
-            result = m.stores.catalog.Manifest(addon.address)
-            if result.ok and result.manifest.catalogs <> invalid then list = result.manifest.catalogs
-        end if
-        if list <> invalid and Type(list) = "roArray"
-            for each catalog in list
-                if CatalogBrowsable(catalog)
-                    catalogs.Push({
-                        addonAddress: addon.address
-                        type: catalog.type
-                        catalogId: catalog.id
-                        name: catalog.name
-                    })
-                end if
-            end for
-        end if
+        addons.Push({ address: addon.address, catalogs: addon.catalogs })
     end for
-    return catalogs
-end function
-
-' A catalog is browsable when none of its required extras demand more than the
-' plain skip=0 browse supplies.
-function CatalogBrowsable(catalog as object) as boolean
-    required = catalog.extraRequired
-    if required <> invalid and Type(required) = "roArray"
-        for each name in required
-            if name <> "skip" then return false
-        end for
+    if addons.Count() = 0 then
+        m.catalogRowsBuilt = true
+        return
     end if
-    extras = catalog.extra
-    if extras <> invalid and Type(extras) = "roArray"
-        for each extra in extras
-            if extra.isRequired = true and extra.name <> "skip" then return false
-        end for
-    end if
-    return true
-end function
-
-' Fetch every advertisable catalog once. The result is the catalog-rows gallery
-' the visible grid re-renders from; network only happens on first entry.
-sub BuildCatalogRows()
-    for each catalog in ResolveCatalogs()
-        response = m.stores.catalog.Catalog(catalog.addonAddress, catalog.type, catalog.catalogId)
-        if response.ok and response.metas <> invalid and response.metas.Count() > 0
-            m.catalogRows.Push({
-                addonAddress: catalog.addonAddress
-                title: catalog.name
-                metaType: catalog.type
-                metas: response.metas
-            })
-        end if
-    end for
-    m.catalogRowsBuilt = true
+    task = CreateObject("roSGNode", "HomeCatalogsTask")
+    m.catalogTask = task
+    m.top.AppendChild(task)
+    task.ObserveField("result", "onCatalogState")
+    task.addons = addons
+    task.control = "RUN"
 end sub
 
-' Assemble the visible grid once: Continue Watching (when the local library has
-' entries) first, then the catalog rows. The content tree is set exactly once;
-' later visits refresh only the live Continue Watching row in place (see
-' RefreshContinueWatching) so the rest of the grid keeps the RowList's own
-' scroll + focus.
+' Rows arrive as full result snapshots ({ rows, done }); apply only what is not
+' on the grid yet. The task assigns each row a stable index, so the slot is
+' cwOffset + index whether the Continue Watching row is present or not.
+sub onCatalogState(event as object)
+    if m.catalogRowsBuilt then return
+    state = event.GetData()
+    if state = invalid or state.rows = invalid or Type(state.rows) <> "roArray" then return
+    for each row in state.rows
+        if row.index >= m.catalogRows.Count() then ApplyCatalogRow(row)
+    end for
+    if state.done = true then FinishCatalogLoad()
+end sub
+
+' Insert one streamed catalog row at its deterministic slot. All rows arrive in
+' ascending index order, so the grid stays in task order even though each
+' snapshot is a full copy.
+sub ApplyCatalogRow(row as object)
+    descriptor = {
+        addonAddress: row.addonAddress
+        title: row.title
+        metaType: row.metaType
+        metas: row.metas
+    }
+    cwOffset = 0
+    if m.gridRows.Count() > 0 and m.gridRows[0].source = "library" then cwOffset = 1
+    slot = cwOffset + row.index
+    node = MakeRowNode(descriptor, invalid)
+    if m.catalog.content <> invalid and m.catalog.content.getChildCount() > slot
+        m.catalog.content.InsertChild(node, slot)
+    else
+        m.catalog.content.AppendChild(node)
+    end if
+    m.catalogRows.Push(descriptor)
+    m.gridRows.Push(descriptor)
+    m.catalog.numRows = m.gridRows.Count()
+    ResyncRowLabels()
+end sub
+
+' Rewrite row titles so duplicated catalog names carry their type suffix; only
+' interesting once a later row turns a previously-unique name into a duplicate.
+sub ResyncRowLabels()
+    if m.catalog.content = invalid then return
+    counts = DuplicateCounts()
+    for r = 0 to m.gridRows.Count() - 1
+        label = m.gridRows[r].title
+        if counts[label] > 1 then label = label + " " + TypeLabel(m.gridRows[r].metaType)
+        node = m.catalog.content.GetChild(r)
+        if node <> invalid and node.title <> label then node.title = label
+    end for
+end sub
+
+' The task finished (the walk completed or errored out): the rows already
+' applied are the final row set. Tear the task node down.
+sub FinishCatalogLoad()
+    m.catalogRowsBuilt = true
+    if m.catalogTask <> invalid
+        m.catalogTask.UnobserveField("result")
+        m.top.RemoveChild(m.catalogTask)
+        m.catalogTask = invalid
+    end if
+end sub
+
+' Assemble the visible grid: Continue Watching (when the local library has
+' entries) first, then the catalog rows as they stream in via onCatalogState.
+' On first entry the content tree is created here; later visits refresh only the
+' live Continue Watching row in place (see RefreshContinueWatching) so the rest
+' of the grid keeps the RowList's own scroll + focus.
 sub BuildRows()
     m.gridRows = []
     cw = LibraryRow()
@@ -120,12 +143,7 @@ sub BuildRows()
         m.gridRows.Push(row)
     end for
 
-    counts = {}
-    for each row in m.gridRows
-        count = counts[row.title]
-        if count = invalid then count = 0
-        counts[row.title] = count + 1
-    end for
+    counts = DuplicateCounts()
 
     content = CreateObject("roSGNode", "ContentNode")
     for r = 0 to m.gridRows.Count() - 1
@@ -135,10 +153,23 @@ sub BuildRows()
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
 end sub
 
+' Rebuild the title histogram across the current grid rows; used to decide the
+' duplicated-name type suffix.
+function DuplicateCounts() as object
+    counts = {}
+    for each row in m.gridRows
+        count = counts[row.title]
+        if count = invalid then count = 0
+        counts[row.title] = count + 1
+    end for
+    return counts
+end function
+
 ' Build the ContentNode for one grid row: a titled group of poster children.
 ' counts carries the merged name histogram so duplicated catalog labels get
-' their type suffix (it is invalid for rows outside the first assembly, e.g. a
-' freshly inserted Continue Watching row — the label is unique anyway).
+' their type suffix (it is invalid for rows streamed in before their duplicate
+' arrives — ResyncRowLabels backfills the suffix then, and for a freshly
+' inserted Continue Watching row the label is unique anyway).
 function MakeRowNode(row as object, counts = invalid as object) as object
     node = CreateObject("roSGNode", "ContentNode")
     label = row.title
@@ -208,7 +239,7 @@ sub RefreshContinueWatching()
             m.gridRows[0] = live
         else
             content.InsertChild(MakeRowNode(live, invalid), 0)
-            m.gridRows.Insert(0, live)
+            m.gridRows.Unshift(live)
             m.catalog.numRows = m.gridRows.Count()
         end if
     else if haveCw
@@ -260,7 +291,7 @@ end function
 
 function OnEnter(params as object) as void
     if not m.railBuilt then BuildRail()
-    if not m.catalogRowsBuilt then BuildCatalogRows()
+    StartCatalogLoad()
     sig = ContinueWatchingSignature()
     if not m.gridBuilt
         BuildRows()
