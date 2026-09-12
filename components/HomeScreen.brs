@@ -342,6 +342,14 @@ function onKeyEvent(key as string, press as boolean) as boolean
     else if key = "left" and m.catalog.HasFocus()
         m.rail.SetFocus(true)
         return true
+    else if key = "options"
+        if m.catalog.HasFocus()
+            m.rail.SetFocus(true)
+            return true
+        else if m.rail.HasFocus()
+            m.catalog.SetFocus(true)
+            return true
+        end if
     end if
     return false
 end function
