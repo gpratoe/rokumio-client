@@ -2,9 +2,11 @@
 <component name="StreamsScreen" extends="Group">
     <!-- Stream picker for a movie or episode, pushed with
          { addonAddress, metaType, metaId, videoId, season, episode, position,
-           name, poster }. Two panes:
+           name, poster, logo, background } plus the panel's data the pusher
+           holds (description + runtime for a movie; episodeName +
+           episodeOverview for a series from EpisodesScreen). Two panes:
            - left: title (series + episode line), synopsis, and the Cinemeta
-             background artwork (no poster);
+             background artwork (no poster), all from the params;
            - right: one selectable stream card per candidate, collected from
              every installed add-on that advertises the "stream" resource.
          OK on a card resolves playback and pushes the PlayerScreen; resolution

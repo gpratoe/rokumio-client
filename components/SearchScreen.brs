@@ -92,6 +92,8 @@ sub RunSearch(query as string)
 
     m.lastQuery = query
     m.status.text = "Searching…"
+    m.results.content = CreateObject("roSGNode", "ContentNode")
+    m.results.numRows = 0
 
     task = CreateObject("roSGNode", "SearchLoaderTask")
     task.id = "searchLoader"
@@ -126,7 +128,7 @@ sub onSearchLoaded()
 
     if m.rows.Count() = 0
         m.status.text = "No results for " + Chr(34) + m.lastQuery + Chr(34) + "."
-        m.results.content = invalid
+        m.results.content = CreateObject("roSGNode", "ContentNode")
         m.results.numRows = 0
         return
     end if

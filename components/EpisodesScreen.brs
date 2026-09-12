@@ -62,7 +62,8 @@ end function
 ' series supersedes whatever is still in flight (CancelLoad drops it first).
 sub LoadSeries()
     if m.meta = invalid then return
-    m.epList.content = invalid
+    m.epList.content = CreateObject("roSGNode", "ContentNode")
+    m.epList.numRows = 0
     m.seasons = []
     m.seasonEpisodes = []
     m.epTitle.text = ""
@@ -257,6 +258,9 @@ sub PushEpisode(season as integer, ep as object)
             name: m.meta.name
             poster: m.meta.poster
             logo: m.meta.logo
+            background: m.meta.background
+            episodeName: ep.name
+            episodeOverview: ep.overview
         }
     }
 end sub

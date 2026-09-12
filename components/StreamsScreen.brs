@@ -1,19 +1,24 @@
 ' StreamsScreen — the stream picker behind every Play/Resume action.
 '
-' The left panel renders the media from its full meta (title, episode line for
-' series, synopsis, Cinemeta background artwork — deliberately no poster). The
-' right side lists every stream candidate from the installed add-ons that
-' advertise the "stream" resource, one card per
+' The left panel renders the media entirely from params the pusher already had:
+' title, the episode line for series, synopsis, and the Cinemeta background
+' artwork (deliberately no poster). The pusher hands over what it knows — the
+' movie plays its description and runtime, EpisodesScreen the episode name and
+' overview it just fetched — so the panel is full the instant the screen
+' opens. The right side lists every stream candidate from the installed add-ons
+' that advertise the "stream" resource, one card per
 ' stream. OK drops straight into the PlayerScreen: the torrent is resolved
 ' there (logo pulse while its engine warms up), so the picker answers instantly
 ' and a resolution failure stays on the player with a message instead of
 ' bouncing back here.
 '
-' Nothing here blocks the render thread: meta + every add-on's stream list load
+' Nothing here blocks the render thread: each add-on's stream list loads
 ' through StreamsLoaderTask only. The player owns playback resolution.
 '
 ' Params: { addonAddress, metaType, metaId, videoId, season, episode, position,
-'           name, poster }.
+'           name, poster, logo, background }, plus the panel's data where the
+'           pusher holds it: description + runtime (movie), and episodeName +
+'           episodeOverview (series from EpisodesScreen).
 
 sub init()
     m.headTitle = m.top.FindNode("headTitle")
@@ -45,20 +50,67 @@ function OnEnter(params as object) as void
 
     CancelStreamsLoad()
     m.params = params
-    name = params.name
-    if name = invalid then name = ""
-    m.headTitle.text = name
+    ApplyParamsChrome(params)
 
-    m.synopsis.text = "No synopsis available."
-    m.headSub.text = ""
-    m.bgPoster.uri = ""
     m.streams = []
     m.loadError = ""
-    m.streamsList.content = invalid
+    EmptyStreamsList()
     m.status.text = "Looking for streams…"
 
     LoadStreams(params)
 end function
+
+' Build the left panel instantly from the params the pusher already had — title,
+' the SxE action line (or "Movie"), the background artwork Details/Episodes were
+' already showing, and the synopsis data the pusher held (movie description, or
+' the episode the EpisodesScreen had already fetched). Missing data leaves a
+' placeholder instead of a blank panel — no fetch ever fills this pane.
+sub ApplyParamsChrome(params as object)
+    name = params.name
+    if name = invalid then name = ""
+    m.headTitle.text = name
+
+    bg = params.background
+    if bg = invalid then bg = ""
+    m.bgPoster.uri = bg
+
+    action = ""
+    synopsis = ""
+    if params.metaType = "series"
+        season = ParamString(params.season)
+        episode = ParamString(params.episode)
+        if season <> "" or episode <> ""
+            action = "S" + season + "E" + episode
+        end if
+        episodeName = params.episodeName
+        if episodeName <> invalid and episodeName <> ""
+            if action <> "" then action = action + "  " + episodeName else action = episodeName
+        end if
+        episodeOverview = params.episodeOverview
+        if episodeOverview <> invalid and episodeOverview <> "" then synopsis = episodeOverview
+    else if params.metaType <> invalid and params.metaType <> ""
+        action = "Movie"
+        description = params.description
+        if description <> invalid and description <> "" then synopsis = description
+        runtime = params.runtime
+        if runtime <> invalid and runtime <> ""
+            formatted = FormatRuntime(runtime)
+            if formatted <> "" then action = "Movie  ·  " + formatted
+        end if
+    end if
+    m.headSub.text = action
+
+    if synopsis = "" then synopsis = "No synopsis available."
+    m.synopsis.text = synopsis
+end sub
+
+' Deterministically blank the stream list: a fresh empty content node, so no
+' previously rendered cards can linger while the new load is in flight.
+sub EmptyStreamsList()
+    content = CreateObject("roSGNode", "ContentNode")
+    m.streamsList.content = content
+    m.streamsList.numRows = 0
+end sub
 
 ' Kick the meta + stream-list fetch off the render thread. The installed add-ons
 ' are read here (registry reads only, no network) so only the addresses that
@@ -79,9 +131,7 @@ sub LoadStreams(params as object)
     task = CreateObject("roSGNode", "StreamsLoaderTask")
     task.id = "streamsLoader"
     m.top.AppendChild(task)
-    task.metaAddress = ParamString(params.addonAddress)
     task.metaType = ParamString(params.metaType)
-    task.metaId = ParamString(params.metaId)
     task.videoId = ParamString(params.videoId)
     task.addonAddresses = addresses
     task.observeField("result", "onStreamsLoaded")
@@ -90,9 +140,9 @@ sub LoadStreams(params as object)
     print "[rokumio] LoadStreams task started"
 end sub
 
-' The loader finished. Apply the fetched meta to the left panel, then fill the
-' stream list. A stale result that landed after CancelStreamsLoad is dropped by
-' the m.loadTask guard.
+' The loader finished. The left panel was already built from params, so this
+' only fills the stream list. A stale result that landed after CancelStreamsLoad
+' is dropped by the m.loadTask guard.
 sub onStreamsLoaded()
     if m.loadTask = invalid then return
     task = m.loadTask
@@ -100,8 +150,6 @@ sub onStreamsLoaded()
     result = task.result
     task.unobserveField("result")
     if task.getParent() <> invalid then m.top.RemoveChild(task)
-
-    if result <> invalid then ApplyMeta(m.params, result.meta)
 
     m.streams = []
     m.loadError = ""
@@ -123,47 +171,6 @@ sub CancelStreamsLoad()
         m.loadTask = invalid
     end if
 end sub
-
-' Fill the left panel from the full meta (episodes.GetMeta against the meta
-' add-on). The fetched meta carries the real title, background artwork and
-' synopsis the slim catalog params lack.
-sub ApplyMeta(params as object, meta as object)
-    m.synopsis.text = "No synopsis available."
-    m.headSub.text = ""
-    bg = ""
-    if meta <> invalid
-        if meta.name <> invalid and meta.name <> "" then m.headTitle.text = meta.name
-        if meta.background <> invalid then bg = meta.background
-        if params.metaType = "series"
-            epLine = "S" + params.season.ToStr() + "E" + params.episode.ToStr()
-            episode = EpisodeFor(meta, params.season, params.episode)
-            if episode <> invalid
-                if episode.name <> invalid and episode.name <> "" then epLine = epLine + "  " + episode.name
-                if episode.overview <> invalid and episode.overview <> "" then m.synopsis.text = episode.overview
-            else if meta.description <> invalid and meta.description <> ""
-                m.synopsis.text = meta.description
-            end if
-            m.headSub.text = epLine
-        else
-            if meta.description <> invalid and meta.description <> "" then m.synopsis.text = meta.description
-            if meta.runtime <> invalid
-                runtime = FormatRuntime(meta.runtime)
-                if runtime <> "" then m.headSub.text = "Movie  ·  " + runtime
-            end if
-        end if
-    end if
-    m.bgPoster.uri = bg
-end sub
-
-function EpisodeFor(meta as object, season as object, episode as object) as dynamic
-    if meta = invalid or meta.videos = invalid then return invalid
-    for each video in meta.videos
-        if video.season <> invalid and video.season = season and video.episode <> invalid and video.episode = episode
-            return video
-        end if
-    end for
-    return invalid
-end function
 
 ' Build the right-side list from the loaded m.streams (one card per stream).
 sub PopulateStreams()

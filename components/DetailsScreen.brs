@@ -177,6 +177,7 @@ sub ResumeEpisode()
             name: m.meta.name
             poster: m.meta.poster
             logo: m.meta.logo
+            background: m.meta.background
         }
     }
 end sub
@@ -199,6 +200,7 @@ sub PlayMedia()
             name: m.meta.name
             poster: m.meta.poster
             logo: m.meta.logo
+            background: m.meta.background
             }
         }
     else
@@ -213,6 +215,9 @@ sub PlayMedia()
                 name: m.meta.name
                 poster: m.meta.poster
                 logo: m.meta.logo
+                background: m.meta.background
+                description: m.meta.description
+                runtime: m.meta.runtime
             }
         }
     end if

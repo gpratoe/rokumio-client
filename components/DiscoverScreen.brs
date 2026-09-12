@@ -259,7 +259,7 @@ sub ResetDiscover()
     m.allLoaded = false
     m.loaded = false
     if m.grid <> invalid
-        m.grid.content = invalid
+        m.grid.content = CreateObject("roSGNode", "ContentNode")
         m.grid.numRows = 0
     end if
 end sub
@@ -350,7 +350,7 @@ sub onDiscoverLoaded()
         m.header.text = label
         m.allLoaded = not result.hasMore or result.metas.Count() = 0
         if m.metas.Count() = 0
-            m.grid.content = invalid
+            m.grid.content = CreateObject("roSGNode", "ContentNode")
             m.grid.numRows = 0
             m.status.text = "No results for " + Chr(34) + label + Chr(34) + "."
             m.chips.SetFocus(true)
