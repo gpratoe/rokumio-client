@@ -44,6 +44,11 @@ sub init()
     m.confirmExit = m.top.FindNode("confirmExitDialog")
     m.confirmExit.ObserveFieldScoped("wasClosed", "onExitDialogClosed")
 
+    ' The support modal is another native dialog; the Scene owns it and decides
+    ' which platform to show. Both dialogs dismiss through wasClosed.
+    m.supportDialog = m.top.FindNode("supportDialog")
+    m.supportDialog.ObserveFieldScoped("wasClosed", "onSupportDialogClosed")
+
     ' Stores are constructed once at the Scene and handed to screens later by
     ' reference. SettingsStore and AddonsStore Load() their persisted state on
     ' construction.
@@ -70,10 +75,15 @@ sub init()
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
-' No business logic — the Scene stays a thin orchestrator.
+' Dialogs (the support modal) are a special case routed through scene.dialog
+' instead. No business logic — the Scene stays a thin orchestrator.
 sub onHomeAction()
     request = m.homeScreen.pushRequest
     if request = invalid or request.screen = invalid then return
+    if request.dialog = true
+        ShowSupportDialog()
+        return
+    end if
     m.stack.push(request.screen, request.params)
 end sub
 
@@ -139,17 +149,40 @@ sub onPlayerClose()
 end sub
 
 ' The exit dialog signals dismissal through wasClosed (Back, Home, or its own
-    ' close field). Clear the Scene's dialog slot so the next Back presents it
-    ' fresh, and hand focus back to Home. Only clear when the dialog is still
-    ' the one shown.
-    sub onExitDialogClosed()
-        if m.top.dialog <> invalid and m.top.dialog.id = "confirmExitDialog"
-            m.top.dialog = invalid
-        end if
-        if m.stack.top() <> invalid and m.stack.top().id = "homeScreen"
-            m.homeScreen.SetFocus(true)
-        end if
-    end sub
+' close field). Clear the Scene's dialog slot so the next Back presents it
+' fresh, and hand focus back to Home. Only clear when the dialog is still
+' the one shown.
+sub onExitDialogClosed()
+    if m.top.dialog <> invalid and m.top.dialog.id = "confirmExitDialog"
+        m.top.dialog = invalid
+    end if
+    if m.stack.top() <> invalid and m.stack.top().id = "homeScreen"
+        m.homeScreen.SetFocus(true)
+    end if
+end sub
+
+' Present the support modal: pick the platform by the device's store region
+' (Argentina → Cafecito, everywhere else → Buy Me a Coffee), configure the
+' dialog, then show it through the Scene's dialog field.
+sub ShowSupportDialog()
+    m.supportDialog.callFunc("Configure", SupportPlatform())
+    m.top.dialog = m.supportDialog
+end sub
+
+function SupportPlatform() as string
+    device = CreateObject("roDeviceInfo")
+    if device <> invalid and device.GetCountryCode() = "AR" then return "cafecito"
+    return "buymeacoffee"
+end function
+
+sub onSupportDialogClosed()
+    if m.top.dialog <> invalid and m.top.dialog.id = "supportDialog"
+        m.top.dialog = invalid
+    end if
+    if m.stack.top() <> invalid and m.stack.top().id = "homeScreen"
+        m.homeScreen.SetFocus(true)
+    end if
+end sub
 
 ' Bootstrap the stack once the roSGScreen is shown. A field observer would not
 ' work here: Scene.visible is born true and never reassigned, so observing it

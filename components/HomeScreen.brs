@@ -287,13 +287,18 @@ sub BlurFocus()
 end sub
 
 ' The left rail: a fixed one-column icon menu. Built once (nodes created in init
-' can be dropped pre-Show, so it happens on first OnEnter like the catalog).
+' can be dropped pre-Show, so it happens on first OnEnter like the catalog). The
+' last row is a modal (the support dialog), so its entry carries dialog = true
+' and onRailItemSelected routes it through the pushRequest contract the same
+' way; MainScene picks it up and shows the native dialog instead of pushing a
+' stack screen.
 sub BuildRail()
     entries = [
         { glyph: "pkg:/images/discover.png", screen: "discoverScreen" }
         { glyph: "pkg:/images/search.png", screen: "searchScreen" }
         { glyph: "pkg:/images/settings.png", screen: "settingsScreen" }
         { glyph: "pkg:/images/puzzle.png", screen: "addonsScreen" }
+        { glyph: "pkg:/images/support.png", screen: "supportDialog", dialog: true }
     ]
     m.railEntries = entries
     content = CreateObject("roSGNode", "ContentNode")
@@ -307,16 +312,22 @@ sub BuildRail()
     m.railBuilt = true
 end sub
 
-' OK on a rail icon: an action request the Scene pushes as a stack screen.
+' OK on a rail icon: an action request the Scene routes. Stack screens publish
+' screen + params; the support modal adds dialog = true, which must survive into
+' the pushRequest or the Scene would push the dialog node as a bogus stack
+' screen and hide Home instead of showing the native dialog over it.
 sub onRailItemSelected()
     data = m.rail.rowItemSelected
     if data = invalid or data.Count() < 2 then return
     row = data[0]
     if row < 0 or m.railEntries = invalid or row >= m.railEntries.Count() then return
-    m.top.pushRequest = {
-        screen: m.railEntries[row].screen
+    entry = m.railEntries[row]
+    request = {
+        screen: entry.screen
         params: {}
     }
+    if entry.dialog = true then request.dialog = true
+    m.top.pushRequest = request
 end sub
 
 ' Cross-focus between the rail and the catalog grid. Left from the grid enters

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="SupportDialog" extends="StandardDialog" initialFocus="buttonArea">
+    <interface>
+        <!-- The Scene passes which platform to show ("cafecito" | "buymeacoffee")
+             before assigning the dialog to scene.dialog. -->
+        <function name="Configure" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/SupportDialog.brs" />
+
+    <children>
+        <StdDlgTitleArea primaryTitle="Support Rokumio" />
+        <StdDlgContentArea>
+          <StdDlgTextItem id="supportIntro" text="Rokumio is free and open source, and it always will be!"/>
+          <StdDlgTextItem text="If it has been useful to you, a small contribution helps keep it going." />
+        </StdDlgContentArea>
+        <StdDlgButtonArea id="buttonArea">
+            <StdDlgButton text="Close" />
+        </StdDlgButtonArea>
+        <StdDlgSideCardArea id="sideCard" horizAlign="right" width="450" extendToDialogEdge="false" showDivider="true" >
+            <Label text="Scan the QR Code to buy me a coffee!"
+                horizAlign="center" wrap="true" width="450"
+                translation="[50, 0]" fontSize="36" />
+
+            <Poster
+                id="qrPoster"
+                translation="[120, 120]"
+                width="300"
+                height="300"
+                loadSync="true"
+                uri="pkg:/images/qr-buymeacoffee.png" />
+        </StdDlgSideCardArea>
+    </children>
+</component>
