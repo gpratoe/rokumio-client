@@ -27,6 +27,8 @@ sub init()
     m.catalog.ObserveField("rowItemSelected", "onRowItemSelected")
     m.rail = m.top.FindNode("rail")
     m.rail.ObserveField("rowItemSelected", "onRailItemSelected")
+    m.homeSub = m.top.FindNode("homeSub")
+    m.homeHint = ""
     m.catalogRowsBuilt = false
     m.catalogRows = []
     m.gridRows = []
@@ -313,8 +315,11 @@ end function
 ' Remember where the grid sits when another screen takes focus. ScreenStack
 ' calls BlurFocus on every push; nothing needs saving because the content tree
 ' is never replaced after first entry, so the RowList keeps its own scroll +
-' focus across every trip away and back.
+' focus across every trip away and back. A Continue-Watching open still in
+' flight is cancelled: the user moved on, so its Details push must not land on
+' the next screen.
 sub BlurFocus()
+    CancelOpen()
 end sub
 
 ' The left rail: a fixed one-column icon menu. Built once (nodes created in init
@@ -389,10 +394,12 @@ end function
 ' data is a [row, itemIndex] pair; the selected name comes from the row's own
 ' data (the tiles only know their parsed label). A catalog tile opens Details
 ' for its meta. A Continue-Watching tile adds the resume hint and, like any
-' other tile, fetches its full meta from the Cinemeta built-in by id first (the
-' local record stores only what the Home row shows — id, name, poster, resume)
-' so Details renders the same full hero as a catalog-opened title. On fetch
-' failure the slim record falls back, so the row still opens.
+' other tile, needs its full meta from the Cinemeta built-in by id (the local
+' record stores only what the Home row shows — id, name, poster, resume) so
+' Details renders the same full hero as a catalog-opened title; that fetch now
+' runs off the UI thread (OpenContinueWatching) so the grid stays interactive
+' while it answers, and on failure the slim record falls back so the row still
+' opens.
 sub onRowItemSelected(event as object)
     data = event.GetData()
     if data = invalid or data.Count() < 2 then return
@@ -405,27 +412,7 @@ sub onRowItemSelected(event as object)
 
     item = metas[index]
     if m.gridRows[row].source = "library"
-        meta = {
-            id: item.id
-            type: item.type
-            name: item.name
-            poster: item.poster
-        }
-        answer = m.stores.episodes.GetMeta(MetaAddress(), item.type, item.id)
-        if answer.ok and answer.meta <> invalid then meta = answer.meta
-        m.top.pushRequest = {
-            screen: "detailsScreen"
-            params: {
-                addonAddress: MetaAddress()
-                meta: meta
-                resume: {
-                    videoId: item.videoId
-                    season: item.season
-                    episode: item.episode
-                    position: item.position
-                }
-            }
-        }
+        OpenContinueWatching(item)
     else
         m.top.pushRequest = {
             screen: "detailsScreen"
@@ -434,5 +421,100 @@ sub onRowItemSelected(event as object)
                 meta: item
             }
         }
+    end if
+end sub
+
+' Begin opening a Continue-Watching tile. The full meta is fetched off the UI
+' thread so Home stays interactive (Back, rail and other tiles keep working);
+' the hint line shows "Loading…" meanwhile. A newer tile press or any
+' navigation away cancels the pending open (CancelOpen); when the meta lands
+' Details is pushed with the full hero, or the slim record on failure.
+sub OpenContinueWatching(item as object)
+    address = MetaAddress()
+    CancelOpen()
+    m.pendingOpen = {
+        address: address
+        meta: {
+            id: item.id
+            type: item.type
+            name: item.name
+            poster: item.poster
+        }
+        resume: {
+            videoId: item.videoId
+            season: item.season
+            episode: item.episode
+            position: item.position
+        }
+    }
+    ShowHomeBusy(true)
+
+    task = CreateObject("roSGNode", "MetaLoaderTask")
+    task.id = "continueWatchingLoader"
+    m.top.AppendChild(task)
+    task.addonAddress = address
+    task.metaType = item.type
+    task.metaId = item.id
+    task.observeField("result", "onContinueWatchingLoaded")
+    m.openTask = task
+    task.control = "RUN"
+end sub
+
+' Stop a pending Continue-Watching open: tear down any in-flight task, clear the
+' pending context and restore the hint. Called on blur (navigating away cancels
+' the open) and when another tile supersedes it. Removing the observer means the
+' cancelled worker's result can never land.
+sub CancelOpen()
+    if m.openTask <> invalid
+        task = m.openTask
+        m.openTask = invalid
+        task.unobserveField("result")
+        if task.getParent() <> invalid then m.top.RemoveChild(task)
+    end if
+    m.pendingOpen = invalid
+    ShowHomeBusy(false)
+end sub
+
+' The full meta arrived (or failed). CancelOpen dropped any superseded task's
+' result before it could fire, so the pending context here is still the one that
+' started this task. Push Details with the full meta, or the slim record on
+' failure so the row still opens.
+sub onContinueWatchingLoaded()
+    if m.openTask = invalid then return
+    task = m.openTask
+    m.openTask = invalid
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    pending = m.pendingOpen
+    m.pendingOpen = invalid
+    ShowHomeBusy(false)
+    if pending = invalid then return
+
+    result = task.result
+    meta = pending.meta
+    if result <> invalid and result.ok and result.meta <> invalid then meta = result.meta
+    m.top.pushRequest = {
+        screen: "detailsScreen"
+        params: {
+            addonAddress: pending.address
+            meta: meta
+            resume: pending.resume
+        }
+    }
+end sub
+
+' A brief "Loading…" on the hint line while the Continue-Watching meta is
+' fetched; the original hint text comes back when the open resolves or cancels.
+sub ShowHomeBusy(show as boolean)
+    if m.homeSub = invalid then return
+    if show
+        if m.homeSub.text <> "Loading…"
+            m.homeHint = m.homeSub.text
+            m.homeSub.text = "Loading…"
+        end if
+    else
+        if m.homeHint <> invalid and m.homeHint <> "" then m.homeSub.text = m.homeHint
+        m.homeHint = ""
     end if
 end sub

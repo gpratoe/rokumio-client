@@ -54,27 +54,64 @@ function OnEnter(params as object) as void
     if bg = invalid then bg = ""
     m.bgPoster.uri = bg
 
-    BuildList()
+    LoadSeries()
 end function
 
-' Fetch the series meta and lay out one RowList row per season. Failure leaves
-' the header with a message and the list empty (Back pops).
-sub BuildList()
+' Begin a fresh season-list build: clear the old list, swap the header to a
+' loading hint, and fetch the series meta off the UI thread. Re-entry with a new
+' series supersedes whatever is still in flight (CancelLoad drops it first).
+sub LoadSeries()
+    if m.meta = invalid then return
     m.epList.content = invalid
     m.seasons = []
     m.seasonEpisodes = []
+    m.epTitle.text = ""
+    m.epDesc.text = "Loading episodes…"
 
-    meta = invalid
-    if m.stores <> invalid
-        answer = m.stores.episodes.GetMeta(m.addonAddress, "series", m.meta.id)
-        if answer.ok and answer.meta <> invalid then meta = answer.meta
+    CancelLoad()
+    task = CreateObject("roSGNode", "MetaLoaderTask")
+    task.id = "episodesLoader"
+    m.top.AppendChild(task)
+    task.addonAddress = m.addonAddress
+    task.metaType = "series"
+    task.metaId = m.meta.id
+    task.observeField("result", "onSeriesLoaded")
+    m.loadTask = task
+    task.control = "RUN"
+end sub
+
+' Tear down an in-flight season load (a newer entry supersedes it). The worker
+' finishes on its own thread; removing the observer means its result can never
+' land, and re-entering this screen builds the list afresh anyway.
+sub CancelLoad()
+    if m.loadTask <> invalid
+        task = m.loadTask
+        m.loadTask = invalid
+        task.unobserveField("result")
+        if task.getParent() <> invalid then m.top.RemoveChild(task)
     end if
-    if meta = invalid
+end sub
+
+' The series meta came back. Failure leaves the header with a message and the
+' list empty (Back pops); success lays out a row per season.
+sub onSeriesLoaded()
+    if m.loadTask = invalid then return
+    task = m.loadTask
+    m.loadTask = invalid
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    result = task.result
+    if result = invalid or not result.ok or result.meta = invalid
         m.epTitle.text = ""
         m.epDesc.text = "Series information could not be loaded."
         return
     end if
+    BuildList(result.meta)
+end sub
 
+' Lay out one RowList row per season from an already-fetched series meta.
+sub BuildList(meta as object)
     allSeasons = m.stores.episodes.Seasons(meta)
     if allSeasons.Count() = 0
         m.epTitle.text = ""
