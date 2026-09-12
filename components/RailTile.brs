@@ -6,6 +6,7 @@
 sub init()
     m.border = m.top.FindNode("railBorder")
     m.glyph = m.top.FindNode("railGlyph")
+    m.zoomAnim = m.top.FindNode("zoomAnim")
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
@@ -18,13 +19,15 @@ end sub
 ' dimming into a fresh row).
 sub UpdateLook()
     if m.top.itemHasFocus
-        m.top.scale = [1.08, 1.08]
+        m.zoomAnim.control = "start"
         m.glyph.blendColor = "0x2BD675FF"
+        m.top.opacity = 1.0
     else
+        m.zoomAnim.control = "stop"
+        m.glyph.scale = [1.0,1.0]
         m.glyph.blendColor = "0x8FA399FF"
-        m.top.scale = [1.0, 1.0]
+        m.top.opacity = 0.30
     end if
-    if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.30
 end sub
 
 sub onItemContentChanged()

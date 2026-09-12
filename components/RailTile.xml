@@ -16,12 +16,22 @@
     <children>
         <!-- railBorder is the frame, railFace the inset face so focus draws a
              border instead of painting over the tile. -->
+        <Animation id="zoomAnim" duration="0.18">
+            <Vector2DFieldInterpolator
+                id="zoomInterp"
+                fieldToInterp="railGlyph.scale"
+                key="[0.0, 1.0]"
+                keyValue="[[1.0, 1.0], [1.35, 1.35]]"
+                easeFunction="linear" />
+        </Animation>
+
         <Rectangle id="railBorder" width="80" height="80" color="0x2BD67500">
             <Poster
                 id="railGlyph"
-                width="80"
-                height="80"
-                translation="[20, 20]"
+                width="60"
+                height="60"
+                scaleRotateCenter="[30, 30]"
+                translation="[10, 10]"
                 horizAlign="center"
                 vertAlign="center" />
         </Rectangle>
