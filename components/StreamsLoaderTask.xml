@@ -3,7 +3,9 @@
     <interface>
         <field id="metaType" type="string" value="" />
         <field id="videoId" type="string" value="" />
-        <field id="addonAddresses" type="array" />
+        <field id="addonAddress" type="string" value="" />
+        <field id="providerIndex" type="integer" value="-1" />
+        <field id="providerName" type="string" value="" />
         <field id="result" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />

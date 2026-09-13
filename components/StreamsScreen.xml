@@ -8,7 +8,9 @@
            - left: title (series + episode line), synopsis, and the Cinemeta
              background artwork (no poster), all from the params;
            - right: one selectable stream card per candidate, collected from
-             every installed add-on that advertises the "stream" resource.
+             every installed add-on that advertises the "stream" resource in
+             parallel — one StreamsLoaderTask per provider, so cards appear as
+             each provider resolves instead of after all of them finish.
          OK on a card resolves playback and pushes the PlayerScreen; resolution
          failures (e.g. torrent streams without a streaming server) surface in
          the status line. -->

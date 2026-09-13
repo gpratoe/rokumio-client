@@ -1,34 +1,46 @@
-' StreamsLoaderTask — back the Streams screen's initial data load off the UI
-' thread. Each add-on stream list rides the default request timeout; running it
-' inside a Task means a hung add-on costs the worker thread, not a frozen
-' channel. The screen already filtered the installed add-ons to those with the
-' "stream" resource and built the left panel from its params (no meta fetch
-' here), so only the stream addresses cross in. The stores are built fresh
-' inside the task scope — no object created on the render thread is shared
-' across the thread boundary.
+' StreamsLoaderTask — back one provider's stream-list fetch off the UI thread.
+' The screen spawns one task per add-on that advertises the "stream" resource,
+' so providers resolve in parallel and each publishes its { streams, error } as
+' soon as that one address answers. Running in a Task means a hung add-on costs
+' the worker thread, not a frozen channel. The store is built fresh in the task
+' scope — no object created on the render thread is shared across the thread
+' boundary. providerIndex/providerName identify which provider this result
+' belongs to, so the screen can route it to the right slot on completion order
+' instead of task creation order.
 sub init()
     m.top.functionName = "load"
 end sub
 sub load()
-    print "[rokumio] StreamsLoaderTask load() starting"
+    print "[rokumio] StreamsLoaderTask load() starting addon=" + m.top.addonAddress
     try
         http = Transport()
         playback = PlaybackStore(http)
 
         streams = []
-        for each address in m.top.addonAddresses
-            answer = playback.Streams(address, m.top.metaType, m.top.videoId)
-            if answer.ok and answer.streams <> invalid
-                for each stream in answer.streams
-                    streams.Push(stream)
-                end for
-            end if
-        end for
+        error = ""
+        answer = playback.Streams(m.top.addonAddress, m.top.metaType, m.top.videoId)
+        if answer.ok and answer.streams <> invalid
+            for each stream in answer.streams
+                streams.Push(stream)
+            end for
+        else if answer.error <> invalid and answer.error <> ""
+            error = answer.error
+        end if
 
-        m.top.result = { streams: streams }
+        m.top.result = {
+            streams: streams
+            error: error
+            providerIndex: m.top.providerIndex
+            providerName: m.top.providerName
+        }
         print "[rokumio] StreamsLoaderTask done, streams=" + streams.Count().ToStr()
     catch e
         print "[rokumio] StreamsLoaderTask error: " + e.message
-        m.top.result = { streams: [], error: e.message }
+        m.top.result = {
+            streams: []
+            error: e.message
+            providerIndex: m.top.providerIndex
+            providerName: m.top.providerName
+        }
     end try
 end sub
