@@ -3,6 +3,7 @@
     <interface>
         <field id="addonAddress" type="string" value="" />
         <field id="query" type="string" value="" />
+        <field id="metaType" type="string" value="" />
         <field id="result" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />

@@ -45,8 +45,10 @@
             font="font:SmallSystemFont"
             color="0x2BD675FF" />
 
-        <!-- Results grid: poster rows grouped by type. numRows is set in code
-             based on how many non-empty type groups a query produced. -->
+        <!-- Results grid: poster rows grouped by type. numRows stays 2 for the
+             whole query — each row always exists so navigation works while its
+             results are still loading. A loading row holds one placeholder tile
+             whose own BusySpinner marks it until that type resolves. -->
         <RowList
             id="searchResults"
             translation="[150, 230]"

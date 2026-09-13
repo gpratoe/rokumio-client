@@ -1,30 +1,34 @@
-' SearchLoaderTask — back the search screen's query off the UI thread. Both
-' type searches (movies, series) ride the default request timeout; running them
-' inside a Task means a hung add-on costs the worker thread, not a frozen
-' channel. The store is built fresh inside the task scope — no object created on
-' the render thread is shared across the thread boundary.
+' SearchLoaderTask — back one search-catalog query off the UI thread. The screen
+' spawns one task per meta type ("movie", "series"), so both type searches run in
+' parallel and each publishes its own { metas, metaType } as soon as that one
+' catalog answers; a hung add-on costs a worker thread, not a frozen channel. The
+' store is built fresh in the task scope — no object created on the render thread
+' is shared across the thread boundary.
 sub init()
     m.top.functionName = "search"
 end sub
 sub search()
-    print "[rokumio] SearchLoaderTask search() starting"
+    print "[rokumio] SearchLoaderTask search() starting type=" + m.top.metaType
     try
         http = Transport()
         catalog = CatalogStore(http)
 
-        movies = []
-        series = []
+        metas = []
+        error = ""
         if m.top.addonAddress <> "" and m.top.query <> ""
-            answer = catalog.Search(m.top.addonAddress, "movie", m.top.query)
-            if answer.ok and answer.metas <> invalid then movies = answer.metas
-            answer = catalog.Search(m.top.addonAddress, "series", m.top.query)
-            if answer.ok and answer.metas <> invalid then series = answer.metas
+            answer = catalog.Search(m.top.addonAddress, m.top.metaType, m.top.query)
+            if answer.ok and answer.metas <> invalid
+                metas = answer.metas
+            else if answer.error <> invalid and answer.error <> ""
+                error = answer.error
+            end if
         end if
 
-        m.top.result = { movies: movies, series: series }
-        print "[rokumio] SearchLoaderTask done, movies=" + movies.Count().ToStr() + " series=" + series.Count().ToStr()
+        result = { metas: metas, metaType: m.top.metaType, error: error }
+        m.top.result = result
+        print "[rokumio] SearchLoaderTask done, type=" + m.top.metaType + " metas=" + metas.Count().ToStr()
     catch e
         print "[rokumio] SearchLoaderTask error: " + e.message
-        m.top.result = { movies: [], series: [], error: e.message }
+        m.top.result = { metas: [], metaType: m.top.metaType, error: e.message }
     end try
 end sub

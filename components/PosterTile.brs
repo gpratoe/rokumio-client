@@ -12,6 +12,7 @@ sub init()
     m.tileBg = m.top.FindNode("tileBg")
     m.tileBorder = m.top.FindNode("tileBorder")
     m.titleText = m.top.FindNode("titleText")
+    m.loadSpinner = m.top.FindNode("loadSpinner")
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
@@ -49,6 +50,24 @@ end sub
 
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
+    loading = m.top.itemContent.loadState = "loading"
+    if loading
+        m.loadSpinner.visible = true
+        m.loadSpinner.spinning = true
+        m.poster.uri = ""
+        m.titleText.text = m.top.itemContent.title
+        m.titleText.visible = false
+        UpdateLook()
+        return
+    end if
+
+    ' Only Search sets loadState, and it defaults off here — every other screen
+    ' that reuses PosterTile is unaffected. A recycled tile must not carry a
+    ' spinning-but-hidden spinner into its next cell, so always stop it when not
+    ' loading.
+    m.loadSpinner.spinning = false
+    m.loadSpinner.visible = false
+
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
     m.poster.uri = poster

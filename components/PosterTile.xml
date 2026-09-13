@@ -23,7 +23,13 @@
         <Rectangle id="tileBorder" width="270" height="378" color="0x2BD67500">
             <Rectangle id="tileBg" width="262" height="370" translation="[4, 4]" color="0x0B110DFF" />
             <Poster id="poster" width="262" height="370" translation="[4, 4]" failBackgroundColor="0x0B110DFF" />
-            <Label id="titleText" width="246" height="362" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" color="0xE9F2ECFF" />
+            <Label id="titleText" width="246" height="362" translation="[18, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" color="0xE9F2ECFF" />
+            <BusySpinner
+                id="loadSpinner"
+                translation="[113, 163]"
+                width="44"
+                height="44"
+                spinning="false" />
         </Rectangle>
     </children>
 </component>
