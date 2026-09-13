@@ -1,8 +1,8 @@
 ' EpisodesStore unit tests.
 '
 ' GetMeta talks to the add-on through the scripted transport; Seasons /
-' EpisodesForSeason / ResolveVideoId are pure helpers over an already-fetched
-' meta so they run without any transport round trip.
+' EpisodesForSeason / ResolveVideoId / NeedsMetaFetch / MergeMeta are pure
+' helpers over an already-fetched meta so they run without any transport round trip.
 
 function SeriesMetaFixture() as object
     return {
@@ -97,4 +97,95 @@ sub Test_Episodes_ResolveVideoId()
 
     Harness_Equal(store.ResolveVideoId("tt1234567", 1, 1), "tt1234567:1:1", "movie/episode id shape")
     Harness_Equal(store.ResolveVideoId("tt1234567", 12, 4), "tt1234567:12:4", "double-digit season/episode")
+end sub
+
+' A complete meta (all hero fields present) never needs a fetch; a slim catalog
+' record missing any of them does. A meta without a fetchable id/type cannot be
+' topped up, so it is "no fetch" too.
+sub Test_Episodes_NeedsMetaFetch()
+    Harness_Suite("EpisodesStore.NeedsMetaFetch flags only sparse metas")
+    store = EpisodesStore(ScriptedTransport([]))
+
+    Harness_Ok(not store.NeedsMetaFetch(invalid), "invalid meta: no fetch")
+    Harness_Ok(not store.NeedsMetaFetch({}), "empty meta: no fetch")
+    Harness_Ok(not store.NeedsMetaFetch({ id: "tt1", name: "No type" }), "missing type: no fetch")
+    Harness_Ok(not store.NeedsMetaFetch({ type: "movie", name: "No id" }), "missing id: no fetch")
+
+    complete = {
+        id: "tt1234567"
+        type: "series"
+        name: "Series"
+        description: "A summary"
+        releaseInfo: "2023"
+        imdbRating: "8.1"
+        background: "https://example.com/bg.jpg"
+        poster: "https://example.com/poster.jpg"
+    }
+    Harness_Ok(not store.NeedsMetaFetch(complete), "complete meta: no fetch")
+
+    sparse = { id: "tt1234567", type: "movie", name: "Movie" }
+    Harness_Ok(store.NeedsMetaFetch(sparse), "slim catalog meta: fetch")
+
+    Harness_Ok(store.NeedsMetaFetch({ id: "tt1", type: "movie", name: "M", description: "ok" }), "missing poster: fetch")
+    Harness_Ok(store.NeedsMetaFetch({ id: "tt1", type: "movie", name: "M", poster: "url", description: "ok", releaseInfo: "2023", imdbRating: "8" }), "missing background: fetch")
+    Harness_Ok(store.NeedsMetaFetch({ id: "tt1", type: "movie", name: "M", poster: "url", description: "ok", releaseInfo: "", imdbRating: "8", background: "bg" }), "empty releaseInfo: fetch")
+end sub
+
+' Merged meta starts from the fetched record and lets any non-empty field from
+' the provided record win, so nothing the caller passed is lost. Empty-string
+' provided fields give way to fetched values. Neither input is mutated.
+sub Test_Episodes_MergeMeta()
+    Harness_Suite("EpisodesStore.MergeMeta fills gaps without losing provided values")
+    store = EpisodesStore(ScriptedTransport([]))
+
+    fetched = {
+        description: "Fetched description"
+        releaseInfo: "2023"
+        imdbRating: "8.6"
+        background: "https://example.com/bg.jpg"
+        poster: "https://example.com/poster.jpg"
+    }
+
+    slim = { id: "tt1234567", type: "movie", name: "Mock Movie" }
+    merged = store.MergeMeta(slim, fetched)
+    Harness_Equal(merged.id, "tt1234567", "provided id kept")
+    Harness_Equal(merged.type, "movie", "provided type kept")
+    Harness_Equal(merged.name, "Mock Movie", "provided name kept")
+    Harness_Equal(merged.description, "Fetched description", "missing description filled")
+    Harness_Equal(merged.releaseInfo, "2023", "missing releaseInfo filled")
+    Harness_Equal(merged.imdbRating, "8.6", "missing imdbRating filled")
+    Harness_Equal(merged.background, "https://example.com/bg.jpg", "missing background filled")
+    Harness_Equal(merged.poster, "https://example.com/poster.jpg", "missing poster filled")
+
+    fetchedWithRuntime = { description: "Fetched description", releaseInfo: "2023", imdbRating: "8.6", background: "bg", poster: "poster", runtime: 121 }
+    keep = store.MergeMeta({ id: "tt1", name: "Kept", description: "provided wins", runtime: "" }, fetchedWithRuntime)
+    Harness_Equal(keep.description, "provided wins", "non-empty provided value wins over fetched")
+    Harness_Equal(keep.runtime, 121, "empty provided value gives way to fetched")
+    Harness_Equal(keep.id, "tt1", "provided id kept in override case")
+    Harness_Equal(keep.imdbRating, "8.6", "fetched fields still fill gaps")
+
+    fromFetchedOnly = store.MergeMeta(invalid, fetched)
+    Harness_Equal(fromFetchedOnly.description, "Fetched description", "fetched-only merge keeps fetched")
+
+    fromProvidedOnly = store.MergeMeta({ id: "tt9", type: "movie", name: "Alone" }, invalid)
+    Harness_Equal(fromProvidedOnly.id, "tt9", "provided-only merge keeps provided")
+    Harness_Equal(fromProvidedOnly.name, "Alone", "provided-only merge keeps name")
+
+    ' Real Cinemeta metas carry object fields like `links`; those must never be
+    ' compared against a blank string (Type Mismatch crash) and the provided
+    ' value wins over the fetched one.
+    providedLinks = [{ name: "Watch Now", category: "watch", url: "https://example.com/watch" }]
+    fetched = { description: "Fetched", links: [{ name: "Fetched Link", category: "other" }] }
+    withLinks = store.MergeMeta({ id: "tt7", name: "Linked", links: providedLinks }, fetched)
+    Harness_Equal(withLinks.links.Count(), 1, "provided links kept (no type-mismatch crash)")
+    Harness_Equal(withLinks.links[0].name, "Watch Now", "provided object value wins over fetched")
+    Harness_Equal(withLinks.description, "Fetched", "fetched string still fills a gap")
+
+    fetchedWithLinks = { description: "Fetched", links: [{ name: "Fetched Link", category: "other" }], videos: [] }
+    fromFetchedLinks = store.MergeMeta({ id: "tt8", name: "No Links" }, fetchedWithLinks)
+    Harness_Equal(fromFetchedLinks.links.Count(), 1, "fetched object field survives when provided lacks it")
+    Harness_Ok(fromFetchedLinks.videos <> invalid and Type(fromFetchedLinks.videos) = "roArray", "fetched array survives")
+
+    Harness_Equal(slim.description, invalid, "provided input not mutated")
+    Harness_Equal(fetched.name, invalid, "fetched input not mutated")
 end sub

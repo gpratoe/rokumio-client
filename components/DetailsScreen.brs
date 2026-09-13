@@ -11,12 +11,14 @@
 ' selection observer dispatches on that id.
 '
 ' Params: { addonAddress, meta } for a hero rendered from the catalog data
-' immediately (no fetch needed; series browsing happens on EpisodesScreen),
-' plus an optional resume hint { videoId, season, episode, position } from the
-' Continue-Watching row. CW tiles fetch their own full meta by id before this
-' screen opens, so the hero there matches a catalog-opened title. When no hint
-' arrives, the local LibraryStore supplies the most recent position for the
-' meta, so a catalog-opened show still offers to pick up where the user left off.
+' immediately, plus an optional resume hint { videoId, season, episode, position }
+' from the Continue-Watching row. CW tiles fetch their own full meta by id
+' before this screen opens, so the hero there matches a catalog-opened title.
+' Search and Discover catalog metas are slim ({ id, type, name }) — those top up
+' their missing fields with a MetaLoaderTask fetch merged into the passed-in
+' record, so the caller's own values always win. When no resume hint arrives,
+' the local LibraryStore supplies the most recent position for the meta, so a
+' catalog-opened show still offers to pick up where the user left off.
 
 sub init()
     m.heroPoster = m.top.FindNode("heroPoster")
@@ -56,8 +58,30 @@ function OnEnter(params as object) as void
         m.resume = m.stores.library.ResumeFor(meta.id)
     end if
 
-    m.detailName.text = meta.name
+    m.metaRefreshed = false
+    RenderHero(meta)
+
+    if meta.type = "series"
+        ShowSeries()
+    else
+        ShowMovie()
+    end if
+    MaybeRefreshMeta()
+end function
+
+' Fill the hero chrome from a meta: title, the {type · release · rating} line,
+' poster, background and description. Called on entry with the catalog meta, and
+' again when a deferred meta fetch returns a fuller record — the passed-in
+' values always win, fetched fields only top up the gaps.
+sub RenderHero(meta as object)
+    if meta = invalid then return
+
+    name = meta.name
+    if name = invalid then name = ""
+    m.detailName.text = name
+
     RenderKind(meta)
+
     poster = meta.poster
     if poster = invalid then poster = ""
     m.heroPoster.uri = poster
@@ -70,13 +94,66 @@ function OnEnter(params as object) as void
 
     desc = meta.description
     if desc <> invalid then m.detailDesc.text = desc else m.detailDesc.text = ""
+end sub
 
-    if meta.type = "series"
-        ShowSeries()
-    else
-        ShowMovie()
+' Search and Discover hand over slim catalog metas ({ id, type, name }) whose
+' hero fields are missing. Fetch the full Cinemeta record off the UI thread when
+' that is the case, then MergeMeta it into m.meta — the caller's non-empty
+' values stay put, the fetch only fills the blanks. Already-complete metas,
+' metas with nothing fetchable, and metas without an add-on to ask skip the trip
+' entirely.
+sub MaybeRefreshMeta()
+    if m.stores = invalid or m.stores.episodes = invalid then return
+    if m.meta = invalid or m.meta.id = invalid or m.meta.type = invalid then return
+    if m.addonAddress = invalid or m.addonAddress = "" then return
+    if m.metaRefreshed then return
+
+    CancelMetaLoad()
+
+    if not m.stores.episodes.NeedsMetaFetch(m.meta) then return
+
+    task = CreateObject("roSGNode", "MetaLoaderTask")
+    task.id = "detailsMetaLoader"
+    m.top.AppendChild(task)
+    task.addonAddress = m.addonAddress
+    task.metaType = m.meta.type
+    task.metaId = m.meta.id
+    task.observeField("result", "onMetaLoaded")
+    m.loadTask = task
+    task.control = "RUN"
+end sub
+
+' Tear down an in-flight meta refresh. A newer entry supersedes it, and leaving
+' this screen drops it too — the worker finishes on its own thread, but no
+' observer means its result can never land.
+sub CancelMetaLoad()
+    if m.loadTask <> invalid
+        task = m.loadTask
+        m.loadTask = invalid
+        task.unobserveField("result")
+        if task.getParent() <> invalid then m.top.RemoveChild(task)
     end if
-end function
+end sub
+
+' The full meta came back. Merge it into what the caller handed in (their values
+' win), remember we are done, and re-render the hero. A failed or mismatched
+' fetch changes nothing — the screen keeps the catalog record it already shows.
+sub onMetaLoaded()
+    if m.stores = invalid or m.stores.episodes = invalid then return
+    if m.loadTask = invalid then return
+    task = m.loadTask
+    m.loadTask = invalid
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    result = task.result
+    if result = invalid or not result.ok or result.meta = invalid then return
+    if result.meta.id <> invalid and m.meta <> invalid and result.meta.id <> m.meta.id then return
+
+    m.meta = m.stores.episodes.MergeMeta(m.meta, result.meta)
+    m.metaRefreshed = true
+    RenderHero(m.meta)
+end sub
 
 ' Re-entry: the shared chip RowList just needs focus back. m.meta/m.resume
 ' survive the push/pop, so a rebuild is not needed.
@@ -107,8 +184,8 @@ function FormatRuntime(runtime as dynamic) as string
 end function
 
 ' Series chips: Resume for the saved spot when there is one, otherwise a "Play
-' S1E1" stand-in (no fetch happens on this screen; EpisodesScreen browses the
-' real list), then "Episodes".
+' S1E1" stand-in (the episode list itself loads on EpisodesScreen; the optional
+' hero refresh above only tops up missing catalog fields), then "Episodes".
 sub ShowSeries()
     actions = []
     if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
@@ -272,6 +349,7 @@ function TypeLabel(metaType as string) as string
 end function
 
 function OnExit() as void
+    CancelMetaLoad()
 end function
 
 function OnBackPressed() as boolean

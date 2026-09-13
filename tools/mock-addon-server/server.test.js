@@ -93,7 +93,11 @@ server.listen(0, "127.0.0.1", async () => {
             metaMovie.status === 200 &&
                 metaMovie.json.meta.type === "movie" &&
                 metaMovie.json.meta.name.includes("tt0133093") &&
-                metaMovie.json.meta.runtime === 121
+                metaMovie.json.meta.runtime === 121 &&
+                typeof metaMovie.json.meta.description === "string" &&
+                typeof metaMovie.json.meta.imdbRating === "string" &&
+                typeof metaMovie.json.meta.releaseInfo === "string" &&
+                typeof metaMovie.json.meta.background === "string"
         );
 
         const metaSeries = await request(port, "GET", "/meta/series/tt1234567.json");

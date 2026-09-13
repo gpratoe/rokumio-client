@@ -47,7 +47,11 @@ function metaResponse(type, id) {
                 id: `mock:series:${id}`,
                 type: "series",
                 name: `Mock ${id} Series`,
+                description: `A mock series about ${id}.`,
+                releaseInfo: "2023",
+                imdbRating: "8.1",
                 poster: "https://images.metahub.space/poster/medium/img.png",
+                background: "https://images.metahub.space/background/medium/img.png",
                 videos: [
                     { id: `mock:series:${id}:s1:e1`, name: `${id} s1e1`, season: 1, episode: 1, runtime: 49 },
                     { id: `mock:series:${id}:s1:e2`, name: `${id} s1e2`, season: 1, episode: 2, runtime: 46 },
@@ -61,7 +65,11 @@ function metaResponse(type, id) {
             id: `mock:movie:${id}`,
             type: "movie",
             name: `Mock ${id} Movie`,
+            description: `A mock movie about ${id}.`,
+            releaseInfo: "2023",
+            imdbRating: "8.6",
             poster: "https://images.metahub.space/poster/medium/img.png",
+            background: "https://images.metahub.space/background/medium/img.png",
             runtime: 121,
         },
     };

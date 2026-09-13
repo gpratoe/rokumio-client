@@ -79,4 +79,42 @@ class EpisodesStore
     function ResolveVideoId(seriesId as string, season as integer, episode as integer) as string
         return seriesId + ":" + season.ToStr() + ":" + episode.ToStr()
     end function
+
+    ' Whether a meta handed in from a list screen is too sparse to render a hero:
+    ' catalog/search rows usually carry only { id, type, name, poster }, so the
+    ' Detail description, rating line and background are blank. Returns false for
+    ' invalid metas and metas without a fetchable id/type — those have nothing to
+    ' improve by fetching.
+    function NeedsMetaFetch(meta as object) as boolean
+        if meta = invalid then return false
+        if meta.id = invalid or meta.id = "" then return false
+        if meta.type = invalid or meta.type = "" then return false
+        fields = ["description", "releaseInfo", "imdbRating", "background", "poster"]
+        for each field in fields
+            if meta[field] = invalid or meta[field] = "" then return true
+        end for
+        return false
+    end function
+
+    ' Merge a freshly fetched full meta into the slim record a screen pushed in.
+    ' Values the provided record already has always win, so nothing the source
+    ' screen supplied is lost; invalid and blank strings give way so the fetched
+    ' meta fills those gaps. Object/array fields (e.g. Cinemeta `links`) count as
+    ' present and are never compared for blank-ness. Returns a new object —
+    ' neither input is mutated.
+    function MergeMeta(provided as object, fetched as object) as object
+        merged = {}
+        if fetched <> invalid
+            for each key in fetched
+                merged[key] = fetched[key]
+            end for
+        end if
+        if provided <> invalid
+            for each key in provided
+                value = provided[key]
+                if value <> invalid and (GetInterface(value, "ifString") = invalid or value <> "") then merged[key] = value
+            end for
+        end if
+        return merged
+    end function
 end class
