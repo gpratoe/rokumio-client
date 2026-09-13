@@ -70,7 +70,6 @@ sub BuildRows()
         item.description = row.value
     end for
     m.list.content = content
-    m.list.numRows = m.rows.Count()
     m.list.jumpToRowItem = [0, 0]
 end sub
 

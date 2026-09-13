@@ -38,7 +38,7 @@
         <RowList
             id="addonsList"
             translation="[80, 210]"
-            numRows="3"
+            numRows="6"
             itemSize="[1000, 118]"
             itemSpacing="[0, 8]"
             rowItemSize="[[1000, 110]]"
@@ -49,7 +49,7 @@
 
         <Label
             id="addonsStatus"
-            translation="[80, 620]"
+            translation="[80, 1000]"
             width="1760"
             height="40"
             font="font:SmallSystemFont"
