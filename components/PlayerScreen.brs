@@ -373,12 +373,17 @@ function DeviceLocale() as string
     return ""
 end function
 
+sub CustomizeVideoNode()
+    m.video.trickPlayBar.filledBarBlendColor = "0x2BD675FF"
+end sub
+
 ' The Video node is declared in XML so Roku owns its native UI lifecycle. Each
 ' player screen is a fresh component instance; the node is reused only for the
 ' single stream played by that screen and is cleared during teardown.
 sub CreateVideo()
     if m.video = invalid then return
     m.video.visible = true
+    CustomizeVideoNode()
     m.video.ObserveField("state", "onVideoStateChanged")
     m.video.ObserveField("bufferingStatus", "onBufferingStatusChanged")
 end sub
