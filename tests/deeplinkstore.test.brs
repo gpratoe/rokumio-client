@@ -73,6 +73,31 @@ sub Test_DeepLink_EncodedPayload()
     Harness_Equal(result.addons[0], "https://addon.example.com/manifest.json", "decoded URL intact")
 end sub
 
+sub Test_DeepLink_DialLaunchArgs()
+    Harness_Suite("DeepLinkStore parses the args a DIAL cold start delivers")
+    store = DeepLinkStore()
+    ' The companion launches over DIAL with body
+    '   contentId=rokumio-import&rkio=<urlencoded>
+    ' Roku passes those pairs to Main(args) keeping the sent key case; a
+    ' source=dial key marks the launch transport. The store must not care.
+    payload = FormatJson({
+        schema: 1
+        addons: ["https://addon.example.com/manifest.json"]
+        settings: { serverAddress: "http://192.168.1.40:11470" }
+    })
+    args = {
+        source: "dial"
+        contentId: "rokumio-import"
+        rkio: payload
+    }
+
+    result = store.Parse(args)
+    Harness_Equal(result.kind, "import", "DIAL launch with our marker recognized")
+    Harness_Ok(result.ok, "payload valid")
+    Harness_Equal(result.addons.Count(), 1, "one add-on URL")
+    Harness_Equal(result.settings.serverAddress, "http://192.168.1.40:11470", "server address surfaced")
+end sub
+
 sub Test_DeepLink_SettingsOnly()
     Harness_Suite("DeepLinkStore accepts a settings-only payload")
     store = DeepLinkStore()
