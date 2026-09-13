@@ -69,18 +69,39 @@
             font="font:SmallSystemFont"
             color="0x2BD675FF" />
 
-        <!-- Right: the selectable stream list. -->
+        <!-- Right: provider header (arrows + name + segment dots) above the
+             selectable stream list. The arrows appear only for directions the
+             user can actually move; the segments mark the position among the
+             providers. -->
+        <Poster
+            id="arrowLeft"
+            translation="[760, 92]"
+            width="48"
+            height="48"
+            uri="pkg:/images/arrow-left.png"
+            visible="false" />
         <Label
-            id="streamsTitle"
-            translation="[760, 100]"
-            width="1040"
+            id="providerName"
+            translation="[824, 96]"
+            width="920"
             height="40"
-            text="Streams"
+            horizAlign="left"
+            wrap="true"
             font="font:MediumBoldSystemFont"
-            color="0x8FA399FF" />
+            color="0xE9F2ECFF" />
+        <Poster
+            id="arrowRight"
+            translation="[1768, 92]"
+            width="48"
+            height="48"
+            uri="pkg:/images/arrow-right.png"
+            visible="false" />
+        <Group
+            id="providerSegments"
+            translation="[760, 156]" />
         <RowList
             id="streamsList"
-            translation="[760, 150]"
+            translation="[760, 180]"
             numRows="1"
             itemSize="[1080, 312]"
             itemSpacing="[0, 12]"
@@ -89,5 +110,16 @@
             showRowLabel="false"
             drawFocusFeedback="false"
             itemComponentName="StreamTile" />
+        <Label
+            id="streamsPlaceholder"
+            translation="[760, 300]"
+            width="1040"
+            height="60"
+            wrap="true"
+            horizAlign="left"
+            vertAlign="top"
+            font="font:MediumSystemFont"
+            color="0x8FA399FF"
+            visible="false" />
     </children>
 </component>

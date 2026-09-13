@@ -32,6 +32,11 @@ sub init()
     m.status = m.top.FindNode("status")
     m.bgPoster = m.top.FindNode("bgPoster")
     m.streamsList = m.top.FindNode("streamsList")
+    m.arrowLeft = m.top.FindNode("arrowLeft")
+    m.arrowRight = m.top.FindNode("arrowRight")
+    m.providerName = m.top.FindNode("providerName")
+    m.providerSegments = m.top.FindNode("providerSegments")
+    m.streamsPlaceholder = m.top.FindNode("streamsPlaceholder")
 
     m.streamsList.ObserveField("rowItemSelected", "onStreamSelected")
 
@@ -41,6 +46,8 @@ sub init()
     m.providersTotal = 0
     m.pendingCount = 0
     m.listFilled = false
+    m.activeIndex = -1
+    m.segments = []
     m.epMetaTask = invalid
 end sub
 
@@ -69,6 +76,7 @@ function OnEnter(params as object) as void
 
     LoadStreams(params)
     StartEpisodeLoad(params)
+    ResetProviderNavigation()
 end function
 
 ' Build the left panel instantly from the params the pusher already had — title,
@@ -174,9 +182,8 @@ end sub
 ' A single provider's stream list landed (or failed). The task reports which
 ' provider it was via its providerIndex slot; results can arrive in any order.
 ' A stale result that landed after CancelStreamsLoad is dropped by the slot
-' guard — the slot was cleared, so nothing applies. On every landing the flat
-' list and cards are rebuilt so the user sees each provider's streams the moment
-' they resolve, with the status line counting down the rest.
+' guard — the slot was cleared, so nothing applies. Only the active provider's
+' landing re-renders the list; the status line keeps counting down regardless.
 sub onStreamsLoaded(event as object)
     if m.loadTasks = invalid then return
     task = event.GetRoSGNode()
@@ -199,34 +206,108 @@ sub onStreamsLoaded(event as object)
     end if
 
     if m.pendingCount > 0 then m.pendingCount = m.pendingCount - 1
-    RebuildFlatStreams()
+    if index = m.activeIndex then RenderActiveProvider()
     UpdateStreamsStatus()
-    PopulateStreams()
 end sub
 
-' Project the per-provider stream lists into the flat m.streams the list renders.
-' Re-running the whole projection each time keeps the card order stable as later
-' providers land (results arrive in completion order, not add-on order — the
-' slot assignment fixes each card's provenance without reshuffling what is shown).
-sub RebuildFlatStreams()
-    m.streams = []
+' Fresh push: point the header at the first provider (known synchronously from
+' LoadStreams' registry pass) and render its section. A re-entry after the
+' player pops skips this and only restores focus (OnEnter's invalid-params
+' branch), so the last-viewed provider is preserved.
+sub ResetProviderNavigation()
+    if m.providers = invalid or m.providers.Count() = 0
+        m.activeIndex = -1
+        m.streams = []
+        EmptyStreamsList()
+        m.streamsPlaceholder.text = "No stream add-ons installed."
+        m.streamsPlaceholder.visible = true
+        UpdateHeader()
+        return
+    end if
+    m.activeIndex = 0
+    m.listFilled = false
+    UpdateHeader()
+    RenderActiveProvider()
+end sub
+
+' Move the header and list onto another provider.
+sub SelectProvider(index as integer)
+    if m.providers = invalid or m.activeIndex < 0 then return
+    if index < 0 or index >= m.providers.Count() then return
+    if index = m.activeIndex then return
+    m.activeIndex = index
+    m.listFilled = false
+    UpdateHeader()
+    RenderActiveProvider()
+end sub
+
+' Header chrome for the active provider: its name, arrows only for the
+' directions the user can actually move, and the segment dots marking the
+' position. The dots rebuild only when the provider count changes; the active
+' slot just repaints.
+sub UpdateHeader()
     if m.providers = invalid then return
-    for each provider in m.providers
-        for each stream in provider.streams
-            m.streams.Push(stream)
-        end for
+
+    if m.activeIndex < 0 or m.activeIndex >= m.providers.Count()
+        m.providerName.text = ""
+        m.arrowLeft.visible = false
+        m.arrowRight.visible = false
+        if m.providerSegments <> invalid then m.providerSegments.visible = false
+        return
+    end if
+
+    provider = m.providers[m.activeIndex]
+    name = provider.name
+    if name = invalid or name = "" then name = m.providers[m.activeIndex].address
+    m.providerName.text = name
+
+    m.arrowLeft.visible = m.activeIndex > 0
+    m.arrowRight.visible = m.activeIndex < m.providers.Count() - 1
+
+    if m.segments.Count() <> m.providers.Count() then RebuildSegments()
+    m.providerSegments.visible = m.segments.Count() > 1
+    for i = 0 to m.segments.Count() - 1
+        if i = m.activeIndex
+            m.segments[i].color = "0x2BD675FF"
+        else
+            m.segments[i].color = "0x2A3530FF"
+        end if
+    end for
+end sub
+
+sub RebuildSegments()
+    while m.providerSegments.GetChildCount() > 0
+        m.providerSegments.RemoveChildIndex(0)
+    end while
+    m.segments = []
+    if m.providers = invalid then return
+    for i = 0 to m.providers.Count() - 1
+        segment = CreateObject("roSGNode", "Rectangle")
+        segment.width = 28
+        segment.height = 6
+        segment.translation = [i * 36, 0]
+        segment.color = "0x2A3530FF"
+        m.providerSegments.AppendChild(segment)
+        m.segments.Push(segment)
     end for
 end sub
 
 ' The status line: while any provider is still resolving, show how many remain
 ' ("2/3 providers loading…"); when all are done, clear it, or report failure/empty
-' precisely the way the old single-shot load did.
+' precisely the way the old single-shot load did. Counts span all providers, since
+' m.streams now holds only the active provider's cards.
 sub UpdateStreamsStatus()
     if m.status = invalid then return
+    total = 0
+    if m.providers <> invalid
+        for each provider in m.providers
+            if provider.streams <> invalid then total = total + provider.streams.Count()
+        end for
+    end if
     if m.pendingCount > 0
         m.status.text = m.pendingCount.ToStr() + "/" + m.providersTotal.ToStr() + " providers loading…"
     else
-        if m.streams.Count() = 0
+        if total = 0
             if m.loadError <> ""
                 m.status.text = "Could not load streams: " + m.loadError
             else
@@ -316,12 +397,31 @@ function EpisodeInMeta(meta as object, season as dynamic, episode as dynamic) as
     return invalid
 end function
 
-' Build the right-side list from the loaded m.streams (one card per stream).
-' Called on every provider completion, so focus/jump only on the first fill
-' (listFilled) — later providers topping up the list must not yank the user's
-' cursor. Empty/error messaging lives in UpdateStreamsStatus, not here.
-sub PopulateStreams()
-    if m.streams.Count() = 0 then return
+' Render the active provider's section: its cards when it has streams, or a
+' placeholder in the list area (still loading / provider error / no streams).
+' Focus falls to the list on the first fill after a switch; when the active
+' provider has nothing to show, the screen Group keeps focus so Left/Right can
+' still move on. m.streams aliases the active provider's own array, so the card
+' index hand-out in onStreamSelected always matches the visible list.
+sub RenderActiveProvider()
+    if m.providers = invalid or m.activeIndex < 0 or m.activeIndex >= m.providers.Count() then return
+    provider = m.providers[m.activeIndex]
+    m.streams = provider.streams
+
+    if m.streams.Count() = 0
+        EmptyStreamsList()
+        label = ProviderEmptyLabel()
+        if label = ""
+            m.streamsPlaceholder.visible = false
+        else
+            m.streamsPlaceholder.text = label
+            m.streamsPlaceholder.visible = true
+        end if
+        m.top.SetFocus(true)
+        return
+    end if
+
+    m.streamsPlaceholder.visible = false
 
     content = CreateObject("roSGNode", "ContentNode")
     for i = 0 to m.streams.Count() - 1
@@ -347,6 +447,21 @@ sub PopulateStreams()
         m.streamsList.SetFocus(true)
     end if
 end sub
+
+' The placeholder text for an empty active provider: its own task still running
+' -> loading; its error -> failure; otherwise nothing found from it.
+function ProviderEmptyLabel() as string
+    provider = m.providers[m.activeIndex]
+    if provider.error <> "" then return "Could not load streams: " + provider.error
+    if isTaskPending(m.activeIndex) then return "Loading streams…"
+    return "No streams found for this provider."
+end function
+
+function isTaskPending(index as integer) as boolean
+    if m.loadTasks = invalid then return false
+    if index < 0 or index >= m.loadTasks.Count() then return false
+    return m.loadTasks[index] <> invalid
+end function
 
 ' The card's primary line: the add-on's stream name, then title, then a generic
 ' label.
@@ -439,8 +554,33 @@ function ParamString(value as dynamic) as string
 end function
 
 sub RestoreFocus()
-    if m.streams.Count() > 0 then m.streamsList.SetFocus(true)
+    if m.activeIndex >= 0 and m.providers <> invalid and m.activeIndex < m.providers.Count()
+        provider = m.providers[m.activeIndex]
+        if provider.streams.Count() > 0 then m.streamsList.SetFocus(true)
+    end if
 end sub
+
+' Left/Right flip between providers: the single-column RowList swallows Up/Down
+' but lets Left/Right bubble here at its edges, so each press moves one provider
+' and the header + segments follow. At the ends there is nothing to move to, so
+' the key is left for the stack/Scene. Whether an edge press really bubbles is
+' device-dependent — verify on-device.
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if m.providers = invalid or m.activeIndex < 0 then return false
+    if key = "left"
+        if m.activeIndex > 0
+            SelectProvider(m.activeIndex - 1)
+            return true
+        end if
+    else if key = "right"
+        if m.activeIndex < m.providers.Count() - 1
+            SelectProvider(m.activeIndex + 1)
+            return true
+        end if
+    end if
+    return false
+end function
 
 function OnExit() as void
     CancelStreamsLoad()
