@@ -42,13 +42,15 @@
              Support). A one-column RowList of RailTiles; OK on an icon
              publishes a pushRequest the Scene routes. Focus reaches it from
              the grid via Left/Right. -->
+        <Rectangle id="railBg" width="140" height="1080" color="0xFFFFFF06"/>
         <RowList
             id="rail"
-            translation="[15, 378]"
+            translation="[0, 480]"
             numRows="5"
-            itemSize="[120, 132]"
-            itemSpacing="[0, 0]"
+            itemSize="[140, 80]"
+            itemSpacing="[0, 40]"
             rowItemSize="[[80, 80]]"
+            focusXOffset="[30]"
             rowItemSpacing="[[0, 0]]"
             showRowLabel="[false]"
             drawFocusFeedback="false"

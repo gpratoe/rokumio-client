@@ -352,10 +352,10 @@ end sub
 ' stack screen.
 sub BuildRail()
     entries = [
-        { glyph: "pkg:/images/discover.png", screen: "discoverScreen" }
         { glyph: "pkg:/images/search.png", screen: "searchScreen" }
-        { glyph: "pkg:/images/settings.png", screen: "settingsScreen" }
+        { glyph: "pkg:/images/discover.png", screen: "discoverScreen" }
         { glyph: "pkg:/images/puzzle.png", screen: "addonsScreen" }
+        { glyph: "pkg:/images/settings.png", screen: "settingsScreen" }
         { glyph: "pkg:/images/support.png", screen: "supportDialog", dialog: true }
     ]
     m.railEntries = entries
@@ -394,6 +394,7 @@ end sub
 ' fallback is starting Home focus on the rail. Verify on-device.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    m.rail.jumpToItem=0
     if key = "right" and m.rail.HasFocus()
         m.catalog.SetFocus(true)
         return true
