@@ -38,7 +38,7 @@ function OnEnter(params as object) as void
     CancelInstall()
     BuildRows()
     m.status.text = ""
-    m.list.SetFocus(true)
+    m.list.callFunc("SetListFocus")
 end function
 
 function OnExit() as void
@@ -83,7 +83,12 @@ sub BuildRows()
         item.description = row.value
     end for
     m.list.content = content
-    m.list.jumpToRowItem = [0, 0]
+
+    installed = m.rows.Count() - 1
+    if installed < 0 then installed = 0
+    quantity = installed.ToStr() + " add-ons"
+    if installed = 1 then quantity = "1 add-on"
+    m.sub.text = "OK adds or removes an add-on, Back returns to Home · " + quantity
 end sub
 
 sub onRowSelected()
@@ -120,7 +125,7 @@ sub onAddChoice()
             StartInstall(address.Trim())
         end if
     end if
-    m.list.SetFocus(true)
+    m.list.callFunc("SetListFocus")
 end sub
 
 ' Kick the manifest fetch off the render thread. AddonsInstallTask runs
@@ -203,5 +208,5 @@ sub onRemoveChoice()
             BuildRows()
         end if
     end if
-    m.list.SetFocus(true)
+    m.list.callFunc("SetListFocus")
 end sub

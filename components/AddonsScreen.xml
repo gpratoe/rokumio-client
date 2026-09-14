@@ -35,17 +35,12 @@
             font="font:SmallSystemFont"
             color="0x8FA399FF" />
 
-        <RowList
+        <ChevronList
             id="addonsList"
-            translation="[80, 210]"
+            translation="[80, 240]"
             numRows="5"
-            itemSize="[1000, 118]"
-            itemSpacing="[0, 8]"
-            rowItemSize="[[1000, 110]]"
-            showRowLabel="[false]"
-            drawFocusFeedback="false"
-            itemComponentName="PrefRow"
-            vertFocusAnimationStyle="floatingFocus"/>
+            itemWidth="1000"
+            rowHeight="110" />
 
         <Label
             id="addonsStatus"
