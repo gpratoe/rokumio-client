@@ -1,9 +1,8 @@
 ' LibraryStore unit tests.
 '
 ' Pure registry-backed store — no transport. Covers saved items (add/remove/
-' list), continue-watching upsert + ordering, and persistence through the fake
-' registry: sequence numbers survive a reload, so a fresh instance keeps
-' "most recent first" and ranks a brand-new write above everything loaded.
+' list) and continue-watching upsert + ordering through a fake registry: the
+' array keeps newest-first across reloads, so a fresh write always lands on top.
 
 sub Test_Library_AddAndListSaved()
     Harness_Suite("LibraryStore stores saved items newest first")
@@ -89,10 +88,10 @@ sub Test_Library_PersistsViaRegistry()
     Harness_Equal(saved.Count(), 1, "saved restored")
     Harness_Equal(watching.Count(), 2, "positions restored")
     Harness_Equal(second.Position("tt0133093"), 120, "position value restored")
-    Harness_Equal(watching[0].videoId, "tt1234567:1:1", "reloaded order keeps most recent first")
+    Harness_Equal(watching[0].videoId, "tt1234567:1:1", "reloaded array keeps newest first")
 
     second.SetPosition("tt9999999", "tt9999999", "movie", 0, 0, "Brand New")
-    Harness_Equal(second.ContinueWatching()[0].videoId, "tt9999999", "new write ranks above loaded seqs")
+    Harness_Equal(second.ContinueWatching()[0].videoId, "tt9999999", "new write lands on top")
 end sub
 
 sub Test_Library_InMemoryOnlyWithoutRegistry()
@@ -103,4 +102,30 @@ sub Test_Library_InMemoryOnlyWithoutRegistry()
 
     empty = LibraryStore(MockRegistry())
     Harness_Equal(empty.SavedItems().Count(), 0, "fresh registry starts empty")
+end sub
+
+sub Test_Library_PruneSeriesEpisodes()
+    Harness_Suite("LibraryStore prune previous episode entries on set")
+    store = LibraryStore(MockRegistry())
+    store.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot")
+    store.SetPosition("tt1234567:2:1", "tt1234567", "series", 2, 1, "Cool Hand Luke")
+    store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix")
+    list = store.ContinueWatching()
+    Harness_Equal(list.Count(), 2, "one series tile + one movie")
+    Harness_Equal(list[0].videoId, "tt0133093", "movie most recent")
+    Harness_Equal(list[1].videoId, "tt1234567:2:1", "series entry is the latest episode")
+    Harness_Ok(not store.IsWatching("tt1234567:1:1"), "old episode pruned")
+    Harness_Ok(store.IsWatching("tt1234567:2:1"), "new episode retained")
+end sub
+
+sub Test_Library_CapContinueWatching()
+    Harness_Suite("LibraryStore caps continue-watching at MAX_CONTINUE_WATCHING")
+    store = LibraryStore(MockRegistry())
+    for i = 1 to 12
+        store.SetPosition("tt" + i.ToStr(), "tt" + i.ToStr(), "movie", 0, 0, "Movie " + i.ToStr())
+    end for
+    list = store.ContinueWatching()
+    Harness_Equal(list.Count(), 8, "capped to eight")
+    Harness_Equal(list[0].videoId, "tt12", "newest first")
+    Harness_Equal(list[7].videoId, "tt5", "oldest retained is the 8th newest")
 end sub

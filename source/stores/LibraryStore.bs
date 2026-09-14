@@ -6,26 +6,28 @@
 ' only). Save() writes the whole library as one registry key. Since the app is
 ' guest-only nothing syncs — this is the local mirror of the Stremio library.
 '
-' Ordering uses a monotonic sequence number (m.seq) instead of a wall clock: it
-' is deterministic in the brs interpreter and needs no real time source. Load()
-' lifts m.seq past the highest persisted record, so a fresh session keeps
-' "most recent first" instead of colliding with old sequence numbers.
+' Ordering is the array itself: freshly written items land at index 0, so the
+' newest is always first and no sequence number or sort is needed. Continue
+' watching is a capped stack — SetPosition drops the old entry for the same
+' video/series, pushes the new one on top, and pops anything beyond the cap.
 '
 ' Helpers live as instance methods: Roku scopes user-defined global functions
 ' per component, so a bare global called from a method that is invoked from
 ' another component's code would resolve to invalid (call of a non-function).
 
+const MAX_CONTINUE_WATCHING = 8
+
 class LibraryStore
     registry as dynamic
     saved as object
+    savedOrder as object
     positions as object
-    seq as integer
 
     sub new(registry = invalid as dynamic)
         m.registry = registry
         m.saved = {}
-        m.positions = {}
-        m.seq = 0
+        m.savedOrder = []
+        m.positions = []
         m.Load()
     end sub
 
@@ -47,8 +49,8 @@ class LibraryStore
             metaType: metaType
             name: name
             poster: poster
-            seq: m.NextSeq()
         }
+        m.savedOrder.Unshift(metaId)
         m.Save()
         return true
     end function
@@ -56,6 +58,9 @@ class LibraryStore
     function RemoveSaved(metaId as string) as boolean
         if m.HasKey(m.saved, metaId)
             m.saved.Delete(metaId)
+            for i = m.savedOrder.Count() - 1 to 0 step -1
+                if m.savedOrder[i] = metaId then m.savedOrder.Delete(i)
+            end for
             m.Save()
             return true
         end if
@@ -66,22 +71,28 @@ class LibraryStore
         return m.HasKey(m.saved, metaId)
     end function
 
-    ' Most recently added first.
+    ' Most recently added first — the array holds ids newest-first.
     function SavedItems() as object
         items = []
-        for each metaId in m.saved
-            items.Push(m.saved[metaId])
+        for each metaId in m.savedOrder
+            if m.HasKey(m.saved, metaId) then items.Push(m.saved[metaId])
         end for
-        return m.SortBySeqDesc(items)
+        return items
     end function
 
     ' Record playback progress for a video (a movie metaId, or the
-    ' "{metaId}:{season}:{episode}" id for an episode). Upserts the
-    ' continue-watching entry and marks it most recent. Blank positions are
-    ' ignored so a fresh screen never clears stored progress.
+    ' "{metaId}:{season}:{episode}" id for an episode). Drops the previous
+    ' entry for the same video or series, pushes the new one on top of the
+    ' capped stack, and pops anything beyond MAX_CONTINUE_WATCHING. Blank
+    ' positions are ignored so a fresh screen never clears stored progress.
     sub SetPosition(videoId as string, metaId as string, metaType as string, season as integer, episode as integer, name as string, poster = "" as string, position = 0 as integer, duration = 0 as integer)
         if videoId = "" or metaId = "" then return
-        m.positions[videoId] = {
+        for i = m.positions.Count() - 1 to 0 step -1
+            if m.positions[i].videoId = videoId or m.positions[i].metaId = metaId
+                m.positions.Delete(i)
+            end if
+        end for
+        m.positions.Unshift({
             videoId: videoId
             metaId: metaId
             metaType: metaType
@@ -91,79 +102,58 @@ class LibraryStore
             poster: poster
             position: position
             duration: duration
-            seq: m.NextSeq()
-        }
+        })
+        while m.positions.Count() > MAX_CONTINUE_WATCHING
+            m.positions.Pop()
+        end while
         m.Save()
     end sub
 
     function Position(videoId as string) as integer
-        if m.HasKey(m.positions, videoId) then return m.positions[videoId].position
+        for each entry in m.positions
+            if entry.videoId = videoId then return entry.position
+        end for
         return 0
     end function
 
     function IsWatching(videoId as string) as boolean
-        return m.HasKey(m.positions, videoId)
+        for each entry in m.positions
+            if entry.videoId = videoId then return true
+        end for
+        return false
     end function
 
-    ' Entries sorted by most recently played first.
+    ' The continue-watching stack as-is: newest first, already capped.
     function ContinueWatching() as object
-        items = []
-        for each videoId in m.positions
-            items.Push(m.positions[videoId])
-        end for
-        return m.SortBySeqDesc(items)
+        return m.positions
     end function
 
     ' The most recent continue-watching entry for one series/movie, or invalid
     ' when nothing has been watched. Details uses this to resurrect a resume
-    ' hint for episodes opened straight from a catalog row.
+    ' hint for episodes opened straight from a catalog row. Since the array is
+    ' newest-first, the first match is the one to resume.
     function ResumeFor(metaId as string) as dynamic
         if metaId = "" then return invalid
-        best = invalid
-        for each videoId in m.positions
-            entry = m.positions[videoId]
-            if entry.metaId = metaId and (best = invalid or entry.seq > best.seq)
-                best = entry
-            end if
+        for each entry in m.positions
+            if entry.metaId = metaId then return entry
         end for
-        return best
+        return invalid
     end function
 
     function RemovePosition(videoId as string) as boolean
-        if m.HasKey(m.positions, videoId)
-            m.positions.Delete(videoId)
-            m.Save()
-            return true
-        end if
-        return false
-    end function
-
-    function NextSeq() as integer
-        m.seq = m.seq + 1
-        return m.seq
-    end function
-
-    ' Insertion sort, highest seq first. Each item lands before the first
-    ' element with a smaller seq, so the result stays sorted descending.
-    function SortBySeqDesc(items as object) as object
-        result = []
-        for each item in items
-            inserted = false
-            for i = 0 to result.Count() - 1
-                if item.seq > result[i].seq
-                    result.Unshift(item)
-                    inserted = true
-                    exit for
-                end if
-            end for
-            if not inserted then result.Push(item)
+        for i = m.positions.Count() - 1 to 0 step -1
+            if m.positions[i].videoId = videoId
+                m.positions.Delete(i)
+                m.Save()
+                return true
+            end if
         end for
-        return result
+        return false
     end function
 
     sub Save()
         if m.registry = invalid then return
-        m.registry.Write("library", FormatJson({ saved: m.saved, continueWatching: m.positions }))
+        m.registry.Write("library", FormatJson({ saved: m.saved, savedOrder: m.savedOrder, continueWatching: m.positions }))
         m.registry.Flush()
     end sub
 
@@ -179,18 +169,7 @@ class LibraryStore
         end try
         if parsed = invalid then return
         if parsed.saved <> invalid and Type(parsed.saved) = "roAssociativeArray" then m.saved = parsed.saved
-        if parsed.continueWatching <> invalid and Type(parsed.continueWatching) = "roAssociativeArray" then m.positions = parsed.continueWatching
-        if m.FindMaxSeq() > m.seq then m.seq = m.FindMaxSeq()
+        if parsed.savedOrder <> invalid and Type(parsed.savedOrder) = "roArray" then m.savedOrder = parsed.savedOrder
+        if parsed.continueWatching <> invalid and Type(parsed.continueWatching) = "roArray" then m.positions = parsed.continueWatching
     end sub
-
-    function FindMaxSeq() as integer
-        maxSeq = 0
-        for each metaId in m.saved
-            if m.saved[metaId].seq <> invalid and m.saved[metaId].seq > maxSeq then maxSeq = m.saved[metaId].seq
-        end for
-        for each videoId in m.positions
-            if m.positions[videoId].seq <> invalid and m.positions[videoId].seq > maxSeq then maxSeq = m.positions[videoId].seq
-        end for
-        return maxSeq
-    end function
 end class
