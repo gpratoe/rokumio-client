@@ -153,6 +153,8 @@ sub onStreamsAction()
     m.uiRoot.AppendChild(player)
     player.callFunc("SetStores", m.stores)
     player.ObserveField("closeRequest", "onPlayerClose")
+    player.ObserveField("watchStateUpdate", "onWatchStateUpdate")
+    m.activePlayer = player
     m.stack.pushNode(player, request.params)
 end sub
 
@@ -164,6 +166,80 @@ sub onPlayerClose()
     if m.stack.top() <> invalid and m.stack.top().id = "playerScreen"
         m.stack.pop()
     end if
+    ' Drop the node reference so SceneGraph can destroy the whole component (and
+    ' release the platform media player) — the last watch-state packet is safe
+    ' because the player also records it in the library store, which lives on.
+    m.activePlayer = invalid
+end sub
+
+' The player published a position update (pause or leave) through
+' watchStateUpdate. MainScene owns the write-back pipeline: gate on a stremio
+' session (guest never touches the API), drop a repeat of the last accepted
+' update (same video, same position — nothing new), and coalesce the rest so at
+' most one WatchStatePushTask runs at a time. The packet is read from the
+' library store, not the player node, so the async callback can land even after
+' onPlayerClose released the component.
+sub onWatchStateUpdate()
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.stores.auth.GetSession() <> "stremio" then return
+    packet = m.stores.library.LatestWatchStatePacket()
+    if packet = invalid then return
+    videoId = packet.videoId
+    if videoId = invalid or videoId = "" then return
+    if packet.position = invalid then return
+    key = videoId + "|" + packet.position.ToStr()
+    if m.lastPacketKey = key then return
+    m.lastPacketKey = key
+    m.pendingWatchState = packet
+    PumpWatchStatePush()
+end sub
+
+' Start one push for the pending state if none is in flight. The pending slot is
+' consumed into the worker; a state that arrives while this worker runs lands
+' back in the slot and is pumped by onWatchStatePushResult. The LibraryItem to
+' send is built by the store (the merge into the freshest cached copy), so no
+' merge logic lives here.
+sub PumpWatchStatePush()
+    if m.pushingWatchState then return
+    if m.pendingWatchState = invalid then return
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    packet = m.pendingWatchState
+    item = m.stores.library.BuildWatchStateItem(packet)
+    if item = invalid then return
+    m.pendingWatchState = invalid
+
+    task = CreateObject("roSGNode", "WatchStatePushTask")
+    task.id = "watchStatePushTask"
+    m.top.AppendChild(task)
+    task.authKey = m.stores.auth.GetAuthKey()
+    task.item = item
+    task.observeField("result", "onWatchStatePushResult")
+    m.watchStatePushTask = task
+    m.inFlightWatchState = packet
+    m.pushingWatchState = true
+    task.control = "RUN"
+end sub
+
+' One push settled. Free the worker and pump any state that arrived meanwhile.
+' The latest update's videoId+position was already suppressed at accept time, so
+' no record is needed here. Failures are non-fatal: the local continue-watching
+' cache stays authoritative and the next position save retries naturally.
+sub onWatchStatePushResult()
+    task = m.watchStatePushTask
+    m.watchStatePushTask = invalid
+    m.pushingWatchState = false
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result <> invalid and result.ok
+        print "[rokumio] watch state pushed videoId='" + m.inFlightWatchState.videoId + "'"
+    else
+        print "[rokumio] watch state push failed"
+    end if
+    m.inFlightWatchState = invalid
+    PumpWatchStatePush()
 end sub
 
 ' The exit dialog signals dismissal through wasClosed (Back, Home, or its own

@@ -315,6 +315,113 @@ class LibraryStore
         end for
     end sub
 
+    ' Build the full LibraryItem a datastorePut push sends after a position
+    ' update. The account is the source of truth for fields this app does not
+    ' track, so the push clones the freshest cached copy of the item (from the
+    ' last sync) and overwrites only the watch-state fields the player knows —
+    ' video_id, timeOffset, duration, lastWatched — plus _mtime. Untracked
+    ' server fields (timesWatched, the watched bitfield, behaviorHints, the
+    ' removed/temp flags) survive untouched. An item the cache has never seen
+    ' (added on another device between sync and push) falls back to a minimal
+    ' temp entry so the server records the progress without promoting it to the
+    ' permanent library. Guest sessions never write back, so the call is refused
+    ' there too (mirrors SyncFromStremio). `now` is injectable for tests;
+    ' production lets it default and NowIso() stamps it.
+    function BuildWatchStateItem(packet as dynamic, now = "" as string) as dynamic
+        if m.sessionType <> "stremio" then return invalid
+        if packet = invalid then return invalid
+        metaId = packet.metaId
+        if metaId = invalid or metaId = "" then return invalid
+        videoId = packet.videoId
+        if videoId = invalid or videoId = "" then videoId = metaId
+        position = 0
+        if packet.position <> invalid then position = packet.position
+        duration = 0
+        if packet.duration <> invalid then duration = packet.duration
+        metaType = packet.metaType
+        if metaType = invalid or metaType = "" then metaType = "movie"
+        name = ""
+        if packet.name <> invalid then name = packet.name
+        poster = ""
+        if packet.poster <> invalid then poster = packet.poster
+        if now = "" then now = m.NowIso()
+
+        original = invalid
+        for each item in m.stremioLibrary
+            if item <> invalid and item._id = metaId then original = item : exit for
+        end for
+        if original = invalid
+            return {
+                _id: metaId
+                name: name
+                type: metaType
+                poster: poster
+                removed: true
+                temp: true
+                _mtime: now
+                state: {
+                    lastWatched: now
+                    timeOffset: position
+                    duration: duration
+                    video_id: videoId
+                }
+            }
+        end if
+
+        clone = {}
+        for each key in original
+            clone[key] = original[key]
+        end for
+        state = {}
+        oldState = original.state
+        if oldState <> invalid and Type(oldState) = "roAssociativeArray"
+            for each key in oldState
+                state[key] = oldState[key]
+            end for
+        end if
+        state.video_id = videoId
+        state.timeOffset = position
+        state.duration = duration
+        state.lastWatched = now
+        clone.state = state
+        clone._mtime = now
+        return clone
+    end function
+
+    ' ISO-8601 UTC timestamp for _mtime/lastWatched, via roDateTime.ToISOString
+    ' (no manual month/day assembly, so no 0-indexed month gotcha). Returns ""
+    ' when the platform cannot produce one.
+    function NowIso() as string
+        try
+            dt = CreateObject("roDateTime")
+            if dt = invalid then return ""
+            iso = dt.ToISOString()
+            if iso = invalid then return ""
+            return iso
+        catch e
+            return ""
+        end try
+    end function
+
+    ' The player publishes each position update as a watch-state packet here
+    ' (memory-only) as well as through its own field, so MainScene can still read
+    ' the last packet after the player node is torn down — its async field
+    ' observer races the pop that releases the component (and the video node it
+    ' holds). Reading from the store has no node-lifetime dependency.
+    '
+    ' Note: the getter is LatestWatchStatePacket, NOT LatestWatchState —
+    ' BrightScript member names are case-insensitive, so a method named
+    ' LatestWatchState would collide with the m.latestWatchState field it reads
+    ' (a runtime crash, same class of bug as the StremioLibrary() rename).
+    sub RecordWatchState(packet as dynamic)
+        if packet = invalid then return
+        m.latestWatchState = packet
+    end sub
+
+    function LatestWatchStatePacket() as dynamic
+        return m.latestWatchState
+    end function
+
     ' Guest/stremio sessions persist under different keys so one session can
     ' never surface the other's saved content or continue-watching positions.
     function RegistryKey() as string

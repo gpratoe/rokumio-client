@@ -461,6 +461,8 @@ sub onVideoStateChanged()
     else if state = "buffering"
         StopResolvePulse()
         if HasLogo() then m.bufferingGroup.visible = true
+    else if state = "paused"
+        PublishWatchState()
     else if state = "finished" or state = "stopped"
         HideBuffering()
     end if
@@ -634,4 +636,45 @@ sub SavePosition()
 
     m.stores.library.SetPosition(params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration))
     m.saved = true
+    PublishWatchState()
+end sub
+
+' Publish the current playback position through the watchStateUpdate field for
+' MainScene to push back to Stremio (a stremio session only). Fired on pause
+' and on leave (from SavePosition); MainScene coalesces, so the last state
+' always wins and at most one push is in flight at a time. Publishing is purely
+' local state — the player never touches the API — and harmless in a guest
+' session, where MainScene drops it.
+sub PublishWatchState()
+    if m.playParams = invalid or m.playParams.videoId = invalid then return
+    if m.stores = invalid or m.stores.library = invalid then return
+    if m.video = invalid then return
+    if not m.hasPlayed then return
+
+    position = m.video.position
+    duration = m.video.duration
+    if position = invalid then position = 0
+    if duration = invalid then duration = 0
+
+    params = m.playParams
+    metaType = ""
+    if params.metaType <> invalid then metaType = params.metaType
+    name = ""
+    if params.name <> invalid then name = params.name
+    poster = ""
+    if params.poster <> invalid then poster = params.poster
+
+    packet = {
+        videoId: params.videoId
+        metaId: params.metaId
+        metaType: metaType
+        name: name
+        poster: poster
+        position: Int(position)
+        duration: Int(duration)
+    }
+    ' Record before publishing: MainScene's observer can fire synchronously on
+    ' the field write, so the store must already hold this packet when it reads.
+    m.stores.library.RecordWatchState(packet)
+    m.top.watchStateUpdate = packet
 end sub
