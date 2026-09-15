@@ -11,6 +11,12 @@ sub init()
     m.homeScreen = m.top.FindNode("homeScreen")
     m.homeScreen.ObserveField("pushRequest", "onHomeAction")
 
+    ' AuthScreen publishes the first-run choice (continue as guest for now; the
+    ' Stremio login row is wired in a later stage). The Scene signs the session
+    ' in, points the session-aware stores at the guest data and pops the gate.
+    m.authScreen = m.top.FindNode("authScreen")
+    m.authScreen.ObserveField("pushRequest", "onAuthAction")
+
     ' Details pushes its own actions (episode selection, movie Play) up through
     ' the same one-action channel Home uses.
     m.detailsScreen = m.top.FindNode("detailsScreen")
@@ -50,21 +56,26 @@ sub init()
     m.supportDialog.ObserveFieldScoped("wasClosed", "onSupportDialogClosed")
 
     ' Stores are constructed once at the Scene and handed to screens later by
-    ' reference. SettingsStore and AddonsStore Load() their persisted state on
-    ' construction.
+    ' reference. SettingsStore, AddonsStore and LibraryStore Load() their
+    ' persisted state on construction; the add-on/library stores are built for
+    ' the current session (guest or stremio) so every screen reads the right
+    ' session's data from the first frame.
     http = Transport()
+    m.authStore = AuthStore(CreateObject("roRegistrySection", "auth"))
     m.settingsStore = SettingsStore(CreateObject("roRegistrySection", "settings"))
+    sessionType = EffectiveSessionType()
     m.stores = {
         transport: http
         settings: m.settingsStore
-        auth: AuthStore()
-        addons: AddonsStore(http, CreateObject("roRegistrySection", "addons"))
+        auth: m.authStore
+        addons: AddonsStore(http, CreateObject("roRegistrySection", "addons"), sessionType)
         catalog: CatalogStore(http)
         episodes: EpisodesStore(http)
-        library: LibraryStore(CreateObject("roRegistrySection", "library"))
+        library: LibraryStore(CreateObject("roRegistrySection", "library"), sessionType)
         playback: PlaybackStore(http)
     }
     m.homeScreen.callFunc("SetStores", m.stores)
+    m.authScreen.callFunc("SetStores", m.stores)
     m.detailsScreen.callFunc("SetStores", m.stores)
     m.episodesScreen.callFunc("SetStores", m.stores)
     m.streamsScreen.callFunc("SetStores", m.stores)
@@ -188,9 +199,35 @@ end sub
 ' work here: Scene.visible is born true and never reassigned, so observing it
 ' never fires. Start() is deterministic, and pushing after Show() guarantees the
 ' tree is renderable when focus is handed out. The stack always rests on a
-' bottom home screen.
+' bottom home screen; a not-logged-in launch parks the auth gate on top, so
+' "Continue as guest" simply pops it to reveal the guest home.
 sub Start()
     m.stack.push("homeScreen")
+    if not m.stores.auth.IsLoggedIn()
+        m.stack.push("authScreen")
+    end if
+end sub
+
+' The store session derives from the persisted auth session: guest when logged
+' out or in a guest session, stremio for an account session. Never blank — the
+' session-aware stores always act on a concrete session's data.
+function EffectiveSessionType() as string
+    if m.authStore <> invalid and m.authStore.GetSession() = "stremio" then return "stremio"
+    return "guest"
+end function
+
+' The AuthScreen published its first-run choice. Today only "continue as guest"
+' is wired: sign the guest session in (persisted), repoint the session-aware
+' stores at the guest data, and pop the gate to reveal the home beneath.
+sub onAuthAction()
+    request = m.authScreen.pushRequest
+    if request = invalid or request.action <> "continueGuest" then return
+    if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginGuest()
+    if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
+    if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
+    if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
+        m.stack.pop()
+    end if
 end sub
 
 ' An ECP deep link (see reference/ecp-integration.md) arrived with the launch

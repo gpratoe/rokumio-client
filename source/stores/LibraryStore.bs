@@ -6,6 +6,16 @@
 ' only). Save() writes the whole library as one registry key. Since the app is
 ' guest-only nothing syncs — this is the local mirror of the Stremio library.
 '
+' Persistence is a session-aware registry key: a guest session uses "library"
+' and a stremio session uses "stremio_library", so the two sessions never share
+' saved content or continue-watching positions. What persists differs by
+' session: a guest session saves saved items + continue watching (its data is
+' local-only, nothing to fetch anywhere), while a stremio session persists ONLY
+' the continue-watching stack — the rest of its library is re-synced from the
+' Stremio account in the background on launch and lives in memory for the
+' session, so nothing is written to the device needlessly. The registry section
+' object is shared; only the key changes.
+'
 ' Ordering is the array itself: freshly written items land at index 0, so the
 ' newest is always first and no sequence number or sort is needed. Continue
 ' watching is a capped stack — SetPosition drops the old entry for the same
@@ -19,12 +29,15 @@ const MAX_CONTINUE_WATCHING = 8
 
 class LibraryStore
     registry as dynamic
+    sessionType as string
     saved as object
     savedOrder as object
     positions as object
 
-    sub new(registry = invalid as dynamic)
+    sub new(registry = invalid as dynamic, sessionType = "guest" as string)
         m.registry = registry
+        m.sessionType = "guest"
+        if sessionType = "stremio" then m.sessionType = "stremio"
         m.saved = {}
         m.savedOrder = []
         m.positions = []
@@ -151,15 +164,40 @@ class LibraryStore
         return false
     end function
 
+    ' Guest/stremio sessions persist under different keys so one session can
+    ' never surface the other's saved content or continue-watching positions.
+    function RegistryKey() as string
+        if m.sessionType = "stremio" then return "stremio_library"
+        return "library"
+    end function
+
+    ' Repoint the store at another session's data. A same-session switch is a
+    ' no-op; everything is reloaded fresh so the in-memory state always mirrors
+    ' the active session's persisted key.
+    sub SwitchSession(sessionType as string)
+        if sessionType <> "guest" and sessionType <> "stremio" then return
+        if m.sessionType = sessionType then return
+        m.sessionType = sessionType
+        m.saved = {}
+        m.savedOrder = []
+        m.positions = []
+        m.Load()
+    end sub
+
     sub Save()
         if m.registry = invalid then return
-        m.registry.Write("library", FormatJson({ saved: m.saved, savedOrder: m.savedOrder, continueWatching: m.positions }))
+        data = { continueWatching: m.positions }
+        if m.sessionType <> "stremio"
+            data.saved = m.saved
+            data.savedOrder = m.savedOrder
+        end if
+        m.registry.Write(m.RegistryKey(), FormatJson(data))
         m.registry.Flush()
     end sub
 
     sub Load()
         if m.registry = invalid then return
-        raw = m.registry.Read("library")
+        raw = m.registry.Read(m.RegistryKey())
         if raw = "" then return
         parsed = invalid
         try
@@ -168,8 +206,10 @@ class LibraryStore
             return
         end try
         if parsed = invalid then return
-        if parsed.saved <> invalid and Type(parsed.saved) = "roAssociativeArray" then m.saved = parsed.saved
-        if parsed.savedOrder <> invalid and Type(parsed.savedOrder) = "roArray" then m.savedOrder = parsed.savedOrder
+        if m.sessionType <> "stremio"
+            if parsed.saved <> invalid and Type(parsed.saved) = "roAssociativeArray" then m.saved = parsed.saved
+            if parsed.savedOrder <> invalid and Type(parsed.savedOrder) = "roArray" then m.savedOrder = parsed.savedOrder
+        end if
         if parsed.continueWatching <> invalid and Type(parsed.continueWatching) = "roArray" then m.positions = parsed.continueWatching
     end sub
 end class

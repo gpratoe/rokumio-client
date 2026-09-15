@@ -27,6 +27,7 @@ async function writeCombinedScript() {
         'tests/settingsstore.test.brs',
         'tests/authstore.test.brs',
         'tests/addonsstore.test.brs',
+        'tests/stremioauthstore.test.brs',
         'tests/catalogstore.test.brs',
         'tests/deeplinkstore.test.brs',
         'tests/episodesstore.test.brs',
@@ -57,7 +58,7 @@ const transpiled = [
 function checkScreenContract() {
     const fs = require('fs');
     const contract = ['OnEnter', 'OnExit', 'OnBackPressed', 'BlurFocus'];
-    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen'];
+    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'AuthScreen'];
     let ok = true;
     for (const name of screens) {
         const xml = fs.readFileSync(path.join(projectRoot, 'components', `${name}.xml`), 'utf8');
@@ -145,7 +146,7 @@ function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
     let ok = true;
-    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'ConfirmExitDialog', 'SupportDialog']) {
+    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'AuthScreen', 'ConfirmExitDialog', 'SupportDialog']) {
         const element = xml.match(new RegExp(`<${name}[^>]*>`));
         if (!element) {
             console.error(`MainScene.xml is missing a <${name} ... /> child`);

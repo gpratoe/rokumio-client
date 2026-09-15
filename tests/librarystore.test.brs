@@ -129,3 +129,41 @@ sub Test_Library_CapContinueWatching()
     Harness_Equal(list[0].videoId, "tt12", "newest first")
     Harness_Equal(list[7].videoId, "tt5", "oldest retained is the 8th newest")
 end sub
+
+sub Test_Library_SwitchSessionSeparatesData()
+    Harness_Suite("LibraryStore session switch isolates guest and stremio libraries")
+    registry = MockRegistry()
+    store = LibraryStore(registry)
+    store.AddSaved("tt0111161", "movie", "The Shawshank Redemption")
+    store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix", "", 120, 2400)
+
+    store.SwitchSession("stremio")
+    Harness_Equal(store.SavedItems().Count(), 0, "stremio session starts empty")
+    Harness_Equal(store.ContinueWatching().Count(), 0, "no stremio positions")
+
+    store.SwitchSession("guest")
+    Harness_Equal(store.SavedItems().Count(), 1, "guest library restored")
+    Harness_Equal(store.ContinueWatching().Count(), 1, "guest positions restored")
+    Harness_Equal(store.Position("tt0133093"), 120, "guest position value restored")
+
+    reopened = LibraryStore(registry, "stremio")
+    Harness_Equal(reopened.SavedItems().Count(), 0, "stremio registry keys stayed empty")
+end sub
+
+sub Test_Library_StremioSessionPersistsOwnKey()
+    Harness_Suite("LibraryStore stremio session persists continue-watching only")
+    registry = MockRegistry()
+    store = LibraryStore(registry, "stremio")
+    store.AddSaved("tt0111161", "movie", "The Shawshank Redemption")
+    store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix", "", 120, 2400)
+
+    Harness_Equal(store.SavedItems().Count(), 1, "saved items live in memory for the live session")
+
+    reopened = LibraryStore(registry, "stremio")
+    Harness_Equal(reopened.SavedItems().Count(), 0, "saved items are not persisted for a stremio session")
+    Harness_Equal(reopened.ContinueWatching().Count(), 1, "continue-watching persists across reloads")
+    Harness_Equal(reopened.Position("tt0133093"), 120, "position value restored")
+
+    guest = LibraryStore(registry)
+    Harness_Equal(guest.SavedItems().Count(), 0, "guest library unaffected by the stremio save")
+end sub
