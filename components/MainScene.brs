@@ -263,6 +263,7 @@ sub onLinkCodeAction()
         if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginStremio(request.authKey, request.user)
         if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("stremio")
         if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("stremio")
+        StartAddonSync()
         if m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
             m.stack.pop()
         end if
@@ -285,6 +286,60 @@ sub CleanupStremioPairTask()
     m.linkStremioTask = invalid
     if task = invalid then return
     if task.getParent() <> invalid then m.top.RemoveChild(task)
+end sub
+
+' Kick the account addon sync for a freshly-logged-in stremio session. The API
+' answers with the full collection incl. each manifest, so no per-addon fetches
+' follow — the task returns the descriptors and MainScene adopts them through
+' AddonsStore (the single writer for installed records). Created per sync like
+' the pairing task; a relaunched stremio session skips this (its addons are
+' already in the stremio_addons registry key from the login that synced them).
+sub StartAddonSync()
+    task = CreateObject("roSGNode", "AddonSyncTask")
+    task.id = "addonSyncTask"
+    m.top.AppendChild(task)
+    m.addonSyncTask = task
+    if m.stores <> invalid and m.stores.auth <> invalid
+        task.authKey = m.stores.auth.GetAuthKey()
+    end if
+    task.observeField("result", "onAddonSyncResult")
+    task.control = "RUN"
+end sub
+
+' One sync settled. Register every descriptor through AddonsStore (duplicates
+' are skipped, so re-syncing is idempotent) and rebuild Home's rows from the
+' new catalog set. Failures are non-fatal — whatever synced registers, the rest
+' is logged and the session proceeds (an empty collection is a legit outcome).
+sub onAddonSyncResult()
+    task = m.addonSyncTask
+    m.addonSyncTask = invalid
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    added = 0
+    skipped = 0
+    failed = 0
+    if result <> invalid and result.ok and result.descriptors <> invalid
+        for each descriptor in result.descriptors
+            if m.stores <> invalid and m.stores.addons <> invalid
+                outcome = m.stores.addons.InstallFromDescriptor(descriptor.transportUrl, descriptor.manifest)
+                if outcome.ok
+                    added = added + 1
+                else if outcome.error = "addon already installed"
+                    skipped = skipped + 1
+                else
+                    failed = failed + 1
+                    print "[rokumio] addon sync dropped '" + outcome.id + "': " + outcome.error
+                end if
+            end if
+        end for
+    end if
+    print "[rokumio] addon sync added=" + added.ToStr() + " skipped=" + skipped.ToStr() + " failed=" + failed.ToStr()
+    if added > 0 and m.homeScreen <> invalid
+        m.homeScreen.callFunc("RebuildRows")
+    end if
 end sub
 
 ' An ECP deep link (see reference/ecp-integration.md) arrived with the launch

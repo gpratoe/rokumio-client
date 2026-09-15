@@ -158,6 +158,26 @@ class AddonsStore
         return false
     end function
 
+    ' Catalog manifests may omit a display name — real-world add-ons (Stremio's
+    ' own Channels add-on among them) ship catalogs with only type/id. Every
+    ' consumer renders the catalog name as a row/chip label, so an invalid name
+    ' degrades badly; fill it in at the source with the addon name, then the
+    ' catalog id when the addon name is also blank. Non-arrays pass through
+    ' untouched (built-in seeds ship catalogs = invalid until a manifest lands).
+    function NormalizeCatalogNames(catalogs as dynamic, fallbackName as dynamic) as dynamic
+        if catalogs = invalid or Type(catalogs) <> "roArray" then return catalogs
+        name = fallbackName
+        if name = invalid then name = ""
+        for each catalog in catalogs
+            if catalog <> invalid and Type(catalog) = "roAssociativeArray"
+                if catalog.name = invalid or catalog.name = "" then catalog.name = name
+                if catalog.name = invalid or catalog.name = "" then catalog.name = catalog.id
+                if catalog.name = invalid then catalog.name = ""
+            end if
+        end for
+        return catalogs
+    end function
+
     ' Fetch the manifest URL the user provides and register the addon. The user
     ' supplies the full URL (including /manifest.json and any query args); we
     ' fetch it directly and extract the base address for later use. Returns a
@@ -205,7 +225,7 @@ class AddonsStore
             name: json.name
             version: json.version
             types: json.types
-            catalogs: json.catalogs
+            catalogs: m.NormalizeCatalogNames(json.catalogs, json.name)
             resources: m.NormalizeResources(json.resources)
             address: base
             builtin: false
@@ -230,6 +250,59 @@ class AddonsStore
         m.installed[record.id] = record
         m.Save()
         return true
+    end function
+
+    ' Adopt an addon the account-sync API already described (transport URL +
+    ' full manifest are in the addonCollectionGet response), so no manifest
+    ' re-fetch is needed. Rejects transports this platform cannot drive
+    ' (non-http(s)) and manifests missing their identity; the record's address
+    ' is the transport base (the URL minus the /manifest.json segment, query
+    ' args preserved) so request building stays uniform. Duplicates are skipped
+    ' by Register.
+    function InstallFromDescriptor(transportUrl as dynamic, manifest as dynamic) as object
+        result = { ok: false, id: "", error: "", record: invalid }
+        if transportUrl = invalid or transportUrl = ""
+            result.error = "no addon address"
+            return result
+        end if
+        if manifest = invalid or manifest.id = invalid or manifest.id = "" or manifest.name = invalid or manifest.name = ""
+            result.error = "manifest missing id or name"
+            return result
+        end if
+
+        base = m.BaseFromManifestUrl(transportUrl)
+        if base = "" then base = transportUrl
+        if base = ""
+            result.error = "invalid addon address"
+            return result
+        end if
+
+        ' Only http(s) transports can be driven from Roku.
+        parts = base.Split("://")
+        if parts.Count() < 2 or (parts[0] <> "http" and parts[0] <> "https") then
+            result.error = "unsupported addon transport"
+            return result
+        end if
+
+        record = {
+            id: manifest.id
+            name: manifest.name
+            version: manifest.version
+            types: manifest.types
+            catalogs: m.NormalizeCatalogNames(manifest.catalogs, manifest.name)
+            resources: m.NormalizeResources(manifest.resources)
+            address: base
+            builtin: false
+        }
+        if not m.Register(record)
+            result.error = "addon already installed"
+            if m.HasKey(m.installed, record.id) then result.record = m.installed[record.id]
+            return result
+        end if
+        result.ok = true
+        result.id = record.id
+        result.record = record
+        return result
     end function
 
     ' Remove an installed add-on, or a shipped built-in. The caller says which

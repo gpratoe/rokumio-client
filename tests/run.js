@@ -27,6 +27,7 @@ async function writeCombinedScript() {
         'tests/settingsstore.test.brs',
         'tests/authstore.test.brs',
         'tests/addonsstore.test.brs',
+        'tests/addonsync.test.brs',
         'tests/stremioauthstore.test.brs',
         'tests/catalogstore.test.brs',
         'tests/deeplinkstore.test.brs',
