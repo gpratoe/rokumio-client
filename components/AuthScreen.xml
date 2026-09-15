@@ -22,7 +22,7 @@
     <script type="text/brightscript" uri="pkg:/components/AuthScreen.brs" />
 
     <children>
-        <Rectangle id="authBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Rectangle id="authBg" width="1920" height="1080" color="0x0" />
         <Label
             id="authTitle"
             translation="[80, 340]"

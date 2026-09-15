@@ -17,7 +17,7 @@
     <script type="text/brightscript" uri="pkg:/components/LinkStremioScreen.brs" />
 
     <children>
-        <Rectangle id="pairBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Rectangle id="pairBg" width="1920" height="1080" color="0x0" />
         <Label
             id="pairTitle"
             translation="[80, 300]"
