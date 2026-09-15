@@ -11,11 +11,17 @@ sub init()
     m.homeScreen = m.top.FindNode("homeScreen")
     m.homeScreen.ObserveField("pushRequest", "onHomeAction")
 
-    ' AuthScreen publishes the first-run choice (continue as guest for now; the
-    ' Stremio login row is wired in a later stage). The Scene signs the session
-    ' in, points the session-aware stores at the guest data and pops the gate.
+    ' AuthScreen publishes the first-run choice (continue as guest, or log in
+    ' with Stremio). The Scene signs the session in, points the session-aware
+    ' stores at the right data and pops the gate — or starts the link-code flow.
     m.authScreen = m.top.FindNode("authScreen")
     m.authScreen.ObserveField("pushRequest", "onAuthAction")
+
+    ' LinkStremioScreen publishes the pairing outcome: completeLogin (authKey +
+    ' user) or cancelLogin (user backed out). The Scene owns the LinkStremioTask
+    ' lifecycle; LinkStremioScreen only observes it and reports.
+    m.linkStremioScreen = m.top.FindNode("linkStremioScreen")
+    m.linkStremioScreen.ObserveField("pushRequest", "onLinkCodeAction")
 
     ' Details pushes its own actions (episode selection, movie Play) up through
     ' the same one-action channel Home uses.
@@ -76,6 +82,7 @@ sub init()
     }
     m.homeScreen.callFunc("SetStores", m.stores)
     m.authScreen.callFunc("SetStores", m.stores)
+    m.linkStremioScreen.callFunc("SetStores", m.stores)
     m.detailsScreen.callFunc("SetStores", m.stores)
     m.episodesScreen.callFunc("SetStores", m.stores)
     m.streamsScreen.callFunc("SetStores", m.stores)
@@ -216,18 +223,68 @@ function EffectiveSessionType() as string
     return "guest"
 end function
 
-' The AuthScreen published its first-run choice. Today only "continue as guest"
-' is wired: sign the guest session in (persisted), repoint the session-aware
-' stores at the guest data, and pop the gate to reveal the home beneath.
+' The AuthScreen published its first-run choice.
 sub onAuthAction()
     request = m.authScreen.pushRequest
-    if request = invalid or request.action <> "continueGuest" then return
-    if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginGuest()
-    if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
-    if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
-    if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
+    if request = invalid then return
+    if request.action = "continueGuest"
+        if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginGuest()
+        if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
+        if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
+        if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
+            m.stack.pop()
+        end if
+    else if request.action = "startLogin"
+        StartLinkCodeFlow()
+    end if
+end sub
+
+' Start the link-code pairing: spawn the worker task, point the LinkStremioScreen
+' at it and push the screen. The task is created dynamically (like the player)
+' so it lives exactly as long as the flow; teardown on success, Back or failure
+' is handled in CleanupStremioPairTask.
+sub StartLinkCodeFlow()
+    task = CreateObject("roSGNode", "LinkStremioTask")
+    task.id = "linkStremioTask"
+    m.top.AppendChild(task)
+    m.linkStremioTask = task
+    m.linkStremioScreen.taskNode = task
+    task.control = "RUN"
+    m.stack.push("linkStremioScreen")
+end sub
+
+' The LinkStremioScreen published its outcome. completeLogin carries the paired
+' authKey + user: persist the stremio session, repoint the session-aware stores
+' and drop back to Home, cleaning up the flow. cancelLogin just washes out.
+sub onLinkCodeAction()
+    request = m.linkStremioScreen.pushRequest
+    if request = invalid then return
+    if request.action = "completeLogin"
+        if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginStremio(request.authKey, request.user)
+        if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("stremio")
+        if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("stremio")
+        if m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
+            m.stack.pop()
+        end if
+        if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
+            m.stack.pop()
+        end if
+    end if
+    CleanupStremioPairTask()
+    if request.action = "cancelLogin" and m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
         m.stack.pop()
     end if
+end sub
+
+' Reap the task: drop references and remove it from the tree. Removing a running
+' Task frees its worker thread (or, worst case, its writes hit a detached node
+' and go nowhere), so a Back-mid-pairing or finished flow never leaves a thread
+' holding the worker.
+sub CleanupStremioPairTask()
+    task = m.linkStremioTask
+    m.linkStremioTask = invalid
+    if task = invalid then return
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
 end sub
 
 ' An ECP deep link (see reference/ecp-integration.md) arrived with the launch

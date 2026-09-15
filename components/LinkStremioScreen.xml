@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="LinkStremioScreen" extends="Group">
+    <!-- Link-code pairing screen: displays the code and URL while the user
+         completes pairing on their phone. Publishes cancelLogin on Back and
+         completeLogin when the task succeeds. -->
+    <interface>
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+        <field id="taskNode" type="node" value="" />
+
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/LinkStremioScreen.brs" />
+
+    <children>
+        <Rectangle id="pairBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Label
+            id="pairTitle"
+            translation="[80, 300]"
+            width="1760"
+            height="70"
+            text="Log in with Stremio"
+            font="font:LargeBoldSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="pairSub"
+            translation="[80, 380]"
+            width="760"
+            height="60"
+            text="Scan the QR code or enter the code below at link.stremio.com"
+            font="font:MediumSystemFont"
+            wrap="true"
+            color="0x8FA399FF" />
+        <Label
+            id="pairQrFallback"
+            translation="[880, 430]"
+            width="360"
+            height="360"
+            horizAlign="center"
+            vertAlign="middle"
+            text="QR code unavailable"
+            font="font:MediumSystemFont"
+            wrap="true"
+            color="0x8FA399FF"
+            visible="false" />
+        <Poster
+            id="pairQr"
+            translation="[880, 430]"
+            width="360"
+            height="360"
+            failBackgroundColor="0x0A0F0CFF" />
+        <Label
+            id="pairCode"
+            translation="[80, 485]"
+            width="760"
+            height="100"
+            text=""
+            font="font:LargeBoldSystemFont"
+            color="0xFFFFFFFF" />
+        <Label
+            id="pairUrl"
+            translation="[80, 595]"
+            width="760"
+            height="50"
+            text=""
+            font="font:MediumSystemFont"
+            color="0x8FA399FF" />
+        <Label
+            id="pairStatus"
+            translation="[80, 700]"
+            width="760"
+            height="50"
+            text="Waiting for link..."
+            font="font:MediumSystemFont"
+            color="0x6B8577FF" />
+    </children>
+</component>

@@ -19,6 +19,7 @@
     <script type="text/brightscript" uri="pkg:/source/stores/EpisodesStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/LibraryStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/PlaybackStore.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/SubtitlesStore.bs" />
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 
     <children>
@@ -29,6 +30,7 @@
 
             <HomeScreen id="homeScreen" visible="false" />
             <AuthScreen id="authScreen" visible="false" />
+            <LinkStremioScreen id="linkStremioScreen" visible="false" />
             <DetailsScreen id="detailsScreen" visible="false" />
             <EpisodesScreen id="episodesScreen" visible="false" />
             <StreamsScreen id="streamsScreen" visible="false" />

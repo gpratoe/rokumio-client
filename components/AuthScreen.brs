@@ -1,9 +1,9 @@
 ' AuthScreen — the first-run and post-logout decision screen.
 '
-' Two PrefRow options: continue as a local guest, or log in with Stremio (the
-' link-code flow lands in a later stage; that row is inert until then). OK on a
-' row publishes one pushRequest; MainScene routes it. Back is swallowed so a
-' not-logged-in launch cannot slip past the gate into the guest home beneath.
+' Two PrefRow options: continue as a local guest, or log in with Stremio via
+' link-code pairing. OK on a row publishes one pushRequest; MainScene routes it.
+' Back is swallowed so a not-logged-in launch cannot slip past the gate into the
+' guest home beneath.
 
 sub init()
     m.list = m.top.FindNode("authList")
@@ -65,6 +65,7 @@ sub onRowSelected()
     action = m.rows[index].action
     if action = "continueGuest"
         m.top.pushRequest = { action: "continueGuest" }
+    else if action = "loginStremio"
+        m.top.pushRequest = { action: "startLogin" }
     end if
-    ' loginStremio is wired when the link-code stage lands; inert until then.
 end sub
