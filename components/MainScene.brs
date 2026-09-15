@@ -212,6 +212,12 @@ sub Start()
     m.stack.push("homeScreen")
     if not m.stores.auth.IsLoggedIn()
         m.stack.push("authScreen")
+    else if EffectiveSessionType() = "stremio"
+        ' Relaunched stremio session: addons are already in the registry key
+        ' from the login that synced them, but the library always re-syncs from
+        ' the account in the background — the persisted Continue Watching stack
+        ' renders first, then freshens when the sync lands.
+        StartLibrarySync()
     end if
 end sub
 
@@ -264,6 +270,7 @@ sub onLinkCodeAction()
         if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("stremio")
         if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("stremio")
         StartAddonSync()
+        StartLibrarySync()
         if m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
             m.stack.pop()
         end if
@@ -340,6 +347,44 @@ sub onAddonSyncResult()
     if added > 0 and m.homeScreen <> invalid
         m.homeScreen.callFunc("RebuildRows")
     end if
+end sub
+
+' Kick the account library sync. Runs on every stremio launch — a fresh login
+' and a relaunched session alike — because only the continue-watching stack
+' persists, so the full library must be re-pulled from the account in the
+' background each time. The task returns the raw library item array; MainScene
+' passes it to LibraryStore.SyncFromStremio, the single mapping authority.
+sub StartLibrarySync()
+    task = CreateObject("roSGNode", "LibrarySyncTask")
+    task.id = "librarySyncTask"
+    m.top.AppendChild(task)
+    m.librarySyncTask = task
+    if m.stores <> invalid and m.stores.auth <> invalid
+        task.authKey = m.stores.auth.GetAuthKey()
+    end if
+    task.observeField("result", "onLibrarySyncResult")
+    task.control = "RUN"
+end sub
+
+' One library sync settled. Reconcile the store with the remote collection and
+' update Home's Continue Watching row in place — the persisted cache (if any)
+' keeps rendering until then. Failures are non-fatal: on a login the CW row
+' just stays empty, on a relaunch the persisted cache keeps rendering.
+sub onLibrarySyncResult()
+    task = m.librarySyncTask
+    m.librarySyncTask = invalid
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result = invalid or not result.ok or result.items = invalid
+        print "[rokumio] library sync failed"
+        return
+    end if
+    if m.stores = invalid or m.stores.library = invalid then return
+    m.stores.library.SyncFromStremio(result.items)
+    if m.homeScreen <> invalid then m.homeScreen.callFunc("RefreshContinueWatching")
 end sub
 
 ' An ECP deep link (see reference/ecp-integration.md) arrived with the launch

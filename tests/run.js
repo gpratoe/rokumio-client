@@ -33,6 +33,7 @@ async function writeCombinedScript() {
         'tests/deeplinkstore.test.brs',
         'tests/episodesstore.test.brs',
         'tests/librarystore.test.brs',
+        'tests/librarysync.test.brs',
         'tests/linkcode.test.brs',
         'tests/playbackstore.test.brs',
         'tests/subtitlesstore.test.brs',
