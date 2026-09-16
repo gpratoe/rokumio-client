@@ -27,10 +27,17 @@ async function writeCombinedScript() {
         'tests/settingsstore.test.brs',
         'tests/authstore.test.brs',
         'tests/addonsstore.test.brs',
+        'tests/addonsync.test.brs',
+        'tests/stremioauthstore.test.brs',
         'tests/catalogstore.test.brs',
         'tests/deeplinkstore.test.brs',
         'tests/episodesstore.test.brs',
         'tests/librarystore.test.brs',
+        'tests/librarysync.test.brs',
+        'tests/watchstatepush.test.brs',
+        'tests/librarywritepush.test.brs',
+        'tests/logouttask.test.brs',
+        'tests/linkcode.test.brs',
         'tests/playbackstore.test.brs',
         'tests/subtitlesstore.test.brs',
         'tests/_run.brs'
@@ -57,7 +64,7 @@ const transpiled = [
 function checkScreenContract() {
     const fs = require('fs');
     const contract = ['OnEnter', 'OnExit', 'OnBackPressed', 'BlurFocus'];
-    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen'];
+    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen'];
     let ok = true;
     for (const name of screens) {
         const xml = fs.readFileSync(path.join(projectRoot, 'components', `${name}.xml`), 'utf8');
@@ -141,11 +148,123 @@ function checkHomeScreenContract() {
     return ok;
 }
 
+// The watch-state write-back worker must keep its contract (authKey + item in,
+// result out with alwaysNotify) so the MainScene pump cannot silently mismatch
+// a field the Task never declared.
+function checkWatchStatePushTaskContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'WatchStatePushTask.xml'), 'utf8');
+    const declared = {};
+    for (const match of xml.matchAll(/<field\s+id="([^"]+)"([^>]*)>/gi)) {
+        declared[match[1]] = match[2];
+    }
+    let ok = true;
+    for (const field of ['authKey', 'item']) {
+        if (!declared[field]) {
+            console.error(`WatchStatePushTask.xml is missing <field id="${field}" ... /> from its interface`);
+            ok = false;
+        }
+    }
+    if (!declared.result) {
+        console.error('WatchStatePushTask.xml is missing <field id="result" ... /> from its interface');
+        ok = false;
+    } else if (!/alwaysNotify\s*=\s*"true"/.test(declared.result)) {
+        console.error('WatchStatePushTask.xml: result field must be alwaysNotify="true"');
+        ok = false;
+    }
+    return ok;
+}
+
+// The library write-back worker must keep its contract (authKey + item in,
+// result out with alwaysNotify) so the MainScene pump cannot silently mismatch
+// a field the LibraryWritePushTask never declared.
+function checkLibraryWritePushTaskContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'LibraryWritePushTask.xml'), 'utf8');
+    const declared = {};
+    for (const match of xml.matchAll(/<field\s+id="([^"]+)"([^>]*)>/gi)) {
+        declared[match[1]] = match[2];
+    }
+    let ok = true;
+    for (const field of ['authKey', 'item']) {
+        if (!declared[field]) {
+            console.error(`LibraryWritePushTask.xml is missing <field id="${field}" ... /> from its interface`);
+            ok = false;
+        }
+    }
+    if (!declared.result) {
+        console.error('LibraryWritePushTask.xml is missing <field id="result" ... /> from its interface');
+        ok = false;
+    } else if (!/alwaysNotify\s*=\s*"true"/.test(declared.result)) {
+        console.error('LibraryWritePushTask.xml: result field must be alwaysNotify="true"');
+        ok = false;
+    }
+    return ok;
+}
+
+// The server-logout worker must keep its contract (authKey in, result out with
+// alwaysNotify) so MainScene's fire-and-forget teardown cannot silently mismatch
+// a field the Task never declared.
+function checkLogoutTaskContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'LogoutTask.xml'), 'utf8');
+    const declared = {};
+    for (const match of xml.matchAll(/<field\s+id="([^"]+)"([^>]*)>/gi)) {
+        declared[match[1]] = match[2];
+    }
+    let ok = true;
+    if (!declared.authKey) {
+        console.error(`LogoutTask.xml is missing <field id="authKey" ... /> from its interface`);
+        ok = false;
+    }
+    if (!declared.result) {
+        console.error('LogoutTask.xml is missing <field id="result" ... /> from its interface');
+        ok = false;
+    } else if (!/alwaysNotify\s*=\s*"true"/.test(declared.result)) {
+        console.error('LogoutTask.xml: result field must be alwaysNotify="true"');
+        ok = false;
+    }
+    return ok;
+}
+
+// The session rows report through SettingsScreen.pushRequest (the same
+// one-action channel the other screens use). Pin the field or onSettingsAction
+// can never fire to start the login flow / logout confirm.
+function checkSettingsPushContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'SettingsScreen.xml'), 'utf8');
+    const declared = new Set(
+        [...xml.matchAll(/<field\s+id="([^"]+)"[\s>]/gi)].map(match => match[1])
+    );
+    if (declared.has('pushRequest')) return true;
+    console.error('SettingsScreen.xml is missing <field id="pushRequest" ... /> from its interface');
+    return false;
+}
+
+// onLibrarySyncResult calls m.libraryScreen.callFunc('RefreshRows') when the
+// sync lands while the Library screen is top. Same callFunc interface trap as
+// HomeScreen's RebuildRows — pin it.
+function checkLibraryScreenContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'LibraryScreen.xml'), 'utf8');
+    const declared = new Set(
+        [...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1])
+    );
+    let ok = true;
+    for (const fn of ['RefreshRows']) {
+        if (!declared.has(fn)) {
+            console.error(`LibraryScreen.xml is missing <function name="${fn}" /> from its interface`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
     let ok = true;
-    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'ConfirmExitDialog', 'SupportDialog']) {
+    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen', 'ConfirmExitDialog', 'SupportDialog']) {
         const element = xml.match(new RegExp(`<${name}[^>]*>`));
         if (!element) {
             console.error(`MainScene.xml is missing a <${name} ... /> child`);
@@ -182,7 +301,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
         process.exit(1);
     }
 

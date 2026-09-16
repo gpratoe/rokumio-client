@@ -355,3 +355,55 @@ sub Test_Addons_HasResource()
     Harness_Ok(not addons.HasResource(invalid, "stream"), "invalid resources not matched")
     Harness_Ok(not addons.HasResource([], "stream"), "empty resources not matched")
 end sub
+
+sub Test_Addons_StremioSessionHidesBuiltIns()
+    Harness_Suite("AddonsStore stremio session hides the virtual built-in seeds")
+    addons = AddonsStore(ScriptedTransport([]), invalid, "stremio")
+
+    Harness_Equal(addons.GetAll().Count(), 0, "no built-in seeds in a stremio session")
+    Harness_Ok(addons.Get("com.linvo.cinemeta") = invalid, "built-in does not resolve")
+    Harness_Ok(addons.Get("org.stremio.opensubtitlesv3") = invalid, "opensubtitles seed does not resolve")
+end sub
+
+sub Test_Addons_SwitchSessionSeparatesData()
+    Harness_Suite("AddonsStore session switch isolates guest and stremio add-ons")
+    manifestUrl = "https://addon.example.com/manifest.json"
+    script = [
+        { method: "GET", url: manifestUrl, ok: true, status: 200, json: ManifestFixture("com.example.addon", "Example"), error: "" }
+    ]
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport(script), registry)
+
+    Harness_Ok(addons.Install(manifestUrl).ok, "guest install ok")
+    Harness_Equal(addons.GetAll().Count(), 3, "guest session has built-ins + example")
+
+    addons.SwitchSession("stremio")
+    Harness_Equal(addons.GetAll().Count(), 0, "stremio session starts empty")
+    Harness_Ok(addons.Get("com.example.addon") = invalid, "guest add-on not visible in stremio")
+
+    addons.SwitchSession("guest")
+    Harness_Equal(addons.GetAll().Count(), 3, "guest add-ons restored on switch back")
+    Harness_Ok(addons.Get("com.example.addon") <> invalid, "guest add-on resolves again")
+
+    reopened = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    Harness_Equal(reopened.GetAll().Count(), 0, "stremio registry keys stayed empty")
+end sub
+
+sub Test_Addons_StremioInstalledPersists()
+    Harness_Suite("AddonsStore stremio session installs into its own registry key")
+    manifestUrl = "https://addon.example.com/manifest.json"
+    script = [
+        { method: "GET", url: manifestUrl, ok: true, status: 200, json: ManifestFixture("com.example.addon", "Example"), error: "" }
+    ]
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport(script), registry, "stremio")
+
+    Harness_Ok(addons.Install(manifestUrl).ok, "stremio install ok")
+    Harness_Equal(addons.GetAll().Count(), 1, "only the installed add-on shows")
+
+    reopened = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    Harness_Ok(reopened.Get("com.example.addon") <> invalid, "stremio add-on reloaded")
+
+    guest = AddonsStore(ScriptedTransport([]), registry)
+    Harness_Equal(guest.GetAll().Count(), 2, "guest session unaffected by the stremio install")
+end sub

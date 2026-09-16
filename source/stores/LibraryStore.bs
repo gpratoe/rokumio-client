@@ -6,6 +6,16 @@
 ' only). Save() writes the whole library as one registry key. Since the app is
 ' guest-only nothing syncs — this is the local mirror of the Stremio library.
 '
+' Persistence is a session-aware registry key: a guest session uses "library"
+' and a stremio session uses "stremio_library", so the two sessions never share
+' saved content or continue-watching positions. What persists differs by
+' session: a guest session saves saved items + continue watching (its data is
+' local-only, nothing to fetch anywhere), while a stremio session persists ONLY
+' the continue-watching stack — the rest of its library is re-synced from the
+' Stremio account in the background on launch and lives in memory for the
+' session, so nothing is written to the device needlessly. The registry section
+' object is shared; only the key changes.
+'
 ' Ordering is the array itself: freshly written items land at index 0, so the
 ' newest is always first and no sequence number or sort is needed. Continue
 ' watching is a capped stack — SetPosition drops the old entry for the same
@@ -16,18 +26,30 @@
 ' another component's code would resolve to invalid (call of a non-function).
 
 const MAX_CONTINUE_WATCHING = 8
+' Guest libraries persist to the device registry, whose size budget is real, so
+' the guest saved list is capped: adding beyond MAX_GUEST_SAVED evicts the
+' oldest entry (the array is newest-first, so the tail is least recent),
+' mirroring the continue-watching cap. A stremio session is memory-only — its
+' saved map is re-synced from the account every launch — so it is never capped
+' and the account stays the authority on how many items it holds.
+const MAX_GUEST_SAVED = 100
 
 class LibraryStore
     registry as dynamic
+    sessionType as string
     saved as object
     savedOrder as object
     positions as object
+    stremioLibrary as object
 
-    sub new(registry = invalid as dynamic)
+    sub new(registry = invalid as dynamic, sessionType = "guest" as string)
         m.registry = registry
+        m.sessionType = "guest"
+        if sessionType = "stremio" then m.sessionType = "stremio"
         m.saved = {}
         m.savedOrder = []
         m.positions = []
+        m.stremioLibrary = []
         m.Load()
     end sub
 
@@ -40,10 +62,20 @@ class LibraryStore
     end function
 
     ' Add a series/movie to the saved library. False when already saved or the
-    ' id is blank.
+    ' id is blank. A guest library is capped at MAX_GUEST_SAVED — adding past
+    ' it drops the oldest entry so the device registry never overflows, exactly
+    ' how the continue-watching stack is capped. A stremio session never caps:
+    ' its saved map is memory-only and re-synced from the account, so the device
+    ' budget does not apply there.
     function AddSaved(metaId as string, metaType as string, name as string, poster = "" as string) as boolean
         if metaId = "" then return false
         if m.HasKey(m.saved, metaId) then return false
+        if m.sessionType <> "stremio"
+            while m.savedOrder.Count() >= MAX_GUEST_SAVED
+                oldestId = m.savedOrder.Pop()
+                m.saved.Delete(oldestId)
+            end while
+        end if
         m.saved[metaId] = {
             metaId: metaId
             metaType: metaType
@@ -78,6 +110,103 @@ class LibraryStore
             if m.HasKey(m.saved, metaId) then items.Push(m.saved[metaId])
         end for
         return items
+    end function
+
+    ' The saved list as the Library screen presents it: filtered by content type
+    ' and ordered by one of the supported sorts, always a fresh array (the
+    ' internal saved map/order are never rearranged — SortByName/SortByWatched
+    ' only reorder the returned copy). typeFilter is "all", "movie" or "series";
+    ' sort is "recent" (saved order, newest first — the default), "az"/"za"
+    ' (case-insensitive by name) or "watched" (any saved item with a
+    ' continue-watching position first, most recently watched first — the
+    ' positions array is newest-first — then everything else by name).
+    function LibraryView(typeFilter as string, sort as string) as object
+        items = m.SavedItems()
+        if typeFilter <> "all"
+            filtered = []
+            for each item in items
+                metaType = item.metaType
+                if metaType = invalid then metaType = ""
+                if metaType = typeFilter then filtered.Push(item)
+            end for
+            items = filtered
+        end if
+        if sort = "az"
+            m.SortByName(items, false)
+        else if sort = "za"
+            m.SortByName(items, true)
+        else if sort = "watched"
+            m.SortByWatched(items)
+        end if
+        return items
+    end function
+
+    ' Case-insensitive insertion sort of saved records by name, ascending or
+    ' descending. An insertion sort keeps it interpreter-safe, exactly like
+    ' SortByMtimeDesc; roArray.Sort with a function comparator is not guaranteed
+    ' in the brs interpreter. A malformed (invalid/blank) name is coerced to ""
+    ' so the compare cannot throw.
+    sub SortByName(items as object, descending as boolean)
+        for i = 1 to items.Count() - 1
+            temp = items[i]
+            j = i
+            while j > 0
+                left = items[j - 1].name
+                if left = invalid then left = ""
+                right = temp.name
+                if right = invalid then right = ""
+                if descending
+                    if LCase(left) >= LCase(right) then exit while
+                else
+                    if LCase(left) <= LCase(right) then exit while
+                end if
+                items[j] = items[j - 1]
+                j = j - 1
+            end while
+            items[j] = temp
+        end for
+    end sub
+
+    ' Insertion sort that floats items with a continue-watching position to the
+    ' front, most recently watched first (positions is newest-first, so the
+    ' earliest array index is the freshest), then the unwatched by name. Any
+    ' position under a metaId marks it watched — an episode position counts for
+    ' its series.
+    sub SortByWatched(items as object)
+        rank = {}
+        for i = 0 to m.positions.Count() - 1
+            mid = m.positions[i].metaId
+            if mid <> invalid and mid <> "" and not m.HasKey(rank, mid) then rank[mid] = i
+        end for
+        for i = 1 to items.Count() - 1
+            temp = items[i]
+            j = i
+            while j > 0
+                if not m.WatchedBefore(items[j - 1], temp, rank) then exit while
+                items[j] = items[j - 1]
+                j = j - 1
+            end while
+            items[j] = temp
+        end for
+    end sub
+
+    ' true when a should sort after b in the "watched" sort: a is less recently
+    ' watched (higher rank) than b, or equally ranked and names after b. Not
+    ' ranked items all share the cap rank, so unwatched sort by name.
+    function WatchedBefore(a as object, b as object, rank as object) as boolean
+        ra = m.WatchedRank(rank, a.metaId)
+        rb = m.WatchedRank(rank, b.metaId)
+        if ra <> rb then return ra > rb
+        an = a.name
+        if an = invalid then an = ""
+        bn = b.name
+        if bn = invalid then bn = ""
+        return LCase(an) > LCase(bn)
+    end function
+
+    function WatchedRank(rank as object, metaId as string) as integer
+        if metaId <> invalid and metaId <> "" and m.HasKey(rank, metaId) then return rank[metaId]
+        return 1000000000
     end function
 
     ' Record playback progress for a video (a movie metaId, or the
@@ -151,15 +280,341 @@ class LibraryStore
         return false
     end function
 
+    ' Reconcile the store with the account's remote library (from the
+    ' datastoreGet pull). The API is the authority, so the whole in-memory state
+    ' is rebuilt, never merged: continue watching is re-derived and re-ordered,
+    ' the saved map is re-filled, and every item (even non-CW ones) is kept in
+    ' stremioLibrary for the future Library screen. Only the continue-watching
+    ' stack is written to the device (Save gates it); the rest lives for the
+    ' session. Stremio sessions only — a guest store has no library to reconcile
+    ' with, and a stray call must never clobber local guest data.
+    sub SyncFromStremio(items as dynamic)
+        if m.sessionType <> "stremio" then return
+        if items = invalid or Type(items) <> "roArray" then return
+
+        m.stremioLibrary = items
+        cw = []
+        saved = {}
+        savedOrder = []
+        for each item in items
+            parsed = m.ParseLibraryItem(item)
+            if parsed = invalid then continue for
+            if parsed.cw then cw.Push(parsed)
+            if parsed.saved and parsed.metaId <> "" and not m.HasKey(saved, parsed.metaId)
+                saved[parsed.metaId] = {
+                    metaId: parsed.metaId
+                    metaType: parsed.metaType
+                    name: parsed.name
+                    poster: parsed.poster
+                }
+                savedOrder.Push(parsed.metaId)
+            end if
+        end for
+
+        ' Continue watching, newest first. Exactly one resume point survives per
+        ' distinct video OR series (mirroring SetPosition's prune), and the stack
+        ' is capped at MAX_CONTINUE_WATCHING. Tracking seen ids instead of
+        ' deleting as we go is what keeps the NEWEST occurrence of each
+        ' video/series — a delete-then-push pass over a newest-first array would
+        ' leave only the oldest.
+        m.SortByMtimeDesc(cw)
+        positions = []
+        seenVideo = {}
+        seenMeta = {}
+        for each entry in cw
+            if not m.HasKey(seenMeta, entry.metaId) and not m.HasKey(seenVideo, entry.videoId)
+                seenMeta[entry.metaId] = true
+                seenVideo[entry.videoId] = true
+                positions.Push({
+                    videoId: entry.videoId
+                    metaId: entry.metaId
+                    metaType: entry.metaType
+                    season: entry.season
+                    episode: entry.episode
+                    name: entry.name
+                    poster: entry.poster
+                    position: entry.position
+                    duration: entry.duration
+                })
+            end if
+        end for
+        while positions.Count() > MAX_CONTINUE_WATCHING
+            positions.Pop()
+        end while
+        m.positions = positions
+
+        m.saved = saved
+        m.savedOrder = savedOrder
+        print "[rokumio] LibraryStore sync cw=" + m.positions.Count().ToStr() + " saved=" + m.savedOrder.Count().ToStr() + " total=" + m.stremioLibrary.Count().ToStr()
+        m.Save()
+    end sub
+
+    ' The full synced library, kept in memory for the future Library screen.
+    function StremioLibraryItems() as object
+        return m.stremioLibrary
+    end function
+
+    ' Classify one datastoreGet library item and pre-map it into the store's
+    ' shape. An item that cannot be resolved to a video id (or is not a valid
+    ' item at all) comes back invalid so it never becomes a continue-watching
+    ' entry; it still lives in the raw stremioLibrary since that keeps everything
+    ' the API returned.
+    '
+    ' Continue watching: timeOffset > 0 && type != "other" && (!removed || temp).
+    ' Saved: removed == false && temp == false. Position/duration are the raw ms
+    ' values — the player tracks time in milliseconds too, so no conversion.
+    function ParseLibraryItem(item as dynamic) as dynamic
+        if item = invalid or Type(item) <> "roAssociativeArray" then return invalid
+        if item._id = invalid or item._id = "" then return invalid
+        metaId = item._id
+        metaType = item.type
+        if metaType = invalid or metaType = "" then metaType = "movie"
+        name = item.name
+        if name = invalid then name = ""
+        poster = item.poster
+        if poster = invalid then poster = ""
+        removed = item.removed = true
+        temp = item.temp = true
+
+        position = 0
+        duration = 0
+        videoId = metaId
+        state = item.state
+        if state <> invalid and Type(state) = "roAssociativeArray"
+            if state.timeOffset <> invalid then position = state.timeOffset
+            if state.duration <> invalid then duration = state.duration
+            if state.video_id <> invalid and state.video_id <> "" then videoId = state.video_id
+        end if
+
+        season = 0
+        episode = 0
+        parts = videoId.Split(":")
+        if parts.Count() = 3
+            season = parts[1].ToInt()
+            episode = parts[2].ToInt()
+        else if parts.Count() <> 1
+            return invalid
+        end if
+
+        mtime = item._mtime
+        if mtime = invalid then mtime = ""
+        return {
+            cw: position > 0 and metaType <> "other" and (not removed or temp)
+            saved: not removed and not temp
+            metaId: metaId
+            metaType: metaType
+            name: name
+            poster: poster
+            videoId: videoId
+            season: season
+            episode: episode
+            position: position
+            duration: duration
+            mtime: mtime
+        }
+    end function
+
+    ' Newest first by _mtime (ISO timestamps sort lexicographically). An
+    ' insertion sort keeps it interpreter-safe; roArray.Sort's function
+    ' comparator is not guaranteed in the brs interpreter.
+    sub SortByMtimeDesc(entries as object)
+        for i = 1 to entries.Count() - 1
+            temp = entries[i]
+            j = i
+            while j > 0 and entries[j - 1].mtime < temp.mtime
+                entries[j] = entries[j - 1]
+                j = j - 1
+            end while
+            entries[j] = temp
+        end for
+    end sub
+
+    ' Build the full LibraryItem a datastorePut push sends after a position
+    ' update. The account is the source of truth for fields this app does not
+    ' track, so the push clones the freshest cached copy of the item (from the
+    ' last sync) and overwrites only the watch-state fields the player knows —
+    ' video_id, timeOffset, duration, lastWatched — plus _mtime. Untracked
+    ' server fields (timesWatched, the watched bitfield, behaviorHints, the
+    ' removed/temp flags) survive untouched. An item the cache has never seen
+    ' (added on another device between sync and push) falls back to a minimal
+    ' temp entry so the server records the progress without promoting it to the
+    ' permanent library. Guest sessions never write back, so the call is refused
+    ' there too (mirrors SyncFromStremio). `now` is injectable for tests;
+    ' production lets it default and NowIso() stamps it.
+    function BuildWatchStateItem(packet as dynamic, now = "" as string) as dynamic
+        if m.sessionType <> "stremio" then return invalid
+        if packet = invalid then return invalid
+        metaId = packet.metaId
+        if metaId = invalid or metaId = "" then return invalid
+        videoId = packet.videoId
+        if videoId = invalid or videoId = "" then videoId = metaId
+        position = 0
+        if packet.position <> invalid then position = packet.position
+        duration = 0
+        if packet.duration <> invalid then duration = packet.duration
+        metaType = packet.metaType
+        if metaType = invalid or metaType = "" then metaType = "movie"
+        name = ""
+        if packet.name <> invalid then name = packet.name
+        poster = ""
+        if packet.poster <> invalid then poster = packet.poster
+        if now = "" then now = m.NowIso()
+
+        original = invalid
+        for each item in m.stremioLibrary
+            if item <> invalid and item._id = metaId then original = item : exit for
+        end for
+        if original = invalid
+            return {
+                _id: metaId
+                name: name
+                type: metaType
+                poster: poster
+                removed: true
+                temp: true
+                _mtime: now
+                state: {
+                    lastWatched: now
+                    timeOffset: position
+                    duration: duration
+                    video_id: videoId
+                }
+            }
+        end if
+
+        clone = {}
+        for each key in original
+            clone[key] = original[key]
+        end for
+        state = {}
+        oldState = original.state
+        if oldState <> invalid and Type(oldState) = "roAssociativeArray"
+            for each key in oldState
+                state[key] = oldState[key]
+            end for
+        end if
+        state.video_id = videoId
+        state.timeOffset = position
+        state.duration = duration
+        state.lastWatched = now
+        clone.state = state
+        clone._mtime = now
+        return clone
+    end function
+
+    ' Build the full LibraryItem a datastorePut push sends after an add/remove
+    ' toggle. Mirrors BuildWatchStateItem: a stremio-only, cache-read-only
+    ' builder. The push clones the freshest cached copy of the item (from the
+    ' last sync) so untracked server fields survive, or falls back to a minimal
+    ' record when the cache has never seen the title (toggled before the first
+    ' sync landed). The membership flags are the whole story: an add is
+    ' removed:false/temp:false, a remove is removed:true/temp:false — the id
+    ' stays in the account library marked removed, so re-adding later is the
+    ' same item with removed:false. `now` is injectable for tests; production
+    ' lets it default and NowIso() stamps it. The cache is never mutated — the
+    ' next datastoreGet replaces it wholesale.
+    function BuildLibraryChangeItem(metaId as string, metaType as string, name as string, poster as string, added as boolean, now = "" as string) as dynamic
+        if m.sessionType <> "stremio" then return invalid
+        if metaId = "" then return invalid
+        if metaType = invalid or metaType = "" then metaType = "movie"
+        if name = invalid then name = ""
+        if poster = invalid then poster = ""
+        if now = "" then now = m.NowIso()
+
+        original = invalid
+        for each item in m.stremioLibrary
+            if item <> invalid and item._id = metaId then original = item : exit for
+        end for
+        if original = invalid
+            return {
+                _id: metaId
+                name: name
+                type: metaType
+                poster: poster
+                removed: not added
+                temp: false
+                _mtime: now
+            }
+        end if
+
+        clone = {}
+        for each key in original
+            clone[key] = original[key]
+        end for
+        clone.removed = not added
+        clone.temp = false
+        clone._mtime = now
+        return clone
+    end function
+
+    ' ISO-8601 UTC timestamp for _mtime/lastWatched, via roDateTime.ToISOString
+    ' (no manual month/day assembly, so no 0-indexed month gotcha). Returns ""
+    ' when the platform cannot produce one.
+    function NowIso() as string
+        try
+            dt = CreateObject("roDateTime")
+            if dt = invalid then return ""
+            iso = dt.ToISOString()
+            if iso = invalid then return ""
+            return iso
+        catch e
+            return ""
+        end try
+    end function
+
+    ' The player publishes each position update as a watch-state packet here
+    ' (memory-only) as well as through its own field, so MainScene can still read
+    ' the last packet after the player node is torn down — its async field
+    ' observer races the pop that releases the component (and the video node it
+    ' holds). Reading from the store has no node-lifetime dependency.
+    '
+    ' Note: the getter is LatestWatchStatePacket, NOT LatestWatchState —
+    ' BrightScript member names are case-insensitive, so a method named
+    ' LatestWatchState would collide with the m.latestWatchState field it reads
+    ' (a runtime crash, same class of bug as the StremioLibrary() rename).
+    sub RecordWatchState(packet as dynamic)
+        if packet = invalid then return
+        m.latestWatchState = packet
+    end sub
+
+    function LatestWatchStatePacket() as dynamic
+        return m.latestWatchState
+    end function
+
+    ' Guest/stremio sessions persist under different keys so one session can
+    ' never surface the other's saved content or continue-watching positions.
+    function RegistryKey() as string
+        if m.sessionType = "stremio" then return "stremio_library"
+        return "library"
+    end function
+
+    ' Repoint the store at another session's data. A same-session switch is a
+    ' no-op; everything is reloaded fresh so the in-memory state always mirrors
+    ' the active session's persisted key.
+    sub SwitchSession(sessionType as string)
+        if sessionType <> "guest" and sessionType <> "stremio" then return
+        if m.sessionType = sessionType then return
+        m.sessionType = sessionType
+        m.saved = {}
+        m.savedOrder = []
+        m.positions = []
+        m.Load()
+    end sub
+
     sub Save()
         if m.registry = invalid then return
-        m.registry.Write("library", FormatJson({ saved: m.saved, savedOrder: m.savedOrder, continueWatching: m.positions }))
+        data = { continueWatching: m.positions }
+        if m.sessionType <> "stremio"
+            data.saved = m.saved
+            data.savedOrder = m.savedOrder
+        end if
+        m.registry.Write(m.RegistryKey(), FormatJson(data))
         m.registry.Flush()
     end sub
 
     sub Load()
         if m.registry = invalid then return
-        raw = m.registry.Read("library")
+        raw = m.registry.Read(m.RegistryKey())
         if raw = "" then return
         parsed = invalid
         try
@@ -168,8 +623,10 @@ class LibraryStore
             return
         end try
         if parsed = invalid then return
-        if parsed.saved <> invalid and Type(parsed.saved) = "roAssociativeArray" then m.saved = parsed.saved
-        if parsed.savedOrder <> invalid and Type(parsed.savedOrder) = "roArray" then m.savedOrder = parsed.savedOrder
+        if m.sessionType <> "stremio"
+            if parsed.saved <> invalid and Type(parsed.saved) = "roAssociativeArray" then m.saved = parsed.saved
+            if parsed.savedOrder <> invalid and Type(parsed.savedOrder) = "roArray" then m.savedOrder = parsed.savedOrder
+        end if
         if parsed.continueWatching <> invalid and Type(parsed.continueWatching) = "roArray" then m.positions = parsed.continueWatching
     end sub
 end class

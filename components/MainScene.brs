@@ -11,10 +11,25 @@ sub init()
     m.homeScreen = m.top.FindNode("homeScreen")
     m.homeScreen.ObserveField("pushRequest", "onHomeAction")
 
+    ' AuthScreen publishes the first-run choice (continue as guest, or log in
+    ' with Stremio). The Scene signs the session in, points the session-aware
+    ' stores at the right data and pops the gate — or starts the link-code flow.
+    m.authScreen = m.top.FindNode("authScreen")
+    m.authScreen.ObserveField("pushRequest", "onAuthAction")
+
+    ' LinkStremioScreen publishes the pairing outcome: completeLogin (authKey +
+    ' user) or cancelLogin (user backed out). The Scene owns the LinkStremioTask
+    ' lifecycle; LinkStremioScreen only observes it and reports.
+    m.linkStremioScreen = m.top.FindNode("linkStremioScreen")
+    m.linkStremioScreen.ObserveField("pushRequest", "onLinkCodeAction")
+
     ' Details pushes its own actions (episode selection, movie Play) up through
     ' the same one-action channel Home uses.
     m.detailsScreen = m.top.FindNode("detailsScreen")
     m.detailsScreen.ObserveField("pushRequest", "onDetailsAction")
+    ' Add/remove toggles from Details report through libraryChange; see
+    ' onLibraryChange for the write-back pipeline.
+    m.detailsScreen.ObserveField("libraryChange", "onLibraryChange")
 
     ' EpisodesScreen (the series episode browser) reports episode selections
     ' through the same one-action channel.
@@ -30,14 +45,25 @@ sub init()
 
     ' SettingsScreen, AddonsScreen and SearchScreen are content-focused (no
     ' pushes of their own; Search pushes Details like the others). SearchScreen
-    ' reports its pushes through its own channel.
+    ' reports its pushes through its own channel. The exception is Settings'
+    ' session rows: a guest can start the Stremio login from here, and a stremio
+    ' user can log out — both are auth flows the Scene owns, so Settings reports
+    ' them through its own channel too.
     m.settingsScreen = m.top.FindNode("settingsScreen")
+    m.settingsScreen.ObserveField("pushRequest", "onSettingsAction")
     m.addonsScreen = m.top.FindNode("addonsScreen")
     m.searchScreen = m.top.FindNode("searchScreen")
     m.searchScreen.ObserveField("pushRequest", "onSearchAction")
     m.discoverScreen = m.top.FindNode("discoverScreen")
     m.discoverScreen.ObserveField("pushRequest", "onDiscoverAction")
+    m.libraryScreen = m.top.FindNode("libraryScreen")
+    m.libraryScreen.ObserveField("pushRequest", "onLibraryAction")
     m.uiRoot = m.top.FindNode("uiRoot")
+    ' Settings can start the link-code flow; logout reuses the pairing worker.
+    ' Both flags are session-flow state with no store counterpart.
+    m.loginFromSettings = false
+    m.logoutTask = invalid
+    m.pendingLogout = false
 
     ' Bottom-of-stack Back opens the native exit dialog through the Scene's dialog
     ' field (a StandardDialog) rather than using the ScreenStack.
@@ -50,21 +76,27 @@ sub init()
     m.supportDialog.ObserveFieldScoped("wasClosed", "onSupportDialogClosed")
 
     ' Stores are constructed once at the Scene and handed to screens later by
-    ' reference. SettingsStore and AddonsStore Load() their persisted state on
-    ' construction.
+    ' reference. SettingsStore, AddonsStore and LibraryStore Load() their
+    ' persisted state on construction; the add-on/library stores are built for
+    ' the current session (guest or stremio) so every screen reads the right
+    ' session's data from the first frame.
     http = Transport()
+    m.authStore = AuthStore(CreateObject("roRegistrySection", "auth"))
     m.settingsStore = SettingsStore(CreateObject("roRegistrySection", "settings"))
+    sessionType = EffectiveSessionType()
     m.stores = {
         transport: http
         settings: m.settingsStore
-        auth: AuthStore()
-        addons: AddonsStore(http, CreateObject("roRegistrySection", "addons"))
+        auth: m.authStore
+        addons: AddonsStore(http, CreateObject("roRegistrySection", "addons"), sessionType)
         catalog: CatalogStore(http)
         episodes: EpisodesStore(http)
-        library: LibraryStore(CreateObject("roRegistrySection", "library"))
+        library: LibraryStore(CreateObject("roRegistrySection", "library"), sessionType)
         playback: PlaybackStore(http)
     }
     m.homeScreen.callFunc("SetStores", m.stores)
+    m.authScreen.callFunc("SetStores", m.stores)
+    m.linkStremioScreen.callFunc("SetStores", m.stores)
     m.detailsScreen.callFunc("SetStores", m.stores)
     m.episodesScreen.callFunc("SetStores", m.stores)
     m.streamsScreen.callFunc("SetStores", m.stores)
@@ -72,6 +104,7 @@ sub init()
     m.addonsScreen.callFunc("SetStores", m.stores)
     m.searchScreen.callFunc("SetStores", m.stores)
     m.discoverScreen.callFunc("SetStores", m.stores)
+    m.libraryScreen.callFunc("SetStores", m.stores)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -115,6 +148,28 @@ sub onDiscoverAction()
     m.stack.push(request.screen, request.params)
 end sub
 
+' LibraryScreen's action channel; same one-action routing.
+sub onLibraryAction()
+    request = m.libraryScreen.pushRequest
+    if request = invalid or request.screen = invalid then return
+    m.stack.push(request.screen, request.params)
+end sub
+
+' SettingsScreen's session rows route here: the linked login is the same
+' link-code flow as the AuthScreen start, while logout goes through a confirm
+' dialog then the teardown in DoLogout. No business logic — the Scene stays a
+' thin orchestrator.
+sub onSettingsAction()
+    request = m.settingsScreen.pushRequest
+    if request = invalid or request.action = invalid then return
+    if request.action = "login"
+        m.loginFromSettings = true
+        StartLinkCodeFlow()
+    else if request.action = "logout"
+        ShowLogoutConfirm()
+    end if
+end sub
+
 ' StreamsScreen's action channel; same one-action routing. The player is special:
 ' it is created here, per play, instead of being a declared child — a component
 ' that survives pop keeps its Video node (and the audio it is decoding) alive on
@@ -135,6 +190,8 @@ sub onStreamsAction()
     m.uiRoot.AppendChild(player)
     player.callFunc("SetStores", m.stores)
     player.ObserveField("closeRequest", "onPlayerClose")
+    player.ObserveField("watchStateUpdate", "onWatchStateUpdate")
+    m.activePlayer = player
     m.stack.pushNode(player, request.params)
 end sub
 
@@ -146,6 +203,142 @@ sub onPlayerClose()
     if m.stack.top() <> invalid and m.stack.top().id = "playerScreen"
         m.stack.pop()
     end if
+    ' Drop the node reference so SceneGraph can destroy the whole component (and
+    ' release the platform media player) — the last watch-state packet is safe
+    ' because the player also records it in the library store, which lives on.
+    m.activePlayer = invalid
+end sub
+
+' The player published a position update (pause or leave) through
+' watchStateUpdate. MainScene owns the write-back pipeline: gate on a stremio
+' session (guest never touches the API), drop a repeat of the last accepted
+' update (same video, same position — nothing new), and coalesce the rest so at
+' most one WatchStatePushTask runs at a time. The packet is read from the
+' library store, not the player node, so the async callback can land even after
+' onPlayerClose released the component.
+sub onWatchStateUpdate()
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.stores.auth.GetSession() <> "stremio" then return
+    packet = m.stores.library.LatestWatchStatePacket()
+    if packet = invalid then return
+    videoId = packet.videoId
+    if videoId = invalid or videoId = "" then return
+    if packet.position = invalid then return
+    key = videoId + "|" + packet.position.ToStr()
+    if m.lastPacketKey = key then return
+    m.lastPacketKey = key
+    m.pendingWatchState = packet
+    PumpWatchStatePush()
+end sub
+
+' Start one push for the pending state if none is in flight. The pending slot is
+' consumed into the worker; a state that arrives while this worker runs lands
+' back in the slot and is pumped by onWatchStatePushResult. The LibraryItem to
+' send is built by the store (the merge into the freshest cached copy), so no
+' merge logic lives here.
+sub PumpWatchStatePush()
+    if m.pushingWatchState then return
+    if m.pendingWatchState = invalid then return
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    packet = m.pendingWatchState
+    item = m.stores.library.BuildWatchStateItem(packet)
+    if item = invalid then return
+    m.pendingWatchState = invalid
+
+    task = CreateObject("roSGNode", "WatchStatePushTask")
+    task.id = "watchStatePushTask"
+    m.top.AppendChild(task)
+    task.authKey = m.stores.auth.GetAuthKey()
+    task.item = item
+    task.observeField("result", "onWatchStatePushResult")
+    m.watchStatePushTask = task
+    m.inFlightWatchState = packet
+    m.pushingWatchState = true
+    task.control = "RUN"
+end sub
+
+' One push settled. Free the worker and pump any state that arrived meanwhile.
+' The latest update's videoId+position was already suppressed at accept time, so
+' no record is needed here. Failures are non-fatal: the local continue-watching
+' cache stays authoritative and the next position save retries naturally.
+sub onWatchStatePushResult()
+    task = m.watchStatePushTask
+    m.watchStatePushTask = invalid
+    m.pushingWatchState = false
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result <> invalid and result.ok
+        print "[rokumio] watch state pushed videoId='" + m.inFlightWatchState.videoId + "'"
+    else
+        print "[rokumio] watch state push failed"
+    end if
+    m.inFlightWatchState = invalid
+    PumpWatchStatePush()
+end sub
+
+' The Details screen published an add/remove toggle through libraryChange.
+' MainScene owns the write-back pipeline, exactly like the watch-state one:
+' gate on a stremio session (guest never touches the API), then coalesce so at
+' most one LibraryWritePushTask runs at a time. The change is read from the
+' screen's field; each toggle flips `added`, so no repeat suppression is needed.
+sub onLibraryChange()
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.stores.auth.GetSession() <> "stremio" then return
+    change = m.detailsScreen.libraryChange
+    if change = invalid then return
+    m.pendingLibraryChange = change
+    PumpLibraryWritePush()
+end sub
+
+' Start one push for the pending change if none is in flight. The pending slot is
+' consumed into the worker; a change that arrives while this worker runs lands
+' back in the slot and is pumped by onLibraryWritePushResult. The LibraryItem to
+' send is built by the store (the merge into the freshest cached copy), so no
+' merge logic lives here.
+sub PumpLibraryWritePush()
+    if m.pushingLibraryChange then return
+    if m.pendingLibraryChange = invalid then return
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    change = m.pendingLibraryChange
+    item = m.stores.library.BuildLibraryChangeItem(change.metaId, change.metaType, change.name, change.poster, change.added)
+    if item = invalid then return
+    m.pendingLibraryChange = invalid
+
+    task = CreateObject("roSGNode", "LibraryWritePushTask")
+    task.id = "libraryWritePushTask"
+    m.top.AppendChild(task)
+    task.authKey = m.stores.auth.GetAuthKey()
+    task.item = item
+    task.observeField("result", "onLibraryWritePushResult")
+    m.libraryWritePushTask = task
+    m.inFlightLibraryChange = change
+    m.pushingLibraryChange = true
+    task.control = "RUN"
+end sub
+
+' One push settled. Free the worker and pump any change that arrived meanwhile.
+' Failures are non-fatal: the local saved map keeps showing the change, and the
+' next library re-sync re-adopts the account's collection (which never received
+' a failed push).
+sub onLibraryWritePushResult()
+    task = m.libraryWritePushTask
+    m.libraryWritePushTask = invalid
+    m.pushingLibraryChange = false
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result <> invalid and result.ok
+        print "[rokumio] library change pushed metaId='" + m.inFlightLibraryChange.metaId + "' added=" + m.inFlightLibraryChange.added.ToStr()
+    else
+        print "[rokumio] library change push failed"
+    end if
+    m.inFlightLibraryChange = invalid
+    PumpLibraryWritePush()
 end sub
 
 ' The exit dialog signals dismissal through wasClosed (Back, Home, or its own
@@ -188,9 +381,313 @@ end sub
 ' work here: Scene.visible is born true and never reassigned, so observing it
 ' never fires. Start() is deterministic, and pushing after Show() guarantees the
 ' tree is renderable when focus is handed out. The stack always rests on a
-' bottom home screen.
+' bottom home screen; a not-logged-in launch parks the auth gate on top, so
+' "Continue as guest" simply pops it to reveal the guest home.
 sub Start()
     m.stack.push("homeScreen")
+    if not m.stores.auth.IsLoggedIn()
+        m.stack.push("authScreen")
+    else if EffectiveSessionType() = "stremio"
+        ' Relaunched stremio session: addons are already in the registry key
+        ' from the login that synced them, but the library always re-syncs from
+        ' the account in the background — the persisted Continue Watching stack
+        ' renders first, then freshens when the sync lands.
+        StartLibrarySync()
+    end if
+end sub
+
+' The store session derives from the persisted auth session: guest when logged
+' out or in a guest session, stremio for an account session. Never blank — the
+' session-aware stores always act on a concrete session's data.
+function EffectiveSessionType() as string
+    if m.authStore <> invalid and m.authStore.GetSession() = "stremio" then return "stremio"
+    return "guest"
+end function
+
+' The AuthScreen published its first-run choice.
+sub onAuthAction()
+    request = m.authScreen.pushRequest
+    if request = invalid then return
+    if request.action = "continueGuest"
+        if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginGuest()
+        if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
+        if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
+        if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
+            m.stack.pop()
+        end if
+    else if request.action = "startLogin"
+        StartLinkCodeFlow()
+    end if
+end sub
+
+' Build the pairing worker, hand it to the LinkStremioScreen and start it. The
+' task is created dynamically (like the player) so it lives exactly as long as
+' the flow; teardown on success, Back or failure is handled in
+' CleanupStremioPairTask. Publishes the fresh node through taskNode so the
+' screen can (re)bind, resetting its spinner and countdown.
+function NewPairingTask() as object
+    task = CreateObject("roSGNode", "LinkStremioTask")
+    task.id = "linkStremioTask"
+    m.top.AppendChild(task)
+    m.linkStremioTask = task
+    m.linkStremioScreen.taskNode = task
+    task.control = "RUN"
+    return task
+end function
+
+' Start the link-code pairing: spawn the worker task, then push the pairing
+' screen on top of whatever presented it (AuthScreen or Settings).
+sub StartLinkCodeFlow()
+    NewPairingTask()
+    m.stack.push("linkStremioScreen")
+end sub
+
+' Request a new code while the pairing screen is already up: clear the old worker
+' (freeing its thread and observer) and swap in a fresh one. No stack push — the
+' screen stays put and rebinds through the taskNode field change.
+sub RefreshLinkCode()
+    CleanupStremioPairTask()
+    NewPairingTask()
+end sub
+
+' The LinkStremioScreen published its outcome. completeLogin carries the paired
+' authKey + user: persist the stremio session, repoint the session-aware stores
+' and drop back to Home, cleaning up the flow. cancelLogin just washes out.
+sub onLinkCodeAction()
+    request = m.linkStremioScreen.pushRequest
+    if request = invalid then return
+    if request.action = "refreshCode"
+        ' The screen stays up; only the worker is replaced.
+        RefreshLinkCode()
+        return
+    end if
+    if request.action = "completeLogin"
+        if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginStremio(request.authKey, request.user)
+        if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("stremio")
+        if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("stremio")
+        StartAddonSync()
+        StartLibrarySync()
+        if m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
+            m.stack.pop()
+        end if
+        if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
+            m.stack.pop()
+        end if
+        if m.loginFromSettings and m.stack.top() <> invalid and m.stack.top().id = "settingsScreen"
+            m.stack.pop()
+        end if
+        m.loginFromSettings = false
+    end if
+    CleanupStremioPairTask()
+    if request.action = "cancelLogin" and m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
+        m.stack.pop()
+    end if
+    if request.action = "cancelLogin" then m.loginFromSettings = false
+end sub
+
+' Reap the task: stop the worker, drop references and remove it from the tree.
+' The STOP signal is the real cancel — the read-poll loop watches control and
+' exits mid-sleep — because removing a running Task node does NOT kill its
+' worker thread (a removed-but-running puller keeps polling, which showed up as
+' the old link code being read alongside the new one after a refresh). Keep the
+' removal too so the node is freed once the thread exits.
+sub CleanupStremioPairTask()
+    task = m.linkStremioTask
+    m.linkStremioTask = invalid
+    if task = invalid then return
+    task.control = "STOP"
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+end sub
+
+' Confirm before leaving the account: the confirm dialog is a StandardMessageDialog
+' through the Scene's dialog field, mirroring the deep-link import dialog's close
+' path (buttons only set buttonSelected; the dialog's own close field funnels into
+' wasClosed so the Scene clears the slot).
+sub ShowLogoutConfirm()
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.id = "logoutConfirmDialog"
+    dialog.title = "Log out?"
+    dialog.message = ["This signs the Stremio account out of this device. Your saved items and continue watching stay here; the library re-syncs if you log back in."]
+    dialog.buttons = ["Log out", "Cancel"]
+    dialog.observeField("buttonSelected", "onLogoutChoice")
+    dialog.observeField("wasClosed", "onLogoutDialogClosed")
+    m.top.dialog = dialog
+end sub
+
+sub onLogoutChoice()
+    if m.top.dialog <> invalid and m.top.dialog.id = "logoutConfirmDialog"
+        ' Record the intent and let the dialog dismiss first: acting while the
+        ' dialog still owns scene.dialog loses the focus race — a screen pushed
+        ' now would render unfocused (the SceneGraph restores focus to the
+        ' pre-dialog node when the slot finally clears). DoLogout runs in
+        ' onLogoutDialogClosed, after the dialog is gone.
+        m.pendingLogout = m.top.dialog.buttonSelected = 0
+        m.top.dialog.close = true
+    end if
+end sub
+
+' The logout dialog dismissed (Log out, Cancel, Back or Home). Clear the Scene's
+' dialog slot, then act: a confirmed logout runs the teardown now that no dialog
+' competes for focus (DoLogout's pushes land focused); otherwise focus returns to
+' Settings.
+sub onLogoutDialogClosed()
+    if m.top.dialog <> invalid and m.top.dialog.id = "logoutConfirmDialog"
+        m.top.dialog = invalid
+    end if
+    wasPending = m.pendingLogout
+    m.pendingLogout = false
+    if wasPending
+        DoLogout()
+    else if m.stack.top() <> invalid and m.stack.top().id = "settingsScreen"
+        m.settingsScreen.SetFocus(true)
+    end if
+end sub
+
+' The actual logout, on confirm: flush the account key at the API (best-effort,
+' never gating), clear the local session, repoint the session-aware stores at the
+' guest data, then walk the stack back to Home and park the auth gate on top so
+' the user can pick their next session. The server call is fire-and-forget — the
+' user is logged out here regardless of its outcome.
+sub DoLogout()
+    print "[rokumio] DoLogout"
+    if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetAuthKey() <> ""
+        task = CreateObject("roSGNode", "LogoutTask")
+        task.id = "logoutTask"
+        m.top.AppendChild(task)
+        task.authKey = m.stores.auth.GetAuthKey()
+        task.observeField("result", "onLogoutResult")
+        m.logoutTask = task
+        task.control = "RUN"
+    end if
+
+    if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.Logout()
+    if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
+    if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
+
+    ' Pop all the way down to Home — every screen gets its normal OnExit/BlurFocus
+    ' teardown, so transient tasks cancel and no stale focus survives.
+    while m.stack.count() > 1
+        m.stack.pop()
+    end while
+    if m.homeScreen <> invalid then m.homeScreen.callFunc("RebuildRows")
+    m.stack.push("authScreen")
+end sub
+
+' The server logout settled. Log the outcome and reap the worker; the local
+' session is already cleared, nothing to gate on.
+sub onLogoutResult()
+    task = m.logoutTask
+    m.logoutTask = invalid
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    if result <> invalid and result.ok
+        print "[rokumio] account logged out at api.strem.io"
+    else
+        error = ""
+        if result <> invalid and result.error <> invalid then error = result.error
+        print "[rokumio] server logout failed: " + error
+    end if
+end sub
+
+' Kick the account addon sync for a freshly-logged-in stremio session. The API
+' answers with the full collection incl. each manifest, so no per-addon fetches
+' follow — the task returns the descriptors and MainScene adopts them through
+' AddonsStore (the single writer for installed records). Created per sync like
+' the pairing task; a relaunched stremio session skips this (its addons are
+' already in the stremio_addons registry key from the login that synced them).
+sub StartAddonSync()
+    task = CreateObject("roSGNode", "AddonSyncTask")
+    task.id = "addonSyncTask"
+    m.top.AppendChild(task)
+    m.addonSyncTask = task
+    if m.stores <> invalid and m.stores.auth <> invalid
+        task.authKey = m.stores.auth.GetAuthKey()
+    end if
+    task.observeField("result", "onAddonSyncResult")
+    task.control = "RUN"
+end sub
+
+' One sync settled. Register every descriptor through AddonsStore (duplicates
+' are skipped, so re-syncing is idempotent) and rebuild Home's rows from the
+' new catalog set. Failures are non-fatal — whatever synced registers, the rest
+' is logged and the session proceeds (an empty collection is a legit outcome).
+sub onAddonSyncResult()
+    task = m.addonSyncTask
+    m.addonSyncTask = invalid
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    added = 0
+    skipped = 0
+    failed = 0
+    if result <> invalid and result.ok and result.descriptors <> invalid
+        for each descriptor in result.descriptors
+            if m.stores <> invalid and m.stores.addons <> invalid
+                outcome = m.stores.addons.InstallFromDescriptor(descriptor.transportUrl, descriptor.manifest)
+                if outcome.ok
+                    added = added + 1
+                else if outcome.error = "addon already installed"
+                    skipped = skipped + 1
+                else
+                    failed = failed + 1
+                    print "[rokumio] addon sync dropped '" + outcome.id + "': " + outcome.error
+                end if
+            end if
+        end for
+    end if
+    print "[rokumio] addon sync added=" + added.ToStr() + " skipped=" + skipped.ToStr() + " failed=" + failed.ToStr()
+    if added > 0 and m.homeScreen <> invalid
+        m.homeScreen.callFunc("RebuildRows")
+    end if
+end sub
+
+' Kick the account library sync. Runs on every stremio launch — a fresh login
+' and a relaunched session alike — because only the continue-watching stack
+' persists, so the full library must be re-pulled from the account in the
+' background each time. The task returns the raw library item array; MainScene
+' passes it to LibraryStore.SyncFromStremio, the single mapping authority.
+sub StartLibrarySync()
+    task = CreateObject("roSGNode", "LibrarySyncTask")
+    task.id = "librarySyncTask"
+    m.top.AppendChild(task)
+    m.librarySyncTask = task
+    if m.stores <> invalid and m.stores.auth <> invalid
+        task.authKey = m.stores.auth.GetAuthKey()
+    end if
+    task.observeField("result", "onLibrarySyncResult")
+    task.control = "RUN"
+end sub
+
+' One library sync settled. Reconcile the store with the remote collection and
+' update Home's Continue Watching row in place — the persisted cache (if any)
+' keeps rendering until then. Failures are non-fatal: on a login the CW row
+' just stays empty, on a relaunch the persisted cache keeps rendering.
+sub onLibrarySyncResult()
+    task = m.librarySyncTask
+    m.librarySyncTask = invalid
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result = invalid or not result.ok or result.items = invalid
+        print "[rokumio] library sync failed"
+        return
+    end if
+    if m.stores = invalid or m.stores.library = invalid then return
+    m.stores.library.SyncFromStremio(result.items)
+    if m.homeScreen <> invalid then m.homeScreen.callFunc("RefreshContinueWatching")
+    ' The relaunched-session case can land the sync while the Library screen is
+    ' already up: poke its grid so the freshly synced saved set appears without
+    ' a re-entry (guest sessions never reach this path). Same idempotent rebuild
+    ' as the LibraryScreen's own OnEnter.
+    if m.stack.top() <> invalid and m.stack.top().id = "libraryScreen" and m.libraryScreen <> invalid
+        m.libraryScreen.callFunc("RefreshRows")
+    end if
 end sub
 
 ' An ECP deep link (see reference/ecp-integration.md) arrived with the launch

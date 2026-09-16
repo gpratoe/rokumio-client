@@ -15,6 +15,7 @@
         <function name="OnBackPressed" />
         <function name="BlurFocus" />
         <field id="closeRequest" type="assocarray" alwaysNotify="true" />
+        <field id="watchStateUpdate" type="assocarray" alwaysNotify="true" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/source/stores/SubtitlesStore.bs" />

@@ -4,7 +4,8 @@
 ' row (Play, and an "add to library" toggle backed by LibraryStore) and push a
 ' stream selection on Play. Series render the same hero, then a chip row: a
 ' Resume chip for the saved position (falling back to "Play S1E1" when nothing
-' is saved) and an "Episodes" chip that pushes the dedicated EpisodesScreen.
+' is saved), the same "add to library" toggle, and an "Episodes" chip that
+' pushes the dedicated EpisodesScreen.
 '
 ' One shared chips RowList serves both kinds — the chips differ, the plumbing
 ' doesn't. Each chip ContentNode maps to a stored action id, and a single
@@ -185,7 +186,8 @@ end function
 
 ' Series chips: Resume for the saved spot when there is one, otherwise a "Play
 ' S1E1" stand-in (the episode list itself loads on EpisodesScreen; the optional
-' hero refresh above only tops up missing catalog fields), then "Episodes".
+' hero refresh above only tops up missing catalog fields), then the same
+' "add to library" toggle the movie row carries, then "Episodes".
 sub ShowSeries()
     actions = []
     if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
@@ -194,6 +196,7 @@ sub ShowSeries()
         actions.Push({ action: "play", title: "Play S1E1" })
     end if
     actions.Push({ action: "episodes", title: "Episodes" })
+    actions.Push({ action: "library", title: LibraryActionLabel() })
     ShowChips(actions)
 end sub
 
@@ -320,10 +323,12 @@ end function
 
 sub ToggleLibrary()
     if m.stores = invalid then return
+    added = false
     if m.stores.library.IsSaved(m.meta.id)
         m.stores.library.RemoveSaved(m.meta.id)
     else
         m.stores.library.AddSaved(m.meta.id, m.meta.type, m.meta.name, m.meta.poster)
+        added = true
     end if
     label = LibraryActionLabel()
     for i = 0 to m.chips.Count() - 1
@@ -335,6 +340,20 @@ sub ToggleLibrary()
             exit for
         end if
     end for
+    ' Publish the write-back packet. An add/remove only affects the account in a
+    ' stremio session — a guest's library is local-only, so it stays silent
+    ' (MainScene re-gates on the session; the screen keeps the payload
+    ' stremio-only). The change appears in the local LibraryStore immediately
+    ' either way, so the Library screen reflects it before the account does.
+    if m.stores.library.sessionType = "stremio"
+        m.top.libraryChange = {
+            metaId: m.meta.id
+            metaType: m.meta.type
+            name: m.meta.name
+            poster: m.meta.poster
+            added: added
+        }
+    end if
 end sub
 
 function LibraryActionLabel() as string

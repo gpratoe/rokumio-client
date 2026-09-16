@@ -43,9 +43,24 @@ end function
 sub BlurFocus()
 end sub
 
-' Rebuild the row list from the live SettingsStore values.
+' Rebuild the row list from the live SettingsStore values. The session row is
+' first so it is the handiest action: a guest is offered the Stremio login, a
+' stremio user their email + logout. The rest follow in fixed order.
 sub BuildRows()
     m.rows = []
+    if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetSession() = "stremio"
+        m.rows.Push({
+            action: "logout"
+            title: "Log out"
+            value: SessionValue()
+        })
+    else
+        m.rows.Push({
+            action: "login"
+            title: "Log in with Stremio"
+            value: "Sign in to sync addons and library"
+        })
+    end if
     m.rows.Push({
         action: "server"
         title: "Streaming server"
@@ -73,6 +88,17 @@ sub BuildRows()
     m.list.jumpToRowItem = [0, 0]
 end sub
 
+' The signed-in-account label for the logout row. Prefer the profile email;
+' fall back to a neutral label when the fetch that fills it is still running or
+' the profile is otherwise absent.
+function SessionValue() as string
+    if m.stores <> invalid and m.stores.auth <> invalid
+        user = m.stores.auth.GetUser()
+        if user <> invalid and user.email <> invalid and user.email <> "" then return user.email
+    end if
+    return "Signed in with Stremio"
+end function
+
 function ServerValue() as string
     if m.stores = invalid or m.stores.settings = invalid then return "—"
     address = m.stores.settings.GetServerAddress()
@@ -91,13 +117,28 @@ sub onRowSelected()
     index = data[0]
     if index < 0 or index >= m.rows.Count() then return
     action = m.rows[index].action
-    if action = "server"
+    if action = "login"
+        SignIn()
+    else if action = "logout"
+        SignOut()
+    else if action = "server"
         EditServer()
     else if action = "language"
         CycleLanguage()
     else if action = "testServer"
         TestServer()
     end if
+end sub
+
+' The session actions hand off to the Scene, the only place that owns auth.
+' Publishing through pushRequest keeps this screen a pure reporter — the Scene
+' runs the link-code flow or the logout confirm/teardown.
+sub SignIn()
+    m.top.pushRequest = { action: "login" }
+end sub
+
+sub SignOut()
+    m.top.pushRequest = { action: "logout" }
 end sub
 
 ' Open the streaming server editor. Empty input clears the address (clearing is
