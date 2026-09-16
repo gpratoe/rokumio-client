@@ -56,7 +56,7 @@ sub StartCatalogLoad()
     end if
     addons = []
     for each addon in m.stores.addons.GetAll()
-        addons.Push({ address: addon.address, catalogs: addon.catalogs })
+        addons.Push({ address: addon.address, catalogs: addon.catalogs, name: addon.name })
     end for
     if addons.Count() = 0 then
         m.catalogRowsBuilt = true
@@ -110,11 +110,14 @@ end sub
 
 ' Rewrite row titles so duplicated catalog names carry their type suffix; only
 ' interesting once a later row turns a previously-unique name into a duplicate.
+' A malformed (invalid/blank) title is coerced to "" so the histogram lookup
+' cannot throw — the grid degrades to a blank label instead of crashing.
 sub ResyncRowLabels()
     if m.catalog.content = invalid then return
     counts = DuplicateCounts()
     for r = 0 to m.gridRows.Count() - 1
         label = m.gridRows[r].title
+        if label = invalid then label = ""
         if counts[label] > 1 then label = label + " " + TypeLabel(m.gridRows[r].metaType)
         node = m.catalog.content.GetChild(r)
         if node <> invalid and node.title <> label then node.title = label
@@ -178,13 +181,17 @@ function RebuildRows() as void
 end function
 
 ' Rebuild the title histogram across the current grid rows; used to decide the
-' duplicated-name type suffix.
+' duplicated-name type suffix. An associative array cannot be keyed by invalid,
+' so malformed titles are coerced to "" before the lookup (a row without a
+' usable title then just groups with the other blank-label rows).
 function DuplicateCounts() as object
     counts = {}
     for each row in m.gridRows
-        count = counts[row.title]
+        title = row.title
+        if title = invalid then title = ""
+        count = counts[title]
         if count = invalid then count = 0
-        counts[row.title] = count + 1
+        counts[title] = count + 1
     end for
     return counts
 end function
@@ -197,6 +204,7 @@ end function
 function MakeRowNode(row as object, counts = invalid as object) as object
     node = CreateObject("roSGNode", "ContentNode")
     label = row.title
+    if label = invalid then label = ""
     if counts <> invalid and counts[label] > 1 then label = label + " " + TypeLabel(row.metaType)
     node.title = label
     for each meta in row.metas

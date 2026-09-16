@@ -35,7 +35,7 @@ sub load()
                             rows.Push({
                                 index: index
                                 addonAddress: addon.address
-                                title: descriptor.name
+                                title: CatalogTitle(descriptor, addon)
                                 metaType: descriptor.type
                                 metas: response.metas
                             })
@@ -73,4 +73,24 @@ function CatalogBrowsable(catalog as object) as boolean
         end for
     end if
     return true
+end function
+
+' A row title that is always a non-empty string. Real-world manifests (Stremio's
+' own Channels addon included) ship catalogs with only type/id and no name, and
+' an invalid title crashes the Home title pipeline (an associative array cannot
+' be keyed by invalid). Fall back: catalog name -> catalog id -> addon name ->
+' "Unknown". The addon packet carries name so a nameless catalog still gets a
+' recognizable label.
+function CatalogTitle(catalog as object, addon as object) as string
+    title = catalog.name
+    if title = invalid or title.Trim() = ""
+        title = catalog.id
+    end if
+    if title = invalid or title.Trim() = ""
+        title = addon.name
+    end if
+    if title = invalid or title.Trim() = ""
+        title = "Unknown"
+    end if
+    return title
 end function
