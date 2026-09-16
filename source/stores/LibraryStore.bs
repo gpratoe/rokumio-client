@@ -112,6 +112,103 @@ class LibraryStore
         return items
     end function
 
+    ' The saved list as the Library screen presents it: filtered by content type
+    ' and ordered by one of the supported sorts, always a fresh array (the
+    ' internal saved map/order are never rearranged — SortByName/SortByWatched
+    ' only reorder the returned copy). typeFilter is "all", "movie" or "series";
+    ' sort is "recent" (saved order, newest first — the default), "az"/"za"
+    ' (case-insensitive by name) or "watched" (any saved item with a
+    ' continue-watching position first, most recently watched first — the
+    ' positions array is newest-first — then everything else by name).
+    function LibraryView(typeFilter as string, sort as string) as object
+        items = m.SavedItems()
+        if typeFilter <> "all"
+            filtered = []
+            for each item in items
+                metaType = item.metaType
+                if metaType = invalid then metaType = ""
+                if metaType = typeFilter then filtered.Push(item)
+            end for
+            items = filtered
+        end if
+        if sort = "az"
+            m.SortByName(items, false)
+        else if sort = "za"
+            m.SortByName(items, true)
+        else if sort = "watched"
+            m.SortByWatched(items)
+        end if
+        return items
+    end function
+
+    ' Case-insensitive insertion sort of saved records by name, ascending or
+    ' descending. An insertion sort keeps it interpreter-safe, exactly like
+    ' SortByMtimeDesc; roArray.Sort with a function comparator is not guaranteed
+    ' in the brs interpreter. A malformed (invalid/blank) name is coerced to ""
+    ' so the compare cannot throw.
+    sub SortByName(items as object, descending as boolean)
+        for i = 1 to items.Count() - 1
+            temp = items[i]
+            j = i
+            while j > 0
+                left = items[j - 1].name
+                if left = invalid then left = ""
+                right = temp.name
+                if right = invalid then right = ""
+                if descending
+                    if LCase(left) >= LCase(right) then exit while
+                else
+                    if LCase(left) <= LCase(right) then exit while
+                end if
+                items[j] = items[j - 1]
+                j = j - 1
+            end while
+            items[j] = temp
+        end for
+    end sub
+
+    ' Insertion sort that floats items with a continue-watching position to the
+    ' front, most recently watched first (positions is newest-first, so the
+    ' earliest array index is the freshest), then the unwatched by name. Any
+    ' position under a metaId marks it watched — an episode position counts for
+    ' its series.
+    sub SortByWatched(items as object)
+        rank = {}
+        for i = 0 to m.positions.Count() - 1
+            mid = m.positions[i].metaId
+            if mid <> invalid and mid <> "" and not m.HasKey(rank, mid) then rank[mid] = i
+        end for
+        for i = 1 to items.Count() - 1
+            temp = items[i]
+            j = i
+            while j > 0
+                if not m.WatchedBefore(items[j - 1], temp, rank) then exit while
+                items[j] = items[j - 1]
+                j = j - 1
+            end while
+            items[j] = temp
+        end for
+    end sub
+
+    ' true when a should sort after b in the "watched" sort: a is less recently
+    ' watched (higher rank) than b, or equally ranked and names after b. Not
+    ' ranked items all share the cap rank, so unwatched sort by name.
+    function WatchedBefore(a as object, b as object, rank as object) as boolean
+        ra = m.WatchedRank(rank, a.metaId)
+        rb = m.WatchedRank(rank, b.metaId)
+        if ra <> rb then return ra > rb
+        an = a.name
+        if an = invalid then an = ""
+        bn = b.name
+        if bn = invalid then bn = ""
+        return LCase(an) > LCase(bn)
+    end function
+
+    function WatchedRank(rank as object, metaId as string) as integer
+        if metaId <> invalid and metaId <> "" and m.HasKey(rank, metaId) then return rank[metaId]
+        return 1000000000
+    end function
+
     ' Record playback progress for a video (a movie metaId, or the
     ' "{metaId}:{season}:{episode}" id for an episode). Drops the previous
     ' entry for the same video or series, pushes the new one on top of the

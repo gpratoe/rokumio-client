@@ -214,3 +214,87 @@ sub Test_Library_StremioSavedUncapped()
     synced.SyncFromStremio(items)
     Harness_Equal(synced.SavedItems().Count(), 120, "synced salvaged library not clamped to the device cap")
 end sub
+
+sub Test_Library_ViewFiltersByType()
+    Harness_Suite("LibraryView filters saved items by movie/series")
+    store = LibraryStore(MockRegistry())
+    store.AddSaved("tt001", "movie", "Movie A")
+    store.AddSaved("tt002", "series", "Series B")
+    store.AddSaved("tt003", "movie", "Movie C")
+
+    all = store.LibraryView("all", "recent")
+    Harness_Equal(all.Count(), 3, "all filter keeps everything")
+    Harness_Equal(all[0].metaId, "tt003", "all + recent is newest first")
+
+    movies = store.LibraryView("movie", "recent")
+    Harness_Equal(movies.Count(), 2, "movie filter keeps only movies")
+    Harness_Equal(movies[0].metaId, "tt003", "movie filter keeps recent order")
+    Harness_Equal(movies[1].metaId, "tt001", "movie filter keeps both movies")
+
+    series = store.LibraryView("series", "recent")
+    Harness_Equal(series.Count(), 1, "series filter keeps only series")
+    Harness_Equal(series[0].metaId, "tt002", "series filter picks the series")
+end sub
+
+sub Test_Library_ViewSortsByName()
+    Harness_Suite("LibraryView sorts saved items A-Z and Z-A")
+    store = LibraryStore(MockRegistry())
+    store.AddSaved("tt001", "movie", "coral")
+    store.AddSaved("tt002", "movie", "Apple")
+    store.AddSaved("tt003", "movie", "banana")
+
+    az = store.LibraryView("all", "az")
+    Harness_Equal(az[0].name, "Apple", "a-z case-insensitive first")
+    Harness_Equal(az[1].name, "banana", "a-z second")
+    Harness_Equal(az[2].name, "coral", "a-z last")
+
+    za = store.LibraryView("all", "za")
+    Harness_Equal(za[0].name, "coral", "z-a first")
+    Harness_Equal(za[1].name, "banana", "z-a second")
+    Harness_Equal(za[2].name, "Apple", "z-a last")
+end sub
+
+sub Test_Library_ViewSortsWatchedFirst()
+    Harness_Suite("LibraryView watched sort floats watched items first")
+    store = LibraryStore(MockRegistry())
+    store.AddSaved("tt001", "movie", "Unwatched A")
+    store.AddSaved("tt002", "movie", "Watched Oldest")
+    store.AddSaved("tt003", "movie", "Watched Newest")
+    store.AddSaved("tt004", "movie", "Unwatched B")
+    store.SetPosition("tt002", "tt002", "movie", 0, 0, "Watched Oldest", "", 30, 1000)
+    store.SetPosition("tt003", "tt003", "movie", 0, 0, "Watched Newest", "", 60, 1000)
+
+    watched = store.LibraryView("all", "watched")
+    Harness_Equal(watched.Count(), 4, "watched sort keeps everything")
+    Harness_Equal(watched[0].metaId, "tt003", "most recently watched first")
+    Harness_Equal(watched[1].metaId, "tt002", "older watched second")
+    Harness_Equal(watched[2].name, "Unwatched A", "unwatched sorted by name")
+    Harness_Equal(watched[3].name, "Unwatched B", "unwatched sorted by name")
+end sub
+
+sub Test_Library_ViewDoesNotMutateStore()
+    Harness_Suite("LibraryView never rearranges the stored saved order")
+    store = LibraryStore(MockRegistry())
+    store.AddSaved("tt001", "movie", "Zulu")
+    store.AddSaved("tt002", "movie", "Alpha")
+    store.AddSaved("tt003", "movie", "Mike")
+
+    store.LibraryView("all", "az")
+
+    items = store.SavedItems()
+    Harness_Equal(items[0].metaId, "tt003", "stored order still newest first")
+    Harness_Equal(items[1].metaId, "tt002", "stored order unchanged")
+    Harness_Equal(items[2].metaId, "tt001", "stored order unchanged")
+end sub
+
+sub Test_Library_ViewFiltersWatchedSeriesByMetaId()
+    Harness_Suite("watched sort counts a series watched through its episode position")
+    store = LibraryStore(MockRegistry())
+    store.AddSaved("tt001", "movie", "A Movie")
+    store.AddSaved("tt002", "series", "B Series")
+    store.SetPosition("tt002:1:1", "tt002", "series", 1, 1, "Episode One", "", 45, 1500)
+
+    watched = store.LibraryView("all", "watched")
+    Harness_Equal(watched[0].metaId, "tt002", "series with an episode position floats first")
+    Harness_Equal(watched[1].metaId, "tt001", "unwatched movie follows")
+end sub

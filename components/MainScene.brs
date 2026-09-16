@@ -53,6 +53,8 @@ sub init()
     m.searchScreen.ObserveField("pushRequest", "onSearchAction")
     m.discoverScreen = m.top.FindNode("discoverScreen")
     m.discoverScreen.ObserveField("pushRequest", "onDiscoverAction")
+    m.libraryScreen = m.top.FindNode("libraryScreen")
+    m.libraryScreen.ObserveField("pushRequest", "onLibraryAction")
     m.uiRoot = m.top.FindNode("uiRoot")
     ' Settings can start the link-code flow; logout reuses the pairing worker.
     ' Both flags are session-flow state with no store counterpart.
@@ -99,6 +101,7 @@ sub init()
     m.addonsScreen.callFunc("SetStores", m.stores)
     m.searchScreen.callFunc("SetStores", m.stores)
     m.discoverScreen.callFunc("SetStores", m.stores)
+    m.libraryScreen.callFunc("SetStores", m.stores)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -138,6 +141,13 @@ end sub
 ' DiscoverScreen's action channel; same one-action routing.
 sub onDiscoverAction()
     request = m.discoverScreen.pushRequest
+    if request = invalid or request.screen = invalid then return
+    m.stack.push(request.screen, request.params)
+end sub
+
+' LibraryScreen's action channel; same one-action routing.
+sub onLibraryAction()
+    request = m.libraryScreen.pushRequest
     if request = invalid or request.screen = invalid then return
     m.stack.push(request.screen, request.params)
 end sub
@@ -606,6 +616,13 @@ sub onLibrarySyncResult()
     if m.stores = invalid or m.stores.library = invalid then return
     m.stores.library.SyncFromStremio(result.items)
     if m.homeScreen <> invalid then m.homeScreen.callFunc("RefreshContinueWatching")
+    ' The relaunched-session case can land the sync while the Library screen is
+    ' already up: poke its grid so the freshly synced saved set appears without
+    ' a re-entry (guest sessions never reach this path). Same idempotent rebuild
+    ' as the LibraryScreen's own OnEnter.
+    if m.stack.top() <> invalid and m.stack.top().id = "libraryScreen" and m.libraryScreen <> invalid
+        m.libraryScreen.callFunc("RefreshRows")
+    end if
 end sub
 
 ' An ECP deep link (see reference/ecp-integration.md) arrived with the launch

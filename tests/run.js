@@ -63,7 +63,7 @@ const transpiled = [
 function checkScreenContract() {
     const fs = require('fs');
     const contract = ['OnEnter', 'OnExit', 'OnBackPressed', 'BlurFocus'];
-    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'AuthScreen', 'LinkStremioScreen'];
+    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen'];
     let ok = true;
     for (const name of screens) {
         const xml = fs.readFileSync(path.join(projectRoot, 'components', `${name}.xml`), 'utf8');
@@ -213,11 +213,30 @@ function checkSettingsPushContract() {
     return false;
 }
 
+// onLibrarySyncResult calls m.libraryScreen.callFunc('RefreshRows') when the
+// sync lands while the Library screen is top. Same callFunc interface trap as
+// HomeScreen's RebuildRows — pin it.
+function checkLibraryScreenContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'LibraryScreen.xml'), 'utf8');
+    const declared = new Set(
+        [...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1])
+    );
+    let ok = true;
+    for (const fn of ['RefreshRows']) {
+        if (!declared.has(fn)) {
+            console.error(`LibraryScreen.xml is missing <function name="${fn}" /> from its interface`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
     let ok = true;
-    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'AuthScreen', 'LinkStremioScreen', 'ConfirmExitDialog', 'SupportDialog']) {
+    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen', 'ConfirmExitDialog', 'SupportDialog']) {
         const element = xml.match(new RegExp(`<${name}[^>]*>`));
         if (!element) {
             console.error(`MainScene.xml is missing a <${name} ... /> child`);
@@ -254,7 +273,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkWatchStatePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
         process.exit(1);
     }
 

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="LibraryScreen" extends="Group">
+    <!-- Library: the saved items for the current session. Two chips (Type · Sort)
+         sit above a poster grid, the same dropdown pattern DiscoverScreen uses:
+         OK on a chip opens the menu of that chip's options — Up/Down to move,
+         OK to pick, Back to dismiss. Type filters the whole library by
+         All/Movies/Series; Sort orders it by Recently added / A-Z / Z-A /
+         Watched (items with a resume point first — most recent first — then the
+         rest by name). All data is local to LibraryStore, so nothing is fetched;
+         a filter change only re-slices what is already there. OK on a result
+         publishes a pushRequest the Scene routes to Details. -->
+    <interface>
+        <!-- The one action Library reports upward: a push request. -->
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+
+        <!-- Screen contract: called by ScreenStack for show/hide/focus/back.
+             RefreshRows is the Scene's poke to re-slice after a background
+             library sync lands while this screen is top. -->
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+        <function name="RefreshRows" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/LibraryScreen.brs" />
+
+    <children>
+        <Rectangle id="libraryBg" width="1920" height="1080" color="0x0" />
+        <Label
+            id="libraryTitle"
+            translation="[150, 48]"
+            width="1760"
+            height="70"
+            text="Library"
+            font="font:LargeBoldSystemFont"
+            color="0x2BD675FF" />
+        <Label
+            id="librarySub"
+            translation="[150, 128]"
+            width="1760"
+            height="40"
+            text="OK on a chip to open its menu · Up/Down to reach the results · Back to exit · * Focus filters"
+            font="font:SmallSystemFont"
+            color="0x8FA399FF" />
+
+        <Label
+            id="libraryStatus"
+            translation="[150, 176]"
+            width="1760"
+            height="40"
+            font="font:SmallSystemFont"
+            color="0x2BD675FF" />
+
+        <!-- The filter chips, one row of ChipTiles rebuilt whenever a value
+             changes: the content-type filter and the sort order. -->
+        <RowList
+            id="libraryChips"
+            translation="[150, 232]"
+            numRows="1"
+            itemSize="[1760, 56]"
+            itemSpacing="[0, 8]"
+            rowItemSize="[[260, 56]]"
+            rowItemSpacing="[[12, 0]]"
+            showRowLabel="false"
+            drawFocusFeedback="false"
+            itemComponentName="ChipTile" />
+
+        <!-- Current filter summary, e.g. "All · Recently added". -->
+        <Label
+            id="libraryHeader"
+            translation="[150, 300]"
+            width="1760"
+            height="40"
+            font="font:MediumSystemFont"
+            color="0x8FA399FF" />
+
+        <!-- Saved items chunked into poster rows of 6 so the RowList
+             clips/scrolls vertically. Same PosterTile contract as Home and
+             Discover. One row per chunk; the grid is rebuilt only when a filter
+             or sort changes, so the RowList keeps its own scroll while the
+             library (and the rest of the state) stays put. -->
+        <RowList
+            id="libraryGrid"
+            translation="[150, 342]"
+            numRows="2"
+            itemSize="[1780, 400]"
+            itemSpacing="[0, 8]"
+            rowItemSize="[[270, 378]]"
+            rowItemSpacing="[[18, 0]]"
+            showRowLabel="false"
+            drawFocusFeedback="false"
+            itemComponentName="PosterTile" />
+
+        <!-- The dropdown: a panel below the chips listing one chip's options in
+             a single-column RowList (vertical clipping free). Opens on chip OK;
+             the panel is declared last so the menu paints over the grid. -->
+        <Group id="libraryMenuGroup" translation="[150, 300]" visible="false">
+            <Rectangle id="libraryMenuBackdrop" width="252" height="62" color="0x101813FF" />
+            <RowList
+                id="libraryMenu"
+                numRows="1"
+                itemSize="[248, 56]"
+                itemSpacing="[0, 6]"
+                rowItemSize="[[240, 56]]"
+                rowItemSpacing="[[4, 0]]"
+                showRowLabel="false"
+                drawFocusFeedback="false"
+                itemComponentName="ChipTile"
+                vertFocusAnimationStyle="floatingFocus"/>
+        </Group>
+    </children>
+</component>
