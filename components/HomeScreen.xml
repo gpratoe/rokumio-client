@@ -46,7 +46,7 @@
         <Rectangle id="railBg" width="140" height="1080" color="0xFFFFFF06"/>
         <RowList
             id="rail"
-            translation="[0, 480]"
+            translation="[0, 380]"
             numRows="6"
             itemSize="[140, 80]"
             itemSpacing="[0, 40]"
