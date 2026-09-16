@@ -7,6 +7,11 @@
              cross components through a field, so they arrive via callFunc. -->
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
 
+        <!-- Write-back packet from an add/remove toggle (stremio sessions
+             only): { metaId, metaType, name, poster, added }. MainScene
+             observes it and pushes to the account. -->
+        <field id="libraryChange" type="assocarray" alwaysNotify="true" />
+
         <!-- Screen contract: called by ScreenStack for show/hide/focus/back. -->
         <function name="SetStores" />
         <function name="OnEnter" />

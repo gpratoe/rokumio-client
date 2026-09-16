@@ -502,6 +502,51 @@ class LibraryStore
         return clone
     end function
 
+    ' Build the full LibraryItem a datastorePut push sends after an add/remove
+    ' toggle. Mirrors BuildWatchStateItem: a stremio-only, cache-read-only
+    ' builder. The push clones the freshest cached copy of the item (from the
+    ' last sync) so untracked server fields survive, or falls back to a minimal
+    ' record when the cache has never seen the title (toggled before the first
+    ' sync landed). The membership flags are the whole story: an add is
+    ' removed:false/temp:false, a remove is removed:true/temp:false — the id
+    ' stays in the account library marked removed, so re-adding later is the
+    ' same item with removed:false. `now` is injectable for tests; production
+    ' lets it default and NowIso() stamps it. The cache is never mutated — the
+    ' next datastoreGet replaces it wholesale.
+    function BuildLibraryChangeItem(metaId as string, metaType as string, name as string, poster as string, added as boolean, now = "" as string) as dynamic
+        if m.sessionType <> "stremio" then return invalid
+        if metaId = "" then return invalid
+        if metaType = invalid or metaType = "" then metaType = "movie"
+        if name = invalid then name = ""
+        if poster = invalid then poster = ""
+        if now = "" then now = m.NowIso()
+
+        original = invalid
+        for each item in m.stremioLibrary
+            if item <> invalid and item._id = metaId then original = item : exit for
+        end for
+        if original = invalid
+            return {
+                _id: metaId
+                name: name
+                type: metaType
+                poster: poster
+                removed: not added
+                temp: false
+                _mtime: now
+            }
+        end if
+
+        clone = {}
+        for each key in original
+            clone[key] = original[key]
+        end for
+        clone.removed = not added
+        clone.temp = false
+        clone._mtime = now
+        return clone
+    end function
+
     ' ISO-8601 UTC timestamp for _mtime/lastWatched, via roDateTime.ToISOString
     ' (no manual month/day assembly, so no 0-indexed month gotcha). Returns ""
     ' when the platform cannot produce one.

@@ -27,6 +27,9 @@ sub init()
     ' the same one-action channel Home uses.
     m.detailsScreen = m.top.FindNode("detailsScreen")
     m.detailsScreen.ObserveField("pushRequest", "onDetailsAction")
+    ' Add/remove toggles from Details report through libraryChange; see
+    ' onLibraryChange for the write-back pipeline.
+    m.detailsScreen.ObserveField("libraryChange", "onLibraryChange")
 
     ' EpisodesScreen (the series episode browser) reports episode selections
     ' through the same one-action channel.
@@ -274,6 +277,68 @@ sub onWatchStatePushResult()
     end if
     m.inFlightWatchState = invalid
     PumpWatchStatePush()
+end sub
+
+' The Details screen published an add/remove toggle through libraryChange.
+' MainScene owns the write-back pipeline, exactly like the watch-state one:
+' gate on a stremio session (guest never touches the API), then coalesce so at
+' most one LibraryWritePushTask runs at a time. The change is read from the
+' screen's field; each toggle flips `added`, so no repeat suppression is needed.
+sub onLibraryChange()
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.stores.auth.GetSession() <> "stremio" then return
+    change = m.detailsScreen.libraryChange
+    if change = invalid then return
+    m.pendingLibraryChange = change
+    PumpLibraryWritePush()
+end sub
+
+' Start one push for the pending change if none is in flight. The pending slot is
+' consumed into the worker; a change that arrives while this worker runs lands
+' back in the slot and is pumped by onLibraryWritePushResult. The LibraryItem to
+' send is built by the store (the merge into the freshest cached copy), so no
+' merge logic lives here.
+sub PumpLibraryWritePush()
+    if m.pushingLibraryChange then return
+    if m.pendingLibraryChange = invalid then return
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    change = m.pendingLibraryChange
+    item = m.stores.library.BuildLibraryChangeItem(change.metaId, change.metaType, change.name, change.poster, change.added)
+    if item = invalid then return
+    m.pendingLibraryChange = invalid
+
+    task = CreateObject("roSGNode", "LibraryWritePushTask")
+    task.id = "libraryWritePushTask"
+    m.top.AppendChild(task)
+    task.authKey = m.stores.auth.GetAuthKey()
+    task.item = item
+    task.observeField("result", "onLibraryWritePushResult")
+    m.libraryWritePushTask = task
+    m.inFlightLibraryChange = change
+    m.pushingLibraryChange = true
+    task.control = "RUN"
+end sub
+
+' One push settled. Free the worker and pump any change that arrived meanwhile.
+' Failures are non-fatal: the local saved map keeps showing the change, and the
+' next library re-sync re-adopts the account's collection (which never received
+' a failed push).
+sub onLibraryWritePushResult()
+    task = m.libraryWritePushTask
+    m.libraryWritePushTask = invalid
+    m.pushingLibraryChange = false
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+
+    if result <> invalid and result.ok
+        print "[rokumio] library change pushed metaId='" + m.inFlightLibraryChange.metaId + "' added=" + m.inFlightLibraryChange.added.ToStr()
+    else
+        print "[rokumio] library change push failed"
+    end if
+    m.inFlightLibraryChange = invalid
+    PumpLibraryWritePush()
 end sub
 
 ' The exit dialog signals dismissal through wasClosed (Back, Home, or its own

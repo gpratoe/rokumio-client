@@ -35,6 +35,7 @@ async function writeCombinedScript() {
         'tests/librarystore.test.brs',
         'tests/librarysync.test.brs',
         'tests/watchstatepush.test.brs',
+        'tests/librarywritepush.test.brs',
         'tests/logouttask.test.brs',
         'tests/linkcode.test.brs',
         'tests/playbackstore.test.brs',
@@ -174,6 +175,33 @@ function checkWatchStatePushTaskContract() {
     return ok;
 }
 
+// The library write-back worker must keep its contract (authKey + item in,
+// result out with alwaysNotify) so the MainScene pump cannot silently mismatch
+// a field the LibraryWritePushTask never declared.
+function checkLibraryWritePushTaskContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'LibraryWritePushTask.xml'), 'utf8');
+    const declared = {};
+    for (const match of xml.matchAll(/<field\s+id="([^"]+)"([^>]*)>/gi)) {
+        declared[match[1]] = match[2];
+    }
+    let ok = true;
+    for (const field of ['authKey', 'item']) {
+        if (!declared[field]) {
+            console.error(`LibraryWritePushTask.xml is missing <field id="${field}" ... /> from its interface`);
+            ok = false;
+        }
+    }
+    if (!declared.result) {
+        console.error('LibraryWritePushTask.xml is missing <field id="result" ... /> from its interface');
+        ok = false;
+    } else if (!/alwaysNotify\s*=\s*"true"/.test(declared.result)) {
+        console.error('LibraryWritePushTask.xml: result field must be alwaysNotify="true"');
+        ok = false;
+    }
+    return ok;
+}
+
 // The server-logout worker must keep its contract (authKey in, result out with
 // alwaysNotify) so MainScene's fire-and-forget teardown cannot silently mismatch
 // a field the Task never declared.
@@ -273,7 +301,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
         process.exit(1);
     }
 
