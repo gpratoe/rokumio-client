@@ -26,6 +26,13 @@
 ' another component's code would resolve to invalid (call of a non-function).
 
 const MAX_CONTINUE_WATCHING = 8
+' Guest libraries persist to the device registry, whose size budget is real, so
+' the guest saved list is capped: adding beyond MAX_GUEST_SAVED evicts the
+' oldest entry (the array is newest-first, so the tail is least recent),
+' mirroring the continue-watching cap. A stremio session is memory-only — its
+' saved map is re-synced from the account every launch — so it is never capped
+' and the account stays the authority on how many items it holds.
+const MAX_GUEST_SAVED = 100
 
 class LibraryStore
     registry as dynamic
@@ -55,10 +62,20 @@ class LibraryStore
     end function
 
     ' Add a series/movie to the saved library. False when already saved or the
-    ' id is blank.
+    ' id is blank. A guest library is capped at MAX_GUEST_SAVED — adding past
+    ' it drops the oldest entry so the device registry never overflows, exactly
+    ' how the continue-watching stack is capped. A stremio session never caps:
+    ' its saved map is memory-only and re-synced from the account, so the device
+    ' budget does not apply there.
     function AddSaved(metaId as string, metaType as string, name as string, poster = "" as string) as boolean
         if metaId = "" then return false
         if m.HasKey(m.saved, metaId) then return false
+        if m.sessionType <> "stremio"
+            while m.savedOrder.Count() >= MAX_GUEST_SAVED
+                oldestId = m.savedOrder.Pop()
+                m.saved.Delete(oldestId)
+            end while
+        end if
         m.saved[metaId] = {
             metaId: metaId
             metaType: metaType

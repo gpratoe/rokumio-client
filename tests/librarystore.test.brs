@@ -167,3 +167,50 @@ sub Test_Library_StremioSessionPersistsOwnKey()
     guest = LibraryStore(registry)
     Harness_Equal(guest.SavedItems().Count(), 0, "guest library unaffected by the stremio save")
 end sub
+
+sub Test_Library_GuestSavedCapEvictsOldest()
+    Harness_Suite("guest saved library caps at MAX_GUEST_SAVED, evicting the oldest")
+    store = LibraryStore(MockRegistry())
+    for i = 1 to 105
+        store.AddSaved("tt" + Pad3(i), "movie", "Movie " + i.ToStr())
+    end for
+
+    items = store.SavedItems()
+    Harness_Equal(items.Count(), 100, "capped at one hundred")
+    Harness_Equal(items[0].metaId, "tt105", "newest kept first")
+    Harness_Equal(items[99].metaId, "tt006", "oldest retained is the 100th newest")
+    Harness_Ok(not store.IsSaved("tt001"), "oldest evicted")
+    Harness_Ok(not store.IsSaved("tt005"), "pre-cap items beyond the window evicted")
+end sub
+
+sub Test_Library_GuestCapPersists()
+    Harness_Suite("the guest saved cap survives a registry reload")
+    registry = MockRegistry()
+    store = LibraryStore(registry)
+    for i = 1 to 105
+        store.AddSaved("tt" + Pad3(i), "movie", "Movie " + i.ToStr())
+    end for
+
+    reopened = LibraryStore(registry)
+    items = reopened.SavedItems()
+    Harness_Equal(items.Count(), 100, "reloaded list stays capped at one hundred")
+    Harness_Equal(items[0].metaId, "tt105", "newest retained across reload")
+    Harness_Ok(not reopened.IsSaved("tt001"), "evicted oldest still absent after reload")
+end sub
+
+sub Test_Library_StremioSavedUncapped()
+    Harness_Suite("stremio session saved library is never capped")
+    store = LibraryStore(MockRegistry(), "stremio")
+    for i = 1 to 120
+        store.AddSaved("tt" + Pad3(i), "movie", "Movie " + i.ToStr())
+    end for
+    Harness_Equal(store.SavedItems().Count(), 120, "stremio add past the guest cap is kept")
+
+    synced = LibraryStore(MockRegistry(), "stremio")
+    items = []
+    for i = 1 to 120
+        items.Push(LibraryItemFixture("tt" + Pad3(i), "movie", "Movie " + i.ToStr(), "2024-06-" + Pad2(120 - i)))
+    end for
+    synced.SyncFromStremio(items)
+    Harness_Equal(synced.SavedItems().Count(), 120, "synced salvaged library not clamped to the device cap")
+end sub
