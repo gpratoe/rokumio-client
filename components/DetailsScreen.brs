@@ -195,8 +195,8 @@ sub ShowSeries()
     else
         actions.Push({ action: "play", title: "Play S1E1" })
     end if
-    actions.Push({ action: "library", title: LibraryActionLabel() })
     actions.Push({ action: "episodes", title: "Episodes" })
+    actions.Push({ action: "library", title: LibraryActionLabel() })
     ShowChips(actions)
 end sub
 
