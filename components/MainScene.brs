@@ -42,14 +42,23 @@ sub init()
 
     ' SettingsScreen, AddonsScreen and SearchScreen are content-focused (no
     ' pushes of their own; Search pushes Details like the others). SearchScreen
-    ' reports its pushes through its own channel.
+    ' reports its pushes through its own channel. The exception is Settings'
+    ' session rows: a guest can start the Stremio login from here, and a stremio
+    ' user can log out — both are auth flows the Scene owns, so Settings reports
+    ' them through its own channel too.
     m.settingsScreen = m.top.FindNode("settingsScreen")
+    m.settingsScreen.ObserveField("pushRequest", "onSettingsAction")
     m.addonsScreen = m.top.FindNode("addonsScreen")
     m.searchScreen = m.top.FindNode("searchScreen")
     m.searchScreen.ObserveField("pushRequest", "onSearchAction")
     m.discoverScreen = m.top.FindNode("discoverScreen")
     m.discoverScreen.ObserveField("pushRequest", "onDiscoverAction")
     m.uiRoot = m.top.FindNode("uiRoot")
+    ' Settings can start the link-code flow; logout reuses the pairing worker.
+    ' Both flags are session-flow state with no store counterpart.
+    m.loginFromSettings = false
+    m.logoutTask = invalid
+    m.pendingLogout = false
 
     ' Bottom-of-stack Back opens the native exit dialog through the Scene's dialog
     ' field (a StandardDialog) rather than using the ScreenStack.
@@ -131,6 +140,21 @@ sub onDiscoverAction()
     request = m.discoverScreen.pushRequest
     if request = invalid or request.screen = invalid then return
     m.stack.push(request.screen, request.params)
+end sub
+
+' SettingsScreen's session rows route here: the linked login is the same
+' link-code flow as the AuthScreen start, while logout goes through a confirm
+' dialog then the teardown in DoLogout. No business logic — the Scene stays a
+' thin orchestrator.
+sub onSettingsAction()
+    request = m.settingsScreen.pushRequest
+    if request = invalid or request.action = invalid then return
+    if request.action = "login"
+        m.loginFromSettings = true
+        StartLinkCodeFlow()
+    else if request.action = "logout"
+        ShowLogoutConfirm()
+    end if
 end sub
 
 ' StreamsScreen's action channel; same one-action routing. The player is special:
@@ -353,11 +377,16 @@ sub onLinkCodeAction()
         if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
             m.stack.pop()
         end if
+        if m.loginFromSettings and m.stack.top() <> invalid and m.stack.top().id = "settingsScreen"
+            m.stack.pop()
+        end if
+        m.loginFromSettings = false
     end if
     CleanupStremioPairTask()
     if request.action = "cancelLogin" and m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
         m.stack.pop()
     end if
+    if request.action = "cancelLogin" then m.loginFromSettings = false
 end sub
 
 ' Reap the task: drop references and remove it from the tree. Removing a running
@@ -369,6 +398,98 @@ sub CleanupStremioPairTask()
     m.linkStremioTask = invalid
     if task = invalid then return
     if task.getParent() <> invalid then m.top.RemoveChild(task)
+end sub
+
+' Confirm before leaving the account: the confirm dialog is a StandardMessageDialog
+' through the Scene's dialog field, mirroring the deep-link import dialog's close
+' path (buttons only set buttonSelected; the dialog's own close field funnels into
+' wasClosed so the Scene clears the slot).
+sub ShowLogoutConfirm()
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.id = "logoutConfirmDialog"
+    dialog.title = "Log out?"
+    dialog.message = ["This signs the Stremio account out of this device. Your saved items and continue watching stay here; the library re-syncs if you log back in."]
+    dialog.buttons = ["Log out", "Cancel"]
+    dialog.observeField("buttonSelected", "onLogoutChoice")
+    dialog.observeField("wasClosed", "onLogoutDialogClosed")
+    m.top.dialog = dialog
+end sub
+
+sub onLogoutChoice()
+    if m.top.dialog <> invalid and m.top.dialog.id = "logoutConfirmDialog"
+        ' Record the intent and let the dialog dismiss first: acting while the
+        ' dialog still owns scene.dialog loses the focus race — a screen pushed
+        ' now would render unfocused (the SceneGraph restores focus to the
+        ' pre-dialog node when the slot finally clears). DoLogout runs in
+        ' onLogoutDialogClosed, after the dialog is gone.
+        m.pendingLogout = m.top.dialog.buttonSelected = 0
+        m.top.dialog.close = true
+    end if
+end sub
+
+' The logout dialog dismissed (Log out, Cancel, Back or Home). Clear the Scene's
+' dialog slot, then act: a confirmed logout runs the teardown now that no dialog
+' competes for focus (DoLogout's pushes land focused); otherwise focus returns to
+' Settings.
+sub onLogoutDialogClosed()
+    if m.top.dialog <> invalid and m.top.dialog.id = "logoutConfirmDialog"
+        m.top.dialog = invalid
+    end if
+    wasPending = m.pendingLogout
+    m.pendingLogout = false
+    if wasPending
+        DoLogout()
+    else if m.stack.top() <> invalid and m.stack.top().id = "settingsScreen"
+        m.settingsScreen.SetFocus(true)
+    end if
+end sub
+
+' The actual logout, on confirm: flush the account key at the API (best-effort,
+' never gating), clear the local session, repoint the session-aware stores at the
+' guest data, then walk the stack back to Home and park the auth gate on top so
+' the user can pick their next session. The server call is fire-and-forget — the
+' user is logged out here regardless of its outcome.
+sub DoLogout()
+    print "[rokumio] DoLogout"
+    if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetAuthKey() <> ""
+        task = CreateObject("roSGNode", "LogoutTask")
+        task.id = "logoutTask"
+        m.top.AppendChild(task)
+        task.authKey = m.stores.auth.GetAuthKey()
+        task.observeField("result", "onLogoutResult")
+        m.logoutTask = task
+        task.control = "RUN"
+    end if
+
+    if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.Logout()
+    if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
+    if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
+
+    ' Pop all the way down to Home — every screen gets its normal OnExit/BlurFocus
+    ' teardown, so transient tasks cancel and no stale focus survives.
+    while m.stack.count() > 1
+        m.stack.pop()
+    end while
+    if m.homeScreen <> invalid then m.homeScreen.callFunc("RebuildRows")
+    m.stack.push("authScreen")
+end sub
+
+' The server logout settled. Log the outcome and reap the worker; the local
+' session is already cleared, nothing to gate on.
+sub onLogoutResult()
+    task = m.logoutTask
+    m.logoutTask = invalid
+    if task = invalid then return
+    result = task.result
+    task.unobserveField("result")
+    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    if result <> invalid and result.ok
+        print "[rokumio] account logged out at api.strem.io"
+    else
+        error = ""
+        if result <> invalid and result.error <> invalid then error = result.error
+        print "[rokumio] server logout failed: " + error
+    end if
 end sub
 
 ' Kick the account addon sync for a freshly-logged-in stremio session. The API
