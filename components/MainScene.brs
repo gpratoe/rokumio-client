@@ -345,18 +345,34 @@ sub onAuthAction()
     end if
 end sub
 
-' Start the link-code pairing: spawn the worker task, point the LinkStremioScreen
-' at it and push the screen. The task is created dynamically (like the player)
-' so it lives exactly as long as the flow; teardown on success, Back or failure
-' is handled in CleanupStremioPairTask.
-sub StartLinkCodeFlow()
+' Build the pairing worker, hand it to the LinkStremioScreen and start it. The
+' task is created dynamically (like the player) so it lives exactly as long as
+' the flow; teardown on success, Back or failure is handled in
+' CleanupStremioPairTask. Publishes the fresh node through taskNode so the
+' screen can (re)bind, resetting its spinner and countdown.
+function NewPairingTask() as object
     task = CreateObject("roSGNode", "LinkStremioTask")
     task.id = "linkStremioTask"
     m.top.AppendChild(task)
     m.linkStremioTask = task
     m.linkStremioScreen.taskNode = task
     task.control = "RUN"
+    return task
+end function
+
+' Start the link-code pairing: spawn the worker task, then push the pairing
+' screen on top of whatever presented it (AuthScreen or Settings).
+sub StartLinkCodeFlow()
+    NewPairingTask()
     m.stack.push("linkStremioScreen")
+end sub
+
+' Request a new code while the pairing screen is already up: clear the old worker
+' (freeing its thread and observer) and swap in a fresh one. No stack push — the
+' screen stays put and rebinds through the taskNode field change.
+sub RefreshLinkCode()
+    CleanupStremioPairTask()
+    NewPairingTask()
 end sub
 
 ' The LinkStremioScreen published its outcome. completeLogin carries the paired
@@ -365,6 +381,11 @@ end sub
 sub onLinkCodeAction()
     request = m.linkStremioScreen.pushRequest
     if request = invalid then return
+    if request.action = "refreshCode"
+        ' The screen stays up; only the worker is replaced.
+        RefreshLinkCode()
+        return
+    end if
     if request.action = "completeLogin"
         if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginStremio(request.authKey, request.user)
         if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("stremio")
@@ -389,14 +410,17 @@ sub onLinkCodeAction()
     if request.action = "cancelLogin" then m.loginFromSettings = false
 end sub
 
-' Reap the task: drop references and remove it from the tree. Removing a running
-' Task frees its worker thread (or, worst case, its writes hit a detached node
-' and go nowhere), so a Back-mid-pairing or finished flow never leaves a thread
-' holding the worker.
+' Reap the task: stop the worker, drop references and remove it from the tree.
+' The STOP signal is the real cancel — the read-poll loop watches control and
+' exits mid-sleep — because removing a running Task node does NOT kill its
+' worker thread (a removed-but-running puller keeps polling, which showed up as
+' the old link code being read alongside the new one after a refresh). Keep the
+' removal too so the node is freed once the thread exits.
 sub CleanupStremioPairTask()
     task = m.linkStremioTask
     m.linkStremioTask = invalid
     if task = invalid then return
+    task.control = "STOP"
     if task.getParent() <> invalid then m.top.RemoveChild(task)
 end sub
 
