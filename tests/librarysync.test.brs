@@ -272,6 +272,11 @@ sub Test_LibrarySync_AccountWatchedFlags()
     Harness_Equal(store.SeriesStatus("tt5000002"), "done", "account watched is done")
     Harness_Equal(store.SeriesStatus("tt5000004"), "progress", "account in-progress is progress")
     Harness_Equal(store.SeriesStatus(""), "none", "blank id is none")
+    Harness_Equal(store.WatchedGlyph("tt5000001", "movie"), "", "untouched item has no badge")
+    Harness_Equal(store.WatchedGlyph("tt5000002", "movie"), "eye", "account-watched movie shows the watched glyph")
+    Harness_Equal(store.WatchedGlyph("tt5000003", "movie"), "eye", "flagged-watched movie shows the watched glyph")
+    Harness_Equal(store.WatchedGlyph("tt5000004", "series"), "clock", "account in-progress series shows the progress glyph")
+    Harness_Equal(store.WatchedGlyph("", "series"), "", "blank id has no badge")
 end sub
 
 sub Test_LibrarySync_EpisodeWatchedFromBitfield()

@@ -130,6 +130,32 @@ sub Test_Library_CapContinueWatching()
     Harness_Equal(list[7].videoId, "tt5", "oldest retained is the 8th newest")
 end sub
 
+sub Test_Library_ContinueWatchingReturnsCopy()
+    Harness_Suite("ContinueWatching hands back a copy so callers can scan it safely")
+    store = LibraryStore(MockRegistry())
+    store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix", "", 100, 1000)
+    store.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot", "", 200, 1000)
+
+    snapshot = store.ContinueWatching()
+    Harness_Equal(snapshot.Count(), 2, "two entries")
+
+    ' A caller mutating the returned array must not disturb the store's own
+    ' stack: ContinueWatching is a snapshot, not the live m.positions alias.
+    snapshot.Clear()
+    Harness_Equal(snapshot.Count(), 0, "returned array cleared")
+    Harness_Equal(store.ContinueWatching().Count(), 2, "store stack untouched by caller mutation")
+
+    ' Mirror HomeScreen.LibraryRow: loop the result and call a helper that
+    ' itself walks m.positions on every entry. The copy keeps the outer loop
+    ' intact, so every entry is seen (a live alias drops all but the first).
+    seen = 0
+    for each entry in store.ContinueWatching()
+        store.ProgressFraction(entry.metaId)
+        seen = seen + 1
+    end for
+    Harness_Equal(seen, 2, "nested progress scan sees every entry")
+end sub
+
 sub Test_Library_SwitchSessionSeparatesData()
     Harness_Suite("LibraryStore session switch isolates guest and stremio libraries")
     registry = MockRegistry()
@@ -349,6 +375,25 @@ sub Test_Library_SeriesStatusLocal()
     Harness_Equal(store.SeriesStatus("ttQW"), "done", "series-done is done")
 end sub
 
+sub Test_Library_EpisodeAired()
+    Harness_Suite("EpisodeAired gates not-yet-aired episodes")
+    store = LibraryStore(MockRegistry())
+    now = "2026-09-16T00:00:00.000Z"
+    past = { released: "2026-08-05T08:00:00.000Z" }
+    today = { released: "2026-09-16T08:00:00.000Z" }
+    future = { released: "2026-09-30T08:00:00.000Z", name: "TBA " }
+    Harness_Ok(store.EpisodeAired(past, now), "past episode aired")
+    Harness_Ok(store.EpisodeAired(today, now), "today's episode aired")
+    Harness_Ok(not store.EpisodeAired(future, now), "future episode not aired")
+    Harness_Ok(not store.EpisodeAired({ firstAired: "2026-10-07T08:00:00.000Z" }, now), "firstAired fallback respected")
+    Harness_Ok(store.EpisodeAired({}, now), "no date means aired")
+    Harness_Ok(store.EpisodeAired({ released: "2026-08-05" }, now), "bare date aired")
+    Harness_Ok(store.EpisodeAired({ released: "rubbish" }, now), "malformed date means aired")
+    Harness_Ok(store.EpisodeAired(invalid, now), "invalid episode means aired")
+    Harness_Ok(store.EpisodeAired({ released: "1960-01-01T00:00:00.000Z" }, ""), "past episode aired with no clock")
+    Harness_Ok(not store.EpisodeAired({ released: "2100-01-01T00:00:00.000Z" }, invalid), "future episode still unaired with invalid clock")
+end sub
+
 sub Test_Library_ProgressFor()
     Harness_Suite("ProgressFor returns the raw resume position for a meta")
     store = LibraryStore(MockRegistry())
@@ -359,6 +404,40 @@ sub Test_Library_ProgressFor()
     Harness_Ok(progress <> invalid, "progress found")
     Harness_Equal(progress.position, 90000, "position ms carried")
     Harness_Equal(progress.duration, 1800000, "duration ms carried")
+end sub
+
+sub Test_Library_ProgressFraction()
+    Harness_Suite("ProgressFraction returns the clamped bar fraction for a meta")
+    store = LibraryStore(MockRegistry())
+    Harness_Ok(store.ProgressFraction("") = invalid, "blank id is invalid")
+    Harness_Ok(store.ProgressFraction("ttQW") = invalid, "never watched is invalid")
+    store.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 450, 1800)
+    Harness_Equal(store.ProgressFraction("ttQW"), 0.25, "resume position maps to position/duration")
+    store.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 3000, 1800)
+    Harness_Equal(store.ProgressFraction("ttQW"), 1, "past-the-end clamps to one")
+    store.AddSaved("ttQW2", "movie", "Zero Duration")
+    store.SetPosition("ttQW2", "ttQW2", "movie", 0, 0, "Zero Duration", "", 300, 0)
+    Harness_Ok(store.ProgressFraction("ttQW2") = invalid, "zero duration has no bar")
+end sub
+
+sub Test_Library_WatchedGlyph()
+    Harness_Suite("WatchedGlyph maps watched state to a single glyph token per tile")
+    store = LibraryStore(MockRegistry())
+    Harness_Equal(store.WatchedGlyph("", "movie"), "", "blank id draws no badge")
+    Harness_Equal(store.WatchedGlyph("ttQW", "movie"), "", "unwatched movie draws no badge")
+    store.MarkWatchedIfFinished("ttQW", "ttQW", 800, 1000)
+    Harness_Equal(store.WatchedGlyph("ttQW", "movie"), "eye", "watched movie uses GLYPH_WATCHED")
+    Harness_Equal(store.WatchedGlyph("ttQW", ""), "eye", "missing type still watches by the whole-key check")
+
+    account = LibraryStore(MockRegistry(), "stremio")
+    items = []
+    items.Push(LibraryItemFixture("ttGLP", "series", "In Progress", "2024-06-01T00:00:00Z", { timesWatched: 0, timeOffset: 1000 }))
+    items.Push(LibraryItemFixture("ttGLD", "series", "Done", "2024-06-02T00:00:00Z"))
+    account.SyncFromStremio(items)
+    Harness_Equal(account.WatchedGlyph("ttGLP", "series"), "clock", "in-progress series uses GLYPH_PROGRESS")
+    Harness_Equal(account.WatchedGlyph("ttGLD", "series"), "eye", "done series uses GLYPH_WATCHED")
+    Harness_Equal(account.WatchedGlyph("ttGLD", "movie"), "eye", "movie-type lookup reuses the same watched key")
+    Harness_Equal(account.WatchedGlyph("ttGLP", "movie"), "", "in-progress series seen as a movie draws no badge")
 end sub
 
 sub Test_Library_WatchedPersistsAcrossReloads()

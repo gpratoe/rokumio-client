@@ -111,7 +111,10 @@ sub onSeriesLoaded()
     BuildList(result.meta)
 end sub
 
-' Lay out one RowList row per season from an already-fetched series meta.
+' Lay out one RowList row per season from an already-fetched series meta. Each
+' episode tile carries a checked badge when LibraryStore says it is watched; the
+' full ordered episode-id list is resolved first so the account bitfield decodes
+' against the complete list (bit indexes are positions in that ordering).
 sub BuildList(meta as object)
     allSeasons = m.stores.episodes.Seasons(meta)
     if allSeasons.Count() = 0
@@ -121,8 +124,13 @@ sub BuildList(meta as object)
     end if
 
     m.seasons = OrderedSeasons(allSeasons)
+    orderedEpisodes = OrderedVideoIds(meta)
 
     content = CreateObject("roSGNode", "ContentNode")
+    anyRegular = false
+    allDone = true
+    nowIso = invalid
+    if m.stores <> invalid and m.stores.library <> invalid then nowIso = m.stores.library.NowIso()
     for s = 0 to m.seasons.Count() - 1
         season = m.seasons[s]
         episodes = m.stores.episodes.EpisodesForSeason(meta, season)
@@ -131,9 +139,21 @@ sub BuildList(meta as object)
         row = content.CreateChild("ContentNode")
         row.title = SeasonLabel(season)
         for each ep in episodes
-            item = row.CreateChild("ContentNode")
+            item = row.CreateChild("TileContent")
             item.title = EpisodeLabel(season, ep)
             if ep.thumbnail <> invalid and ep.thumbnail <> "" then item.hdPosterUrl = ep.thumbnail
+            if season <> 0
+                ' An unaired episode can't be watched yet — account bitfields
+                ' for a series marked fully watched mark the whole known list,
+                ' placeholders included, and literally decoding that would paint
+                ' checks on episodes that don't exist yet.
+                aired = m.stores.library.EpisodeAired(ep, nowIso)
+                item.watched = aired and Watched(season, ep, orderedEpisodes)
+                if aired
+                    anyRegular = true
+                    if not item.watched then allDone = false
+                end if
+            end if
         end for
     end for
 
@@ -142,7 +162,40 @@ sub BuildList(meta as object)
     m.epList.jumpToRowItem = ResumePosition()
     m.epList.SetFocus(true)
     UpdateHeader(m.epList.jumpToRowItem)
+
+    ' The full list is now known: a series whose every regular episode is
+    ' watched crosses from in-progress (clock) to done (eye) on the grid
+    ' tiles that only carry a coarse SeriesStatus badge.
+    if anyRegular and allDone and m.stores <> invalid and m.stores.library <> invalid
+        m.stores.library.MarkSeriesDone(m.meta.id)
+    end if
 end sub
+
+' The series' ordered episode-id list, "{metaId}:{season}:{episode}" per regular
+' (non-special) episode in display order — the ordering the account watched
+' bitfield indexes.
+function OrderedVideoIds(meta as object) as object
+    ids = []
+    if m.stores = invalid or m.stores.episodes = invalid or m.meta = invalid then return ids
+    for s = 0 to m.seasons.Count() - 1
+        season = m.seasons[s]
+        if season = 0 then continue for
+        episodes = m.stores.episodes.EpisodesForSeason(meta, season)
+        for each ep in episodes
+            if ep.episode <> invalid
+                ids.Push(m.stores.episodes.ResolveVideoId(m.meta.id, season, ep.episode))
+            end if
+        end for
+    end for
+    return ids
+end function
+
+' Per-episode watched, precise (local set or the decoded account bitfield).
+function Watched(season as integer, ep as object, orderedEpisodes as object) as boolean
+    if m.stores = invalid or m.stores.library = invalid then return false
+    if ep = invalid or ep.episode = invalid then return false
+    return m.stores.library.EpisodeWatched(m.meta.id, season, ep.episode, orderedEpisodes)
+end function
 
 ' Real seasons keep ascending order; season 0 (specials) is relabelled and moved
 ' to the end of the list so it never masquerades as the first broadcast season.

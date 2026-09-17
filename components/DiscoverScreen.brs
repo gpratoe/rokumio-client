@@ -399,12 +399,15 @@ sub UpdateGrid(rowToShow = -1 as integer)
             flat = r * m.chunk + c
             if flat >= m.metas.Count() then exit for
             meta = m.metas[flat]
-            item = row.CreateChild("ContentNode")
+            item = row.CreateChild("TileContent")
             name = meta.name
             if name = invalid then name = ""
             item.title = name
             poster = meta.poster
             if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
+            glyph = ""
+            if m.stores <> invalid and m.stores.library <> invalid then glyph = m.stores.library.WatchedGlyph(meta.id, meta.type)
+            if glyph <> "" then item.watchedGlyph = glyph
         end for
     end for
     m.grid.content = content

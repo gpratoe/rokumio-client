@@ -9,7 +9,7 @@
 '
 ' Two optional overlays ride on itemContent and render nothing until a screen
 ' provides them: `progress` (0..1) draws the bottom continue-watching bar, and
-' `watchedGlyph` ("check" | "diamond") draws the top-right badge. Screens that
+' `watchedGlyph` ("eye" | "clock") draws the top-right badge. Screens that
 ' set neither are pixel-identical to before.
 
 sub init()
@@ -102,7 +102,7 @@ sub UpdateOverlays()
     end if
 
     glyph = m.top.itemContent.watchedGlyph
-    if glyph = "check" or glyph = "diamond"
+    if glyph = "eye" or glyph = "clock"
         m.watchedGlyph.uri = "pkg:/images/" + glyph + ".png"
         m.watchedGlyph.visible = true
     else

@@ -52,7 +52,7 @@ sub onItemContentChanged()
     m.poster.uri = poster
     m.titleText.text = m.top.itemContent.title
     if m.top.itemContent.watched = true
-        m.watchedBadge.uri = "pkg:/images/check.png"
+        m.watchedBadge.uri = "pkg:/images/eye.png"
         m.watchedBadge.visible = true
     else
         m.watchedBadge.visible = false

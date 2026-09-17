@@ -208,23 +208,41 @@ function MakeRowNode(row as object, counts = invalid as object) as object
     if counts <> invalid and counts[label] > 1 then label = label + " " + TypeLabel(row.metaType)
     node.title = label
     for each meta in row.metas
-        item = node.CreateChild("ContentNode")
-        name = meta.name
-        if name = invalid then name = ""
-        item.title = name
-        poster = meta.poster
-        if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
+        glyph = meta.watchedGlyph
+        if glyph = invalid and m.stores <> invalid and m.stores.library <> invalid then glyph = m.stores.library.WatchedGlyph(meta.id, meta.type)
+        PaintTileFields(node.CreateChild("TileContent"), meta, glyph)
     end for
     return node
 end function
 
+' Paint the shared poster-tile fields — title, hdPosterUrl, progress-bar fraction
+' and watched glyph — onto an item ContentNode. Always writes the overlay fields
+' so a recycled node never carries a stale bar/badge into a cell that has none;
+' fallbackGlyph is the store-computed glyph when the meta did not carry one.
+sub PaintTileFields(item as object, meta as object, fallbackGlyph as dynamic)
+    name = meta.name
+    if name = invalid then name = ""
+    item.title = name
+    poster = meta.poster
+    if poster <> invalid and poster <> "" then item.hdPosterUrl = poster else item.hdPosterUrl = invalid
+    item.progress = invalid
+    if meta.progress <> invalid and meta.progress > 0 then item.progress = meta.progress
+    glyph = meta.watchedGlyph
+    if glyph = invalid then glyph = fallbackGlyph
+    item.watchedGlyph = invalid
+    if glyph <> invalid and glyph <> "" then item.watchedGlyph = glyph
+end sub
+
 ' The top row when the user has watched something: one tile per local
 ' continue-watching entry, carrying its resume hint so Details can reopen on
-' the right spot. Items are synthesized catalog metas.
+' the right spot. Items are synthesized catalog metas. Each tile also carries
+' the progress fraction (position/duration) and the coarse watched glyph, so a
+' finished watch paints a bar/badge on the tile without reopening Details.
 function LibraryRow() as dynamic
     if m.stores = invalid or m.stores.library = invalid then return invalid
     entries = m.stores.library.ContinueWatching()
-    if entries = invalid or entries.Count() = 0 then return invalid
+    if entries = invalid then return invalid
+    if entries.Count() = 0 then return invalid
     metas = []
     for each entry in entries
         metas.Push({
@@ -236,6 +254,8 @@ function LibraryRow() as dynamic
             season: entry.season
             episode: entry.episode
             position: entry.position
+            progress: m.stores.library.ProgressFraction(entry.metaId)
+            watchedGlyph: m.stores.library.WatchedGlyph(entry.metaId, entry.metaType)
         })
     end for
     return { source: "library", title: "Continue Watching", metaType: "", metas: metas }
@@ -247,7 +267,12 @@ function ContinueWatchingSignature() as string
     if entries = invalid or entries.Count() = 0 then return ""
     parts = []
     for each entry in entries
-        parts.Push(entry.metaId + "|" + entry.videoId + "|" + entry.season.toStr() + "|" + entry.episode.toStr() + "|" + entry.position.toStr())
+        position = entry.position
+        if position = invalid then position = 0
+        duration = entry.duration
+        if duration = invalid then duration = 0
+        glyph = m.stores.library.WatchedGlyph(entry.metaId, entry.metaType)
+        parts.Push(entry.metaId + "|" + entry.videoId + "|" + entry.season.toStr() + "|" + entry.episode.toStr() + "|" + position.toStr() + "|" + duration.toStr() + "|" + glyph)
     end for
     parts.Sort("i")
     return parts.Join(";")
@@ -292,13 +317,9 @@ sub SyncContinueWatchingRow(node as object, metas as object)
         if c < existing
             item = node.GetChild(c)
         else
-            item = node.CreateChild("ContentNode")
+            item = node.CreateChild("TileContent")
         end if
-        name = metas[c].name
-        if name = invalid then name = ""
-        item.title = name
-        poster = metas[c].poster
-        if poster <> invalid and poster <> "" then item.hdPosterUrl = poster else item.hdPosterUrl = invalid
+        PaintTileFields(item, metas[c], metas[c].watchedGlyph)
     end for
     while node.getChildCount() > metas.Count()
         node.RemoveChildIndex(node.getChildCount() - 1)

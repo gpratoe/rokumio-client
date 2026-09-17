@@ -50,6 +50,12 @@ const MAX_GUEST_SAVED = 100
 const WATCHED_THRESHOLD = 0.7
 const MAX_CONTINUE_WATCHING = 8
 
+' Tile glyph tokens. The store maps watched state to a token; PosterTile/EpisodeTile
+' turn it into an uri ("pkg:/images/" + token + ".png"). Defined once here so a
+' rename touches these two lines and the icon assets, not every screen.
+const GLYPH_WATCHED = "eye"
+const GLYPH_PROGRESS = "clock"
+
 class LibraryStore
     registry as dynamic
     sessionType as string
@@ -59,6 +65,7 @@ class LibraryStore
     stremioLibrary as object
     watched as object
     accountWatched as object
+    codec as object
 
     sub new(registry = invalid as dynamic, sessionType = "guest" as string)
         m.registry = registry
@@ -70,6 +77,14 @@ class LibraryStore
         m.stremioLibrary = []
         m.watched = {}
         m.accountWatched = {}
+        ' Instance the codec here, not inside EpisodeWatched: Roku scopes
+        ' user-defined global functions per component, so a bare WatchedCodec()
+        ' call from a method invoked under another component's scope resolves to
+        ' invalid (attempted call of a non-function). Construction runs under
+        ' MainScene scope — MainScene.brs is the only construction site — which
+        ' carries WatchedCodec, and the codec's methods only call intrinsics, so
+        ' the stored instance is callable from any component.
+        m.codec = WatchedCodec()
         m.Load()
     end sub
 
@@ -272,9 +287,17 @@ class LibraryStore
         return false
     end function
 
-    ' The continue-watching stack as-is: newest first, already capped.
+    ' The continue-watching stack as-is: newest first, already capped. A shallow
+    ' copy is returned, never the live m.positions array: callers loop over the
+    ' result and may call helpers that themselves scan m.positions, and a nested
+    ' for-each over the same roArray on-device stops the outer loop after its
+    ' first element (BrightScript shares the array's iterator state).
     function ContinueWatching() as object
-        return m.positions
+        result = []
+        for each entry in m.positions
+            result.Push(entry)
+        end for
+        return result
     end function
 
     ' The most recent continue-watching entry for one series/movie, or invalid
@@ -343,8 +366,8 @@ class LibraryStore
         account = m.AccountLayer(metaId)
         if account = invalid then return false
         if account.bitfield = "" then return false
-        codec = WatchedCodec()
-        watched = codec.WatchedDecode(account.bitfield, orderedEpisodes)
+        if m.codec = invalid then return false
+        watched = m.codec.WatchedDecode(account.bitfield, orderedEpisodes)
         if watched <> invalid and m.HasKey(watched, videoId) then return true
         return false
     end function
@@ -365,16 +388,53 @@ class LibraryStore
         return "none"
     end function
 
+    ' The coarse watched glyph for a grid tile without an episode list. Series
+    ' answer by SeriesStatus (done → GLYPH_WATCHED, in-progress → GLYPH_PROGRESS,
+    ' untouched → no badge); everything else by IsWatched (GLYPH_WATCHED or none).
+    ' One definition here, so renaming a glyph touches the store + the PosterTile
+    ' image — not the one-line adapters in Home/Library/Discover/Search.
+    function WatchedGlyph(metaId as string, metaType as string) as string
+        if metaId = invalid or metaId = "" then return ""
+        kind = metaType
+        if kind = invalid then kind = ""
+        if kind = "series"
+            status = m.SeriesStatus(metaId)
+            if status = "done" then return GLYPH_WATCHED
+            if status = "progress" then return GLYPH_PROGRESS
+            return ""
+        end if
+        if m.IsWatched(metaId) then return GLYPH_WATCHED
+        return ""
+    end function
+
     ' The existing continue-watching position for a meta, as the progress bar
     ' needs it (position/duration in ms), or invalid when there is none.
     function ProgressFor(metaId as string) as dynamic
         if metaId = "" then return invalid
-        for each entry in m.positions
-            if entry.metaId = metaId
-                return { position: entry.position, duration: entry.duration }
+        for i = 0 to m.positions.Count() - 1
+            if m.positions[i].metaId = metaId
+                return { position: m.positions[i].position, duration: m.positions[i].duration }
             end if
         end for
         return invalid
+    end function
+
+    ' The continue-watching bar fraction for a meta: position/duration clamped to
+    ' (0, 1], or invalid when there is no playable progress (never started, bogus
+    ' or zero duration). Screen code just paints the returned value — the clamped
+    ' fraction math lives here so Home and Library tiles agree on the bar.
+    function ProgressFraction(metaId as string) as dynamic
+        if metaId = "" then return invalid
+        entry = invalid
+        for i = 0 to m.positions.Count() - 1
+            if m.positions[i].metaId = metaId then entry = m.positions[i]
+        end for
+        if entry = invalid then return invalid
+        if entry.duration = invalid or entry.duration <= 0 then return invalid
+        if entry.position = invalid or entry.position <= 0 then return invalid
+        fraction = entry.position / entry.duration
+        if fraction > 1 then fraction = 1
+        return fraction
     end function
 
     ' Persist a whole-series done flag (guest local, stremio display-only like
@@ -702,6 +762,49 @@ class LibraryStore
         catch e
             return ""
         end try
+    end function
+
+    ' Whether an episode has aired: its release date (released, falling back to
+    ' firstAired) must exist and not be after today. Dates compare on their
+    ' leading YYYY-MM-DD (both UTC), so no platform date arithmetic is needed
+    ' and the interpreter cannot diverge from a device. Missing/malformed dates
+    ' or an unavailable clock (nowIso = "", or no roDateTime) are treated as
+    ' aired — the goal is never to hide a claimable episode, only to block ones
+    ' that demonstrably have not aired. That matters because an account bitfield
+    ' for a series marked fully watched runs across the whole known episode
+    ' list, including not-yet-aired placeholders; literally replaying those bits
+    ' would paint a check on episodes that cannot have been watched.
+    function EpisodeAired(ep as object, nowIso = invalid as dynamic) as boolean
+        if ep = invalid then return true
+        dateStr = ""
+        if ep.released <> invalid and ep.released <> "" then
+            dateStr = ep.released
+        else if ep.firstAired <> invalid and ep.firstAired <> "" then
+            dateStr = ep.firstAired
+        end if
+        if dateStr = "" then return true
+        if nowIso = invalid or nowIso = "" then nowIso = m.NowIso()
+        if nowIso = "" then return true
+        day = dateStr.Mid(0, 10)
+        if not m.IsCalendarDate(day) then return true
+        if day > nowIso.Mid(0, 10) then return false
+        return true
+    end function
+
+    ' YYYY-MM-DD shape check (the first ten characters of a date string), so a
+    ' clearly non-date value can't accidentally compare greater than today.
+    function IsCalendarDate(value as string) as boolean
+        if value = invalid or value.Len() < 10 then return false
+        digits = "0123456789"
+        for i = 0 to 9
+            c = value.Mid(i, 1)
+            if i = 4 or i = 7
+                if c <> "-" then return false
+            else if digits.InStr(c) < 0
+                return false
+            end if
+        end for
+        return true
     end function
 
     ' The player publishes each position update as a watch-state packet here

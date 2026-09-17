@@ -176,15 +176,18 @@ sub RenderRows()
         rowNode.title = row.title
         if row.state = "loaded"
             for each meta in row.metas
-                entry = rowNode.CreateChild("ContentNode")
+                entry = rowNode.CreateChild("TileContent")
                 name = meta.name
                 if name = invalid then name = ""
                 entry.title = name
                 poster = meta.poster
                 if poster <> invalid and poster <> "" then entry.hdPosterUrl = poster
+                glyph = ""
+                if m.stores <> invalid and m.stores.library <> invalid then glyph = m.stores.library.WatchedGlyph(meta.id, meta.type)
+                if glyph <> "" then entry.watchedGlyph = glyph
             end for
         else
-            entry = rowNode.CreateChild("ContentNode")
+            entry = rowNode.CreateChild("TileContent")
             entry.title = PlaceholderTitle(row)
             entry.addFields({ loadState: row.state })
         end if
