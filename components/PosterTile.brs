@@ -92,11 +92,11 @@ end sub
 sub UpdateOverlays()
     progress = m.top.itemContent.progress
     if progress <> invalid and progress > 0 and progress <= 1
-        m.progressFill.width = 270 * progress
+        m.progressFill.width = m.poster.width * progress
         m.progressTrack.visible = true
         m.progressFill.visible = true
     else
-        m.progressFill.width = 270
+        m.progressFill.width = m.poster.width
         m.progressTrack.visible = false
         m.progressFill.visible = false
     end if
