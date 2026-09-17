@@ -24,8 +24,18 @@
 ' Helpers live as instance methods: Roku scopes user-defined global functions
 ' per component, so a bare global called from a method that is invoked from
 ' another component's code would resolve to invalid (call of a non-function).
+'
+' Watched state is two layers merged at read time:
+'   - the local set (m.watched) is display-side only, written by
+'     MarkWatchedIfFinished / MarkSeriesDone, persisted with the saved items so
+'     it survives reloads. It is never pushed to the account.
+'   - the account layer (m.accountWatched) is re-derived on every sync from the
+'     libraryItem state (watched bitfield, flaggedWatched/timesWatched flags,
+'     timeOffset), memory-only for the session.
+' Internally watched is keyed by videoId (a movie's metaId, or a series'
+' "{metaId}:{season}:{episode}") so grid tiles ask coarsely with a metaId while
+' EpisodesScreen asks per episode.
 
-const MAX_CONTINUE_WATCHING = 8
 ' Guest libraries persist to the device registry, whose size budget is real, so
 ' the guest saved list is capped: adding beyond MAX_GUEST_SAVED evicts the
 ' oldest entry (the array is newest-first, so the tail is least recent),
@@ -34,6 +44,12 @@ const MAX_CONTINUE_WATCHING = 8
 ' and the account stays the authority on how many items it holds.
 const MAX_GUEST_SAVED = 100
 
+' A video counts as watched when the player position has reached ~70% of its
+' duration (so a movie/episode finished per Stremio's rule). position/duration
+' are milliseconds; the comparison stays on integer math.
+const WATCHED_THRESHOLD = 0.7
+const MAX_CONTINUE_WATCHING = 8
+
 class LibraryStore
     registry as dynamic
     sessionType as string
@@ -41,6 +57,8 @@ class LibraryStore
     savedOrder as object
     positions as object
     stremioLibrary as object
+    watched as object
+    accountWatched as object
 
     sub new(registry = invalid as dynamic, sessionType = "guest" as string)
         m.registry = registry
@@ -50,6 +68,8 @@ class LibraryStore
         m.savedOrder = []
         m.positions = []
         m.stremioLibrary = []
+        m.watched = {}
+        m.accountWatched = {}
         m.Load()
     end sub
 
@@ -280,6 +300,98 @@ class LibraryStore
         return false
     end function
 
+    ' ---- watched state ----
+
+    ' Record that a video finished (position >= duration * WATCHED_THRESHOLD),
+    ' when the player knows a duration. Coalesces like SetPosition: the key is
+    ' the video id (a movie's metaId, or a series' "{metaId}:{season}:{episode}")
+    ' so re-watching never duplicates. The local set is display-side only — it
+    ' is written here on both guest and stremio sessions but never pushed to the
+    ' account (the push clones the account's own flags, see BuildWatchStateItem).
+    sub MarkWatchedIfFinished(metaId as string, videoId as string, position as integer, duration as integer)
+        if duration <= 0 then return
+        if position < duration * WATCHED_THRESHOLD then return
+        key = metaId
+        if videoId <> "" then key = videoId
+        if key = "" then return
+        if m.HasKey(m.watched, key) then return
+        m.watched[key] = true
+        m.Save()
+    end sub
+
+    ' Coarse whole-item watched: the local set has the metaId, or the account
+    ' layer flagged the whole item watched (flaggedWatched/timesWatched). Movies
+    ' answer directly; series tiles should use SeriesStatus for the watched/
+    ' progress distinction.
+    function IsWatched(metaId as string) as boolean
+        if metaId = "" then return false
+        if m.HasKey(m.watched, metaId) then return true
+        account = m.AccountLayer(metaId)
+        if account <> invalid and account.watched then return true
+        return false
+    end function
+
+    ' Per-episode watched, precise. Local set first; when the episode list is
+    ' available the account bitfield is decoded against it (it is only an index
+    ' into that ordering, so without the list the account part cannot answer).
+    ' "orderedEpisodes" is the series' ordered video id list.
+    function EpisodeWatched(metaId as string, season as integer, episode as integer, orderedEpisodes as object) as boolean
+        if orderedEpisodes = invalid or Type(orderedEpisodes) <> "roArray" then return false
+        videoId = metaId + ":" + season.ToStr() + ":" + episode.ToStr()
+        if m.HasKey(m.watched, videoId) then return true
+        if m.HasKey(m.watched, metaId) then return true
+        account = m.AccountLayer(metaId)
+        if account = invalid then return false
+        if account.bitfield = "" then return false
+        codec = WatchedCodec()
+        watched = codec.WatchedDecode(account.bitfield, orderedEpisodes)
+        if watched <> invalid and m.HasKey(watched, videoId) then return true
+        return false
+    end function
+
+    ' Coarse series status for grid tiles that have no episode list. "done" when
+    ' the whole series is known watched (local MarkSeriesDone, or the account
+    ' flagged the series watched); "progress" when some watch state exists
+    ' (account in-progress, or the account bitfield covers part of the list);
+    ' "none" otherwise. Precise done (every episode) needs the episode list and
+    ' is EpisodesScreen's job.
+    function SeriesStatus(metaId as string) as string
+        if metaId = "" then return "none"
+        if m.HasKey(m.watched, metaId) then return "done"
+        account = m.AccountLayer(metaId)
+        if account = invalid then return "none"
+        if account.watched then return "done"
+        if account.inProgress or account.bitfield <> "" then return "progress"
+        return "none"
+    end function
+
+    ' The existing continue-watching position for a meta, as the progress bar
+    ' needs it (position/duration in ms), or invalid when there is none.
+    function ProgressFor(metaId as string) as dynamic
+        if metaId = "" then return invalid
+        for each entry in m.positions
+            if entry.metaId = metaId
+                return { position: entry.position, duration: entry.duration }
+            end if
+        end for
+        return invalid
+    end function
+
+    ' Persist a whole-series done flag (guest local, stremio display-only like
+    ' the watched set). Used by EpisodesScreen once it has the full episode list
+    ' and can see every non-special episode is watched.
+    sub MarkSeriesDone(metaId as string)
+        if metaId = "" then return
+        if m.HasKey(m.watched, metaId) then return
+        m.watched[metaId] = true
+        m.Save()
+    end sub
+
+    function AccountLayer(metaId as string) as dynamic
+        if m.HasKey(m.accountWatched, metaId) then return m.accountWatched[metaId]
+        return invalid
+    end function
+
     ' Reconcile the store with the account's remote library (from the
     ' datastoreGet pull). The API is the authority, so the whole in-memory state
     ' is rebuilt, never merged: continue watching is re-derived and re-ordered,
@@ -296,9 +408,20 @@ class LibraryStore
         cw = []
         saved = {}
         savedOrder = []
+        accountWatched = {}
         for each item in items
             parsed = m.ParseLibraryItem(item)
             if parsed = invalid then continue for
+            ' The account layer: re-derived on every sync, memory-only. It peers
+            ' into the item's watch state the same way the app's own watched set
+            ' does — flaggedWatched/timesWatched mark a whole item watched,
+            ' timeOffset marks it in progress, and the raw watched bitfield is
+            ' kept whole so EpisodesScreen can decode it against the episode list.
+            accountWatched[parsed.metaId] = {
+                watched: parsed.watchedFlag
+                inProgress: parsed.inProgress
+                bitfield: parsed.bitfield
+            }
             if parsed.cw then cw.Push(parsed)
             if parsed.saved and parsed.metaId <> "" and not m.HasKey(saved, parsed.metaId)
                 saved[parsed.metaId] = {
@@ -345,6 +468,7 @@ class LibraryStore
 
         m.saved = saved
         m.savedOrder = savedOrder
+        m.accountWatched = accountWatched
         print "[rokumio] LibraryStore sync cw=" + m.positions.Count().ToStr() + " saved=" + m.savedOrder.Count().ToStr() + " total=" + m.stremioLibrary.Count().ToStr()
         m.Save()
     end sub
@@ -363,6 +487,13 @@ class LibraryStore
     ' Continue watching: timeOffset > 0 && type != "other" && (!removed || temp).
     ' Saved: removed == false && temp == false. Position/duration are the raw ms
     ' values — the player tracks time in milliseconds too, so no conversion.
+    '
+    ' The account watched layer rides on the same item's state: flaggedWatched
+    ' (an explicit "mark all watched" toggle) or timesWatched means the whole
+    ' item is watched on the account; timeOffset > 0 means it is in progress;
+    ' the raw state.watched bitfield (if any) is kept whole for precise per-
+    ' episode decoding on EpisodesScreen. None of it is recalculated here — it
+    ' is read off the server exactly as Stremio stores it.
     function ParseLibraryItem(item as dynamic) as dynamic
         if item = invalid or Type(item) <> "roAssociativeArray" then return invalid
         if item._id = invalid or item._id = "" then return invalid
@@ -379,12 +510,18 @@ class LibraryStore
         position = 0
         duration = 0
         videoId = metaId
+        watchedFlag = false
+        bitfield = ""
         state = item.state
         if state <> invalid and Type(state) = "roAssociativeArray"
             if state.timeOffset <> invalid then position = state.timeOffset
             if state.duration <> invalid then duration = state.duration
             if state.video_id <> invalid and state.video_id <> "" then videoId = state.video_id
+            if state.flaggedWatched <> invalid and state.flaggedWatched > 0 then watchedFlag = true
+            if state.timesWatched <> invalid and state.timesWatched > 0 then watchedFlag = true
+            if state.watched <> invalid and (Type(state.watched) = "roString" or Type(state.watched) = "String") then bitfield = state.watched
         end if
+        inProgress = position > 0
 
         season = 0
         episode = 0
@@ -411,6 +548,9 @@ class LibraryStore
             position: position
             duration: duration
             mtime: mtime
+            watchedFlag: watchedFlag
+            inProgress: inProgress
+            bitfield: bitfield
         }
     end function
 
@@ -431,16 +571,18 @@ class LibraryStore
 
     ' Build the full LibraryItem a datastorePut push sends after a position
     ' update. The account is the source of truth for fields this app does not
-    ' track, so the push clones the freshest cached copy of the item (from the
+    ' author, so the push clones the freshest cached copy of the item (from the
     ' last sync) and overwrites only the watch-state fields the player knows —
-    ' video_id, timeOffset, duration, lastWatched — plus _mtime. Untracked
-    ' server fields (timesWatched, the watched bitfield, behaviorHints, the
-    ' removed/temp flags) survive untouched. An item the cache has never seen
-    ' (added on another device between sync and push) falls back to a minimal
-    ' temp entry so the server records the progress without promoting it to the
-    ' permanent library. Guest sessions never write back, so the call is refused
-    ' there too (mirrors SyncFromStremio). `now` is injectable for tests;
-    ' production lets it default and NowIso() stamps it.
+    ' video_id, timeOffset, duration, lastWatched — plus _mtime. Server-authored
+    ' fields (timesWatched, the watched bitfield, flaggedWatched, behaviorHints,
+    ' the removed/temp flags) survive untouched; SyncFromStremio reads them into
+    ' the account watched layer (m.accountWatched) at pull time, and they go back
+    ' unchanged on push so this app never overwrites what the account knows. An
+    ' item the cache has never seen (added on another device between sync and
+    ' push) falls back to a minimal temp entry so the server records the progress
+    ' without promoting it to the permanent library. Guest sessions never write
+    ' back, so the call is refused there too (mirrors SyncFromStremio). `now` is
+    ' injectable for tests; production lets it default and NowIso() stamps it.
     function BuildWatchStateItem(packet as dynamic, now = "" as string) as dynamic
         if m.sessionType <> "stremio" then return invalid
         if packet = invalid then return invalid
@@ -598,6 +740,8 @@ class LibraryStore
         m.saved = {}
         m.savedOrder = []
         m.positions = []
+        m.watched = {}
+        m.accountWatched = {}
         m.Load()
     end sub
 
@@ -607,6 +751,7 @@ class LibraryStore
         if m.sessionType <> "stremio"
             data.saved = m.saved
             data.savedOrder = m.savedOrder
+            data.watched = m.watched
         end if
         m.registry.Write(m.RegistryKey(), FormatJson(data))
         m.registry.Flush()
@@ -626,6 +771,7 @@ class LibraryStore
         if m.sessionType <> "stremio"
             if parsed.saved <> invalid and Type(parsed.saved) = "roAssociativeArray" then m.saved = parsed.saved
             if parsed.savedOrder <> invalid and Type(parsed.savedOrder) = "roArray" then m.savedOrder = parsed.savedOrder
+            if parsed.watched <> invalid and Type(parsed.watched) = "roAssociativeArray" then m.watched = parsed.watched
         end if
         if parsed.continueWatching <> invalid and Type(parsed.continueWatching) = "roArray" then m.positions = parsed.continueWatching
     end sub

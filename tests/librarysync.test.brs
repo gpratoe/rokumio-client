@@ -33,6 +33,9 @@ function LibraryItemFixture(metaId as string, metaType as string, name as string
         if options.videoId <> invalid then item.state.video_id = options.videoId
         if options.removed <> invalid then item.removed = options.removed
         if options.temp <> invalid then item.temp = options.temp
+        if options.watched <> invalid then item.state.watched = options.watched
+        if options.timesWatched <> invalid then item.state.timesWatched = options.timesWatched
+        if options.flaggedWatched <> invalid then item.state.flaggedWatched = options.flaggedWatched
     end if
     return item
 end function
@@ -249,4 +252,52 @@ sub Test_LibrarySync_GuestSessionIgnored()
     Harness_Equal(store.ContinueWatching()[0].videoId, "tt0133093", "guest position kept")
     Harness_Equal(store.SavedItems().Count(), 1, "guest saved kept")
     Harness_Equal(store.StremioLibraryItems().Count(), 0, "remote library not adopted into a guest session")
+end sub
+
+sub Test_LibrarySync_AccountWatchedFlags()
+    Harness_Suite("account layer drives IsWatched and SeriesStatus from sync flags")
+    items = []
+    items.Push(LibraryItemFixture("tt5000001", "movie", "Plain", "2024-06-01T00:00:00Z", { timesWatched: 0 }))
+    items.Push(LibraryItemFixture("tt5000002", "movie", "TimesWatched", "2024-06-02T00:00:00Z"))
+    items.Push(LibraryItemFixture("tt5000003", "movie", "Flagged", "2024-06-03T00:00:00Z", { timesWatched: 0, flaggedWatched: 1 }))
+    items.Push(LibraryItemFixture("tt5000004", "series", "InProgress", "2024-06-04T00:00:00Z", { timesWatched: 0, timeOffset: 1000 }))
+    store = LibraryStore(MockRegistry(), "stremio")
+    store.SyncFromStremio(items)
+
+    Harness_Ok(not store.IsWatched("tt5000001"), "untouched item not watched")
+    Harness_Ok(store.IsWatched("tt5000002"), "timesWatched flags the whole item watched")
+    Harness_Ok(store.IsWatched("tt5000003"), "flaggedWatched flags the whole item watched")
+    Harness_Ok(not store.IsWatched("tt5000004"), "in-progress is not watched")
+    Harness_Equal(store.SeriesStatus("tt5000001"), "none", "untouched item is none")
+    Harness_Equal(store.SeriesStatus("tt5000002"), "done", "account watched is done")
+    Harness_Equal(store.SeriesStatus("tt5000004"), "progress", "account in-progress is progress")
+    Harness_Equal(store.SeriesStatus(""), "none", "blank id is none")
+end sub
+
+sub Test_LibrarySync_EpisodeWatchedFromBitfield()
+    Harness_Suite("EpisodeWatched decodes the account watched bitfield against the episode list")
+    items = []
+    items.Push(LibraryItemFixture("tt3330003", "series", "Sparse", "2024-06-01T00:00:00Z", { timesWatched: 0, watched: "tt3330003:5:9:64:eJzrYGBgYGBkaAAABMsBCg==" }))
+    store = LibraryStore(MockRegistry(), "stremio")
+    store.SyncFromStremio(items)
+
+    ids = ["tt3330003:1:1", "tt3330003:1:2", "tt3330003:1:3", "tt3330003:1:4", "tt3330003:1:5", "tt3330003:1:6", "tt3330003:1:7", "tt3330003:1:8", "tt3330003:1:9", "tt3330003:1:10", "tt3330003:1:11", "tt3330003:1:12"]
+    Harness_Ok(store.EpisodeWatched("tt3330003", 1, 4, ids), "bit 3 episode is watched")
+    Harness_Ok(store.EpisodeWatched("tt3330003", 1, 8, ids), "bit 7 episode is watched")
+    Harness_Ok(not store.EpisodeWatched("tt3330003", 1, 5, ids), "bit 4 episode is not watched")
+    Harness_Ok(not store.EpisodeWatched("tt3330003", 2, 1, ids), "episode outside the list is not watched")
+    Harness_Ok(not store.EpisodeWatched("tt9999999", 1, 1, ids), "series never synced is not watched")
+    Harness_Ok(not store.EpisodeWatched("tt3330003", 1, 1, invalid), "invalid episode list is refused")
+end sub
+
+sub Test_LibrarySync_EpisodeWatchedEmptyBitfield()
+    Harness_Suite("EpisodeWatched ignores missing and empty account bitfields")
+    items = []
+    items.Push(LibraryItemFixture("tt5000005", "series", "No Bits", "2024-06-01T00:00:00Z", { timesWatched: 0 }))
+    items.Push(LibraryItemFixture("tt5000006", "series", "Empty Bits", "2024-06-02T00:00:00Z", { timesWatched: 0, watched: "" }))
+    store = LibraryStore(MockRegistry(), "stremio")
+    store.SyncFromStremio(items)
+
+    Harness_Ok(not store.EpisodeWatched("tt5000005", 1, 1, ["tt5000005:1:1"]), "no bitfield means not watched")
+    Harness_Ok(not store.EpisodeWatched("tt5000006", 1, 1, ["tt5000006:1:1"]), "empty bitfield means not watched")
 end sub
