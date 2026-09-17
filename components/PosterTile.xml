@@ -30,6 +30,18 @@
                 width="44"
                 height="44"
                 spinning="false" />
+            <!-- Optional continue-watching progress bar, painted on top of the
+                 poster's bottom edge (6px strip spanning the tile). The dark
+                 track is the full tile width; the mint fill's width is scaled
+                 in code from itemContent.progress (0..1). Both stay hidden
+                 until a screen passes progress. -->
+            <Rectangle id="progressTrack" width="270" height="6" translation="[0, 372]" color="0x00000073" visible="false" />
+            <Rectangle id="progressFill" width="270" height="6" translation="[0, 372]" color="0x46E0A3FF" visible="false" />
+            <!-- Optional watched-state glyph (check = done, diamond = in
+                 progress), ~48px top-right above the bar. The uri is set in
+                 code from itemContent.watchedGlyph; hidden until a screen asks
+                 for a badge. -->
+            <Poster id="watchedGlyph" width="48" height="48" translation="[214, 10]" visible="false" />
         </Rectangle>
     </children>
 </component>

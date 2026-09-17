@@ -6,6 +6,11 @@
 ' hdPosterUrl (mapped from the addon meta's poster). Tiles without art — no
 ' poster URL, or one that failed to load — fall back to the title text so the
 ' tile is never a blank face. A tile with art shows the poster only.
+'
+' Two optional overlays ride on itemContent and render nothing until a screen
+' provides them: `progress` (0..1) draws the bottom continue-watching bar, and
+' `watchedGlyph` ("check" | "diamond") draws the top-right badge. Screens that
+' set neither are pixel-identical to before.
 
 sub init()
     m.poster = m.top.FindNode("poster")
@@ -13,6 +18,9 @@ sub init()
     m.tileBorder = m.top.FindNode("tileBorder")
     m.titleText = m.top.FindNode("titleText")
     m.loadSpinner = m.top.FindNode("loadSpinner")
+    m.progressTrack = m.top.FindNode("progressTrack")
+    m.progressFill = m.top.FindNode("progressFill")
+    m.watchedGlyph = m.top.FindNode("watchedGlyph")
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
@@ -57,6 +65,7 @@ sub onItemContentChanged()
         m.poster.uri = ""
         m.titleText.text = m.top.itemContent.title
         m.titleText.visible = false
+        UpdateOverlays()
         UpdateLook()
         return
     end if
@@ -72,8 +81,33 @@ sub onItemContentChanged()
     if poster = invalid then poster = ""
     m.poster.uri = poster
     m.titleText.text = m.top.itemContent.title
+    UpdateOverlays()
     UpdateFallback()
     UpdateLook()
+end sub
+
+' The progress bar and watched glyph are driven entirely by optional
+' itemContent fields, so a tile reused without them (or recycled onto one
+' without them) never shows a stale overlay.
+sub UpdateOverlays()
+    progress = m.top.itemContent.progress
+    if progress <> invalid and progress > 0 and progress <= 1
+        m.progressFill.width = 270 * progress
+        m.progressTrack.visible = true
+        m.progressFill.visible = true
+    else
+        m.progressFill.width = 270
+        m.progressTrack.visible = false
+        m.progressFill.visible = false
+    end if
+
+    glyph = m.top.itemContent.watchedGlyph
+    if glyph = "check" or glyph = "diamond"
+        m.watchedGlyph.uri = "pkg:/images/" + glyph + ".png"
+        m.watchedGlyph.visible = true
+    else
+        m.watchedGlyph.visible = false
+    end if
 end sub
 
 sub onPosterLoadStatus()

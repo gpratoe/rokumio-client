@@ -11,6 +11,7 @@ sub init()
     m.tileBg = m.top.FindNode("tileBg")
     m.tileBorder = m.top.FindNode("tileBorder")
     m.titleText = m.top.FindNode("titleText")
+    m.watchedBadge = m.top.FindNode("watchedBadge")
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
@@ -50,6 +51,12 @@ sub onItemContentChanged()
     if poster = invalid then poster = ""
     m.poster.uri = poster
     m.titleText.text = m.top.itemContent.title
+    if m.top.itemContent.watched = true
+        m.watchedBadge.uri = "pkg:/images/check.png"
+        m.watchedBadge.visible = true
+    else
+        m.watchedBadge.visible = false
+    end if
     UpdateFallback()
     UpdateLook()
 end sub

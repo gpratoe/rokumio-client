@@ -40,6 +40,8 @@ async function writeCombinedScript() {
         'tests/linkcode.test.brs',
         'tests/playbackstore.test.brs',
         'tests/subtitlesstore.test.brs',
+        'tests/watchedcodec.fixtures.brs',
+        'tests/watchedcodec.test.brs',
         'tests/_run.brs'
     ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });
@@ -58,7 +60,8 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'LibraryStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'PlaybackStore.brs'),
-    path.join(stagingDir, 'source', 'stores', 'SubtitlesStore.brs')
+    path.join(stagingDir, 'source', 'stores', 'SubtitlesStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs')
 ];
 
 function checkScreenContract() {
@@ -85,17 +88,32 @@ function checkScreenContract() {
 // `itemContent` and `itemHasFocus` — never `content` or `focused`. This bit us:
 // PosterTile observed the wrong fields and never rendered text or focus. Guard
 // the interface so the tile's render contract stays pinned to the grid's API.
-function checkItemContract() {
+// Both tiles must keep their interfaces read-only-exclusive: no `content` /
+// `focused` re-declaration may ever creep back in (it would silently shadow the
+// list's own fields and break the recycle behavior).
+function checkTileContract() {
     const fs = require('fs');
-    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'PosterTile.xml'), 'utf8');
-    const declared = new Set(
-        [...xml.matchAll(/<field\s+id="([^"]+)"[\s>]/gi)].map(match => match[1])
-    );
+    const tiles = [
+        { name: 'PosterTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] },
+        { name: 'EpisodeTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] }
+    ];
     let ok = true;
-    for (const field of ['itemContent', 'itemHasFocus', 'rowHasFocus']) {
-        if (!declared.has(field)) {
-            console.error(`PosterTile.xml is missing <field id="${field}" ... /> from its interface`);
-            ok = false;
+    for (const tile of tiles) {
+        const xml = fs.readFileSync(path.join(projectRoot, 'components', `${tile.name}.xml`), 'utf8');
+        const declared = new Set(
+            [...xml.matchAll(/<field\s+id="([^"]+)"[\s>]/gi)].map(match => match[1])
+        );
+        for (const field of tile.fields) {
+            if (!declared.has(field)) {
+                console.error(`${tile.name}.xml is missing <field id="${field}" ... /> from its interface`);
+                ok = false;
+            }
+        }
+        for (const forbidden of ['content', 'focused']) {
+            if (declared.has(forbidden)) {
+                console.error(`${tile.name}.xml must not re-declare <field id="${forbidden}"> — the list drives items through itemContent/itemHasFocus only`);
+                ok = false;
+            }
         }
     }
     return ok;
@@ -301,7 +319,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
         process.exit(1);
     }
 
