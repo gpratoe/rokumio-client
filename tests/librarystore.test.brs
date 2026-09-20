@@ -130,6 +130,32 @@ sub Test_Library_CapContinueWatching()
     Harness_Equal(list[7].videoId, "tt5", "oldest retained is the 8th newest")
 end sub
 
+sub Test_Library_ContinueWatchingReturnsCopy()
+    Harness_Suite("ContinueWatching hands back a copy so callers can scan it safely")
+    store = LibraryStore(MockRegistry())
+    store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix", "", 100, 1000)
+    store.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot", "", 200, 1000)
+
+    snapshot = store.ContinueWatching()
+    Harness_Equal(snapshot.Count(), 2, "two entries")
+
+    ' A caller mutating the returned array must not disturb the store's own
+    ' stack: ContinueWatching is a snapshot, not the live m.positions alias.
+    snapshot.Clear()
+    Harness_Equal(snapshot.Count(), 0, "returned array cleared")
+    Harness_Equal(store.ContinueWatching().Count(), 2, "store stack untouched by caller mutation")
+
+    ' Mirror HomeScreen.LibraryRow: loop the result and call a helper that
+    ' itself walks m.positions on every entry. The copy keeps the outer loop
+    ' intact, so every entry is seen (a live alias drops all but the first).
+    seen = 0
+    for each entry in store.ContinueWatching()
+        store.ProgressFraction(entry.metaId)
+        seen = seen + 1
+    end for
+    Harness_Equal(seen, 2, "nested progress scan sees every entry")
+end sub
+
 sub Test_Library_SwitchSessionSeparatesData()
     Harness_Suite("LibraryStore session switch isolates guest and stremio libraries")
     registry = MockRegistry()
@@ -297,4 +323,192 @@ sub Test_Library_ViewFiltersWatchedSeriesByMetaId()
     watched = store.LibraryView("all", "watched")
     Harness_Equal(watched[0].metaId, "tt002", "series with an episode position floats first")
     Harness_Equal(watched[1].metaId, "tt001", "unwatched movie follows")
+end sub
+
+sub Test_Library_MarkWatchedThreshold()
+    Harness_Suite("MarkWatchedIfFinished honors the 70% watched threshold")
+    store = LibraryStore(MockRegistry())
+    store.MarkWatchedIfFinished("ttQW1", "ttQW1", 600, 1000)
+    Harness_Ok(not store.IsWatched("ttQW1"), "below threshold is not watched")
+    store.MarkWatchedIfFinished("ttQW2", "ttQW2", 700, 1000)
+    Harness_Ok(store.IsWatched("ttQW2"), "at threshold is watched")
+    store.MarkWatchedIfFinished("ttQW3", "ttQW3", 9000, 10000)
+    Harness_Ok(store.IsWatched("ttQW3"), "above threshold is watched")
+    store.MarkWatchedIfFinished("ttQW4", "ttQW4", 5000, 0)
+    Harness_Ok(not store.IsWatched("ttQW4"), "zero duration is ignored")
+    store.MarkWatchedIfFinished("ttQW5", "", 8000, 10000)
+    Harness_Ok(store.IsWatched("ttQW5"), "blank videoId keys by the meta id")
+end sub
+
+sub Test_Library_MarkWatchedEpisodeKey()
+    Harness_Suite("MarkWatchedIfFinished keys episodes by videoId, idempotently")
+    store = LibraryStore(MockRegistry())
+    store.MarkWatchedIfFinished("ttQW", "ttQW:2:3", 800, 1000)
+    Harness_Ok(store.EpisodeWatched("ttQW", 2, 3, []), "episode is marked")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 2, 4, []), "a neighbor episode is not marked")
+    Harness_Ok(not store.IsWatched("ttQW"), "an episode mark is not a movie mark")
+    store.MarkWatchedIfFinished("ttQW", "ttQW:2:3", 900, 1000)
+    Harness_Ok(store.EpisodeWatched("ttQW", 2, 3, []), "re-mark stays watched")
+    Harness_Equal(store.watched.Count(), 1, "re-mark does not duplicate the entry")
+end sub
+
+sub Test_Library_MarkSeriesDone()
+    Harness_Suite("MarkSeriesDone persists a whole-series flag idempotently")
+    store = LibraryStore(MockRegistry())
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 1, []), "episode not watched before done")
+    store.MarkSeriesDone("ttQW")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 1, []), "done marks every episode")
+    Harness_Ok(store.EpisodeWatched("ttQW", 99, 99, []), "done marks episodes outside a list")
+    Harness_Equal(store.SeriesStatus("ttQW"), "done", "series status is done")
+    store.MarkSeriesDone("ttQW")
+    Harness_Equal(store.watched.Count(), 1, "series-done is idempotent")
+end sub
+
+sub Test_Library_SeriesStatusLocal()
+    Harness_Suite("SeriesStatus reads local state and defaults to none")
+    fresh = LibraryStore(MockRegistry())
+    Harness_Equal(fresh.SeriesStatus(""), "none", "blank id is none")
+    Harness_Equal(fresh.SeriesStatus("ttQW"), "none", "fresh series is none")
+
+    finished = LibraryStore(MockRegistry())
+    finished.MarkWatchedIfFinished("ttQW", "ttQW:1:2", 800, 1000)
+    Harness_Equal(finished.SeriesStatus("ttQW"), "progress", "a finished episode counts as in progress")
+
+    playing = LibraryStore(MockRegistry())
+    playing.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 500, 1000)
+    Harness_Equal(playing.SeriesStatus("ttQW"), "progress", "an active position counts as in progress")
+
+    started = LibraryStore(MockRegistry())
+    started.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 0, 1000)
+    Harness_Equal(started.SeriesStatus("ttQW"), "none", "a zero position is not in progress")
+
+    aged = LibraryStore(MockRegistry())
+    aged.SetPosition("ttQW:1:3", "ttQW", "series", 1, 3, "Third", "", 900, 1000)
+    aged.MarkWatchedIfFinished("ttQW", "ttQW:1:3", 900, 1000)
+    aged.RemovePosition("ttQW:1:3")
+    Harness_Equal(aged.SeriesStatus("ttQW"), "progress", "finished episode survives the CW entry aging out")
+
+    done = LibraryStore(MockRegistry())
+    done.MarkWatchedIfFinished("ttQW", "ttQW:1:2", 800, 1000)
+    done.MarkSeriesDone("ttQW")
+    Harness_Equal(done.SeriesStatus("ttQW"), "done", "series-done is done and beats progress")
+end sub
+
+sub Test_Library_EpisodeAired()
+    Harness_Suite("EpisodeAired gates not-yet-aired episodes")
+    store = LibraryStore(MockRegistry())
+    now = "2026-09-16T00:00:00.000Z"
+    past = { released: "2026-08-05T08:00:00.000Z" }
+    today = { released: "2026-09-16T08:00:00.000Z" }
+    future = { released: "2026-09-30T08:00:00.000Z", name: "TBA " }
+    Harness_Ok(store.EpisodeAired(past, now), "past episode aired")
+    Harness_Ok(store.EpisodeAired(today, now), "today's episode aired")
+    Harness_Ok(not store.EpisodeAired(future, now), "future episode not aired")
+    Harness_Ok(not store.EpisodeAired({ firstAired: "2026-10-07T08:00:00.000Z" }, now), "firstAired fallback respected")
+    Harness_Ok(store.EpisodeAired({}, now), "no date means aired")
+    Harness_Ok(store.EpisodeAired({ released: "2026-08-05" }, now), "bare date aired")
+    Harness_Ok(store.EpisodeAired({ released: "rubbish" }, now), "malformed date means aired")
+    Harness_Ok(store.EpisodeAired(invalid, now), "invalid episode means aired")
+    Harness_Ok(store.EpisodeAired({ released: "1960-01-01T00:00:00.000Z" }, ""), "past episode aired with no clock")
+    Harness_Ok(not store.EpisodeAired({ released: "2100-01-01T00:00:00.000Z" }, invalid), "future episode still unaired with invalid clock")
+end sub
+
+sub Test_Library_ProgressFor()
+    Harness_Suite("ProgressFor returns the raw resume position for a meta")
+    store = LibraryStore(MockRegistry())
+    Harness_Ok(store.ProgressFor("") = invalid, "blank id is invalid")
+    Harness_Ok(store.ProgressFor("ttQW") = invalid, "never watched is invalid")
+    store.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 90000, 1800000)
+    progress = store.ProgressFor("ttQW")
+    Harness_Ok(progress <> invalid, "progress found")
+    Harness_Equal(progress.position, 90000, "position ms carried")
+    Harness_Equal(progress.duration, 1800000, "duration ms carried")
+end sub
+
+sub Test_Library_ProgressFraction()
+    Harness_Suite("ProgressFraction returns the clamped bar fraction for a meta")
+    store = LibraryStore(MockRegistry())
+    Harness_Ok(store.ProgressFraction("") = invalid, "blank id is invalid")
+    Harness_Ok(store.ProgressFraction("ttQW") = invalid, "never watched is invalid")
+    store.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 450, 1800)
+    Harness_Equal(store.ProgressFraction("ttQW"), 0.25, "resume position maps to position/duration")
+    store.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 3000, 1800)
+    Harness_Equal(store.ProgressFraction("ttQW"), 1, "past-the-end clamps to one")
+    store.AddSaved("ttQW2", "movie", "Zero Duration")
+    store.SetPosition("ttQW2", "ttQW2", "movie", 0, 0, "Zero Duration", "", 300, 0)
+    Harness_Ok(store.ProgressFraction("ttQW2") = invalid, "zero duration has no bar")
+end sub
+
+sub Test_Library_WatchedGlyph()
+    Harness_Suite("WatchedGlyph maps watched state to a single glyph token per tile")
+    store = LibraryStore(MockRegistry())
+    Harness_Equal(store.WatchedGlyph("", "movie"), "", "blank id draws no badge")
+    Harness_Equal(store.WatchedGlyph("ttQW", "movie"), "", "unwatched movie draws no badge")
+    store.MarkWatchedIfFinished("ttQW", "ttQW", 800, 1000)
+    Harness_Equal(store.WatchedGlyph("ttQW", "movie"), "eye", "watched movie uses GLYPH_WATCHED")
+    Harness_Equal(store.WatchedGlyph("ttQW", ""), "eye", "missing type still watches by the whole-key check")
+
+    guestSeries = LibraryStore(MockRegistry())
+    guestSeries.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 500, 1000)
+    Harness_Equal(guestSeries.WatchedGlyph("ttQW", "series"), "clock", "guest in-progress series uses GLYPH_PROGRESS")
+    guestSeries.MarkSeriesDone("ttQW")
+    Harness_Equal(guestSeries.WatchedGlyph("ttQW", "series"), "eye", "guest done series uses GLYPH_WATCHED")
+    untouched = LibraryStore(MockRegistry())
+    Harness_Equal(untouched.WatchedGlyph("ttQW", "series"), "", "fresh guest series draws no badge")
+
+    account = LibraryStore(MockRegistry(), "stremio")
+    items = []
+    items.Push(LibraryItemFixture("ttGLP", "series", "In Progress", "2024-06-01T00:00:00Z", { timesWatched: 0, timeOffset: 1000 }))
+    items.Push(LibraryItemFixture("ttGLD", "series", "Done", "2024-06-02T00:00:00Z"))
+    account.SyncFromStremio(items)
+    Harness_Equal(account.WatchedGlyph("ttGLP", "series"), "clock", "in-progress series uses GLYPH_PROGRESS")
+    Harness_Equal(account.WatchedGlyph("ttGLD", "series"), "eye", "done series uses GLYPH_WATCHED")
+    Harness_Equal(account.WatchedGlyph("ttGLD", "movie"), "eye", "movie-type lookup reuses the same watched key")
+    Harness_Equal(account.WatchedGlyph("ttGLP", "movie"), "", "in-progress series seen as a movie draws no badge")
+end sub
+
+sub Test_Library_WatchedPersistsAcrossReloads()
+    Harness_Suite("guest watched state persists across reloads")
+    registry = MockRegistry()
+    first = LibraryStore(registry)
+    first.MarkWatchedIfFinished("ttQW", "ttQW", 800, 1000)
+    first.MarkWatchedIfFinished("ttQW2", "ttQW2:1:5", 900, 1000)
+    first.MarkSeriesDone("ttQW3")
+
+    second = LibraryStore(registry)
+    Harness_Ok(second.IsWatched("ttQW"), "movie watch restored")
+    Harness_Ok(second.EpisodeWatched("ttQW2", 1, 5, []), "episode watch restored")
+    Harness_Ok(second.EpisodeWatched("ttQW3", 4, 2, []), "series-done restored")
+    raw = registry.Read("library")
+    parsed = ParseJson(raw)
+    Harness_Equal(parsed.watched.Count(), 3, "watched map written to the guest key")
+end sub
+
+sub Test_Library_StremioWatchedIsDisplayOnly()
+    Harness_Suite("stremio watched is in-memory only, never persisted")
+    registry = MockRegistry()
+    store = LibraryStore(registry, "stremio")
+    store.MarkWatchedIfFinished("ttQW", "ttQW", 800, 1000)
+    Harness_Ok(store.IsWatched("ttQW"), "watch is recorded during the live session")
+    raw = registry.Read("stremio_library")
+    parsed = ParseJson(raw)
+    Harness_Ok(parsed <> invalid, "stremio key written")
+    Harness_Ok(parsed.watched = invalid, "watched not persisted to the stremio key")
+
+    reopened = LibraryStore(registry, "stremio")
+    Harness_Ok(not reopened.IsWatched("ttQW"), "watch does not survive the reload")
+end sub
+
+sub Test_Library_WatchedSwitchSessionSeparates()
+    Harness_Suite("SwitchSession isolates watched state per session")
+    registry = MockRegistry()
+    store = LibraryStore(registry)
+    store.MarkWatchedIfFinished("ttQW", "ttQW", 800, 1000)
+
+    store.SwitchSession("stremio")
+    Harness_Ok(not store.IsWatched("ttQW"), "stremio session starts without local watches")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 1, []), "stremio session has no local episodes")
+
+    store.SwitchSession("guest")
+    Harness_Ok(store.IsWatched("ttQW"), "guest watches restored after switching back")
 end sub

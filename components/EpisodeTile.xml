@@ -23,6 +23,9 @@
             <Rectangle id="tileBg" width="312" height="172" translation="[4, 4]" color="0x0B110DFF" />
             <Poster id="poster" width="312" height="172" translation="[4, 4]" failBackgroundColor="0x0B110DFF" />
             <Label id="titleText" width="296" height="164" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" color="0xE9F2ECFF" />
+            <!-- Optional watched badge (40px check, top-right). Hidden until a
+                 screen passes itemContent.watched. -->
+            <Poster id="watchedBadge" width="40" height="40" translation="[272, 8]" visible="false" />
         </Rectangle>
     </children>
 </component>

@@ -237,12 +237,13 @@ sub BuildRows()
             flat = r * m.chunk + c
             if flat >= m.items.Count() then exit for
             item = m.items[flat]
-            tile = row.CreateChild("ContentNode")
+            tile = row.CreateChild("TileContent")
             name = item.name
             if name = invalid then name = ""
             tile.title = name
             poster = item.poster
             if poster <> invalid and poster <> "" then tile.hdPosterUrl = poster
+            TileWatchFields(tile, item.metaId, item.metaType)
         end for
     end for
     m.grid.content = content
@@ -258,6 +259,18 @@ sub BuildRows()
     else
         m.status.text = ""
     end if
+end sub
+
+' Paint the watched overlays on one saved-library tile: the continue-watching
+' bar from ProgressFraction, and the coarse glyph by WatchedGlyph (eye for a
+' finished movie/series, clock for an in-progress one).
+sub TileWatchFields(tile as object, metaId as dynamic, metaType as dynamic)
+    if m.stores = invalid or m.stores.library = invalid then return
+    fraction = m.stores.library.ProgressFraction(metaId)
+    tile.progress = 0
+    if fraction <> invalid then tile.progress = fraction
+    glyph = m.stores.library.WatchedGlyph(metaId, metaType)
+    tile.watchedGlyph = glyph
 end sub
 
 ' The human summary of the current view, e.g. "All · Recently added".

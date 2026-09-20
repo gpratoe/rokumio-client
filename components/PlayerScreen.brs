@@ -635,6 +635,9 @@ sub SavePosition()
     if params.poster <> invalid then poster = params.poster
 
     m.stores.library.SetPosition(params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration))
+    mid = ""
+    if params.metaId <> invalid then mid = params.metaId
+    m.stores.library.MarkWatchedIfFinished(mid, params.videoId, Int(position), Int(duration))
     m.saved = true
     PublishWatchState()
 end sub

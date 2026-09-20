@@ -40,6 +40,8 @@ async function writeCombinedScript() {
         'tests/linkcode.test.brs',
         'tests/playbackstore.test.brs',
         'tests/subtitlesstore.test.brs',
+        'tests/watchedcodec.fixtures.brs',
+        'tests/watchedcodec.test.brs',
         'tests/_run.brs'
     ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });
@@ -58,7 +60,8 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'LibraryStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'PlaybackStore.brs'),
-    path.join(stagingDir, 'source', 'stores', 'SubtitlesStore.brs')
+    path.join(stagingDir, 'source', 'stores', 'SubtitlesStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs')
 ];
 
 function checkScreenContract() {
@@ -81,21 +84,90 @@ function checkScreenContract() {
     return ok;
 }
 
+// Including the same script file twice in one component corrupts the shared
+// function namespace at load time — a class that some other script then calls
+// resolves to a non-function ("Function Call Operator ( ) attempted on
+// non-function") on the device. This bit us with WatchedCodec.bs, so pin it:
+// no component may repeat a script uri.
+function checkNoDuplicateScripts() {
+    const fs = require('fs');
+    const components = fs.readdirSync(path.join(projectRoot, 'components')).filter(f => f.endsWith('.xml'));
+    let ok = true;
+    for (const name of components) {
+        const xml = fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8');
+        const uris = [...xml.matchAll(/<script[^>]*uri="([^"]+)"/gi)].map(m => m[1]);
+        const seen = new Set();
+        for (const uri of uris) {
+            if (seen.has(uri)) {
+                console.error(`${name} includes <script uri="${uri}"> more than once — a duplicated script corrupts the component scope`);
+                ok = false;
+            }
+            seen.add(uri);
+        }
+    }
+    return ok;
+}
+
+// Roku scopes user-defined global functions per component, so a store method
+// invoked from a screen's scope must never call a bare cross-file global —
+// `WatchedCodec()` resolved to invalid at runtime inside EpisodeWatched that
+// way. The interpreter cannot model this (run.js concatenates one scope), so
+// pin it statically: LibraryStore may construct the codec exactly once, in
+// new() (which runs under MainScene's scope), and must decode via the stored
+// m.codec instance from then on.
+function checkLibraryCodecContract() {
+    const fs = require('fs');
+    const src = fs.readFileSync(path.join(projectRoot, 'source', 'stores', 'LibraryStore.bs'), 'utf8');
+    let ok = true;
+    const constructors = [];
+    for (const [i, line] of src.split('\n').entries()) {
+        const code = line.split("'")[0];
+        if (/\bWatchedCodec\s*\(/.test(code)) constructors.push(code.trim());
+    }
+    if (constructors.length !== 1) {
+        console.error(`LibraryStore.bs must call WatchedCodec() exactly once, in new(); found ${constructors.length} call(s)`);
+        ok = false;
+    } else if (!/^m\.codec = WatchedCodec\(\)/.test(constructors[0])) {
+        console.error(`LibraryStore.bs: the single WatchedCodec() call must be the m.codec capture in new() (found "${constructors[0]}")`);
+        ok = false;
+    }
+    if (!/\bm\.codec\s*\.\s*WatchedDecode\s*\(/.test(src)) {
+        console.error('LibraryStore.bs must decode account bitfields through m.codec.WatchedDecode (a bare global WatchedCodec() dies cross-component)');
+        ok = false;
+    }
+    return ok;
+}
+
 // MarkupGrid only updates item components through interface fields named
 // `itemContent` and `itemHasFocus` — never `content` or `focused`. This bit us:
 // PosterTile observed the wrong fields and never rendered text or focus. Guard
 // the interface so the tile's render contract stays pinned to the grid's API.
-function checkItemContract() {
+// Both tiles must keep their interfaces read-only-exclusive: no `content` /
+// `focused` re-declaration may ever creep back in (it would silently shadow the
+// list's own fields and break the recycle behavior).
+function checkTileContract() {
     const fs = require('fs');
-    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'PosterTile.xml'), 'utf8');
-    const declared = new Set(
-        [...xml.matchAll(/<field\s+id="([^"]+)"[\s>]/gi)].map(match => match[1])
-    );
+    const tiles = [
+        { name: 'PosterTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] },
+        { name: 'EpisodeTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] }
+    ];
     let ok = true;
-    for (const field of ['itemContent', 'itemHasFocus', 'rowHasFocus']) {
-        if (!declared.has(field)) {
-            console.error(`PosterTile.xml is missing <field id="${field}" ... /> from its interface`);
-            ok = false;
+    for (const tile of tiles) {
+        const xml = fs.readFileSync(path.join(projectRoot, 'components', `${tile.name}.xml`), 'utf8');
+        const declared = new Set(
+            [...xml.matchAll(/<field\s+id="([^"]+)"[\s>]/gi)].map(match => match[1])
+        );
+        for (const field of tile.fields) {
+            if (!declared.has(field)) {
+                console.error(`${tile.name}.xml is missing <field id="${field}" ... /> from its interface`);
+                ok = false;
+            }
+        }
+        for (const forbidden of ['content', 'focused']) {
+            if (declared.has(forbidden)) {
+                console.error(`${tile.name}.xml must not re-declare <field id="${forbidden}"> — the list drives items through itemContent/itemHasFocus only`);
+                ok = false;
+            }
         }
     }
     return ok;
@@ -301,7 +373,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkItemContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
         process.exit(1);
     }
 
