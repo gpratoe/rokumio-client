@@ -267,9 +267,10 @@ end sub
 sub TileWatchFields(tile as object, metaId as dynamic, metaType as dynamic)
     if m.stores = invalid or m.stores.library = invalid then return
     fraction = m.stores.library.ProgressFraction(metaId)
+    tile.progress = 0
     if fraction <> invalid then tile.progress = fraction
     glyph = m.stores.library.WatchedGlyph(metaId, metaType)
-    if glyph <> "" then tile.watchedGlyph = glyph
+    tile.watchedGlyph = glyph
 end sub
 
 ' The human summary of the current view, e.g. "All · Recently added".

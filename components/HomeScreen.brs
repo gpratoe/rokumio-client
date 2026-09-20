@@ -216,21 +216,25 @@ function MakeRowNode(row as object, counts = invalid as object) as object
 end function
 
 ' Paint the shared poster-tile fields — title, hdPosterUrl, progress-bar fraction
-' and watched glyph — onto an item ContentNode. Always writes the overlay fields
-' so a recycled node never carries a stale bar/badge into a cell that has none;
-' fallbackGlyph is the store-computed glyph when the meta did not carry one.
+' and watched glyph — onto an item ContentNode. Overlay fields are always
+' written a concrete value (""/0 when there is none): they're typed fields on
+' TileContent, and on a recycled node an "unset" is not reliably cleared by
+' assigning invalid, so a tile that previously held a bar/badge would keep it
+' into a cell that has none. fallbackGlyph is the store-computed glyph when the
+' meta did not carry one.
 sub PaintTileFields(item as object, meta as object, fallbackGlyph as dynamic)
     name = meta.name
     if name = invalid then name = ""
     item.title = name
     poster = meta.poster
-    if poster <> invalid and poster <> "" then item.hdPosterUrl = poster else item.hdPosterUrl = invalid
-    item.progress = invalid
+    if poster = invalid then poster = ""
+    item.hdPosterUrl = poster
+    item.progress = 0
     if meta.progress <> invalid and meta.progress > 0 then item.progress = meta.progress
     glyph = meta.watchedGlyph
     if glyph = invalid then glyph = fallbackGlyph
-    item.watchedGlyph = invalid
-    if glyph <> invalid and glyph <> "" then item.watchedGlyph = glyph
+    if glyph = invalid then glyph = ""
+    item.watchedGlyph = glyph
 end sub
 
 ' The top row when the user has watched something: one tile per local
