@@ -366,13 +366,32 @@ end sub
 
 sub Test_Library_SeriesStatusLocal()
     Harness_Suite("SeriesStatus reads local state and defaults to none")
-    store = LibraryStore(MockRegistry())
-    Harness_Equal(store.SeriesStatus(""), "none", "blank id is none")
-    Harness_Equal(store.SeriesStatus("ttQW"), "none", "fresh series is none")
-    store.MarkWatchedIfFinished("ttQW", "ttQW:1:2", 800, 1000)
-    Harness_Equal(store.SeriesStatus("ttQW"), "none", "a single episode mark is not done or progress")
-    store.MarkSeriesDone("ttQW")
-    Harness_Equal(store.SeriesStatus("ttQW"), "done", "series-done is done")
+    fresh = LibraryStore(MockRegistry())
+    Harness_Equal(fresh.SeriesStatus(""), "none", "blank id is none")
+    Harness_Equal(fresh.SeriesStatus("ttQW"), "none", "fresh series is none")
+
+    finished = LibraryStore(MockRegistry())
+    finished.MarkWatchedIfFinished("ttQW", "ttQW:1:2", 800, 1000)
+    Harness_Equal(finished.SeriesStatus("ttQW"), "progress", "a finished episode counts as in progress")
+
+    playing = LibraryStore(MockRegistry())
+    playing.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 500, 1000)
+    Harness_Equal(playing.SeriesStatus("ttQW"), "progress", "an active position counts as in progress")
+
+    started = LibraryStore(MockRegistry())
+    started.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 0, 1000)
+    Harness_Equal(started.SeriesStatus("ttQW"), "none", "a zero position is not in progress")
+
+    aged = LibraryStore(MockRegistry())
+    aged.SetPosition("ttQW:1:3", "ttQW", "series", 1, 3, "Third", "", 900, 1000)
+    aged.MarkWatchedIfFinished("ttQW", "ttQW:1:3", 900, 1000)
+    aged.RemovePosition("ttQW:1:3")
+    Harness_Equal(aged.SeriesStatus("ttQW"), "progress", "finished episode survives the CW entry aging out")
+
+    done = LibraryStore(MockRegistry())
+    done.MarkWatchedIfFinished("ttQW", "ttQW:1:2", 800, 1000)
+    done.MarkSeriesDone("ttQW")
+    Harness_Equal(done.SeriesStatus("ttQW"), "done", "series-done is done and beats progress")
 end sub
 
 sub Test_Library_EpisodeAired()
@@ -428,6 +447,14 @@ sub Test_Library_WatchedGlyph()
     store.MarkWatchedIfFinished("ttQW", "ttQW", 800, 1000)
     Harness_Equal(store.WatchedGlyph("ttQW", "movie"), "eye", "watched movie uses GLYPH_WATCHED")
     Harness_Equal(store.WatchedGlyph("ttQW", ""), "eye", "missing type still watches by the whole-key check")
+
+    guestSeries = LibraryStore(MockRegistry())
+    guestSeries.SetPosition("ttQW:1:1", "ttQW", "series", 1, 1, "Pilot", "", 500, 1000)
+    Harness_Equal(guestSeries.WatchedGlyph("ttQW", "series"), "clock", "guest in-progress series uses GLYPH_PROGRESS")
+    guestSeries.MarkSeriesDone("ttQW")
+    Harness_Equal(guestSeries.WatchedGlyph("ttQW", "series"), "eye", "guest done series uses GLYPH_WATCHED")
+    untouched = LibraryStore(MockRegistry())
+    Harness_Equal(untouched.WatchedGlyph("ttQW", "series"), "", "fresh guest series draws no badge")
 
     account = LibraryStore(MockRegistry(), "stremio")
     items = []

@@ -374,18 +374,41 @@ class LibraryStore
 
     ' Coarse series status for grid tiles that have no episode list. "done" when
     ' the whole series is known watched (local MarkSeriesDone, or the account
-    ' flagged the series watched); "progress" when some watch state exists
-    ' (account in-progress, or the account bitfield covers part of the list);
-    ' "none" otherwise. Precise done (every episode) needs the episode list and
-    ' is EpisodesScreen's job.
+    ' flagged the series watched); "progress" when some watch state exists —
+    ' account in-progress/bitfield, or the local layer (a continue-watching
+    ' position or a locally-finished episode); "none" otherwise. Precise done
+    ' (every episode) needs the episode list and is EpisodesScreen's job.
     function SeriesStatus(metaId as string) as string
         if metaId = "" then return "none"
         if m.HasKey(m.watched, metaId) then return "done"
         account = m.AccountLayer(metaId)
-        if account = invalid then return "none"
-        if account.watched then return "done"
-        if account.inProgress or account.bitfield <> "" then return "progress"
+        if account <> invalid
+            if account.watched then return "done"
+            if account.inProgress or account.bitfield <> "" then return "progress"
+        end if
+        ' Guest/local parity: the account layer is the stremio-only source of
+        ' in-progress, so a guest's progress can only come from the local layer
+        ' (positions + the watched set), mirroring the account's own signals.
+        if m.HasLocalSeriesProgress(metaId) then return "progress"
         return "none"
+    end function
+
+    ' The local layer's in-progress answer for a series, mirroring the account
+    ' layer's inProgress/bitfield: a continue-watching entry with real progress
+    ' (position > 0), or a locally-finished episode key ("{metaId}:{season}:
+    ' {episode}") that survives even after the CW cap ages the position out.
+    ' SeriesStatus gives "done" precedence, so a MarkSeriesDone series never
+    ' reads as in progress here.
+    function HasLocalSeriesProgress(metaId as string) as boolean
+        if metaId = "" then return false
+        for i = 0 to m.positions.Count() - 1
+            if m.positions[i].metaId = metaId and m.positions[i].position > 0 then return true
+        end for
+        prefix = metaId + ":"
+        for each key in m.watched
+            if Left(key, prefix.Len()) = prefix then return true
+        end for
+        return false
     end function
 
     ' The coarse watched glyph for a grid tile without an episode list. Series
