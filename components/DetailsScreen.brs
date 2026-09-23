@@ -125,13 +125,15 @@ sub MaybeRefreshMeta()
 end sub
 
 ' Tear down an in-flight meta refresh. A newer entry supersedes it, and leaving
-' this screen drops it too — the worker finishes on its own thread, but no
-' observer means its result can never land.
+' this screen drops it too. STOP is the real cancel — merely removing a running
+' Task node does not kill its worker thread — and dropping the observer means
+' its result can never land.
 sub CancelMetaLoad()
     if m.loadTask <> invalid
         task = m.loadTask
         m.loadTask = invalid
         task.unobserveField("result")
+        task.control = "STOP"
         if task.getParent() <> invalid then m.top.RemoveChild(task)
     end if
 end sub

@@ -85,14 +85,16 @@ sub LoadSeries()
     task.control = "RUN"
 end sub
 
-' Tear down an in-flight season load (a newer entry supersedes it). The worker
-' finishes on its own thread; removing the observer means its result can never
-' land, and re-entering this screen builds the list afresh anyway.
+' Tear down an in-flight season load (a newer entry supersedes it). STOP is the
+' real cancel — merely removing a running Task node does not kill its worker
+' thread — and dropping the observer means its result can never land; re-entering
+' this screen builds the list afresh anyway.
 sub CancelLoad()
     if m.loadTask <> invalid
         task = m.loadTask
         m.loadTask = invalid
         task.unobserveField("result")
+        task.control = "STOP"
         if task.getParent() <> invalid then m.top.RemoveChild(task)
     end if
 end sub

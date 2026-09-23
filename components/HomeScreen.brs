@@ -519,13 +519,15 @@ end sub
 
 ' Stop a pending Continue-Watching open: tear down any in-flight task, clear the
 ' pending context and restore the hint. Called on blur (navigating away cancels
-' the open) and when another tile supersedes it. Removing the observer means the
-' cancelled worker's result can never land.
+' the open) and when another tile supersedes it. STOP is the real cancel — merely
+' removing a running Task node does not kill its worker thread (see MainScene) —
+' and dropping the observer means its result can never land afterwards.
 sub CancelOpen()
     if m.openTask <> invalid
         task = m.openTask
         m.openTask = invalid
         task.unobserveField("result")
+        task.control = "STOP"
         if task.getParent() <> invalid then m.top.RemoveChild(task)
     end if
     m.pendingOpen = invalid
