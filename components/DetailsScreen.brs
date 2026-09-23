@@ -209,7 +209,7 @@ sub ShowChips(actions as object)
     end for
     m.chipsRow.content = root
     m.chipsRow.jumpToRowItem = [0, 0]
-    m.chipsRow.SetFocus(true)
+    if m.top.screenActive then m.chipsRow.SetFocus(true)
 end sub
 
 sub onChipSelected()

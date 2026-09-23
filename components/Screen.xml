@@ -13,7 +13,13 @@
         <!-- Screen contract: called by ScreenStack for show/hide/focus/back.
              callFunc only runs for functions declared in the interface. Stores
              are class instances and cannot cross components through a field,
-             so they arrive via callFunc. -->
+             so they arrive via callFunc.
+
+             screenActive is owned by the stack: true while this screen is the
+             interactive top. Async task result handlers must only grab focus
+             while it holds, or a late landing on a covered screen would steal
+             focus from whatever is on top. -->
+        <field id="screenActive" type="boolean" value="false" />
         <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />

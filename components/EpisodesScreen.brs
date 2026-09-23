@@ -151,7 +151,7 @@ sub BuildList(meta as object)
     m.epList.content = content
     m.epList.numRows = m.seasons.Count()
     m.epList.jumpToRowItem = ResumePosition()
-    m.epList.SetFocus(true)
+    if m.top.screenActive then m.epList.SetFocus(true)
     UpdateHeader(m.epList.jumpToRowItem)
 
     MarkAllIfDone(anyRegular, allDone)

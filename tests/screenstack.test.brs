@@ -1,10 +1,11 @@
 ' ScreenStack unit tests.
 '
 ' ScreenStack talks to the scene only through FindNode, node.visible,
-' node.callFunc and node.SetFocus, so the harness fakes the scene with the same
-' tiny surface. Every assertion printed by the harness is a lock on a stack
-' behavior: push shows + enters, pop hides + blurs + exits + refocuses, back
-' delegates, popTo walks the stack, and the bottom screen is never popped away.
+' node.screenActive, node.callFunc and node.SetFocus, so the harness fakes the
+' scene with the same tiny surface. Every assertion printed by the harness is a
+' lock on a stack behavior: push shows + enters, pop hides + blurs + exits +
+' refocuses, back delegates, popTo walks the stack, the bottom screen is never
+' popped away, and screenActive tracks the interactive top.
 
 function MockNode(id as string, log as object, parent = invalid as dynamic) as object
     node = {
@@ -103,6 +104,9 @@ sub Test_Push_ShowsAndEnters()
 
     Harness_Ok(Test_FindCall(log, "home", "BlurFocus") <> invalid, "outgoing home blurred on push")
 
+    Harness_Ok(not screens.home.screenActive, "outgoing home no longer active after push")
+    Harness_Ok(screens.detail.screenActive, "pushed detail is the active top")
+
     call = Test_FindCall(log, "detail", "SetFocus")
     Harness_Ok(call <> invalid and call.value = true, "pushed detail focused")
 end sub
@@ -120,12 +124,15 @@ sub Test_Modal_Push_KeepsPreviousVisible()
     Harness_Ok(screens.dialog.visible, "modal dialog visible")
     Harness_Ok(screens.home.visible, "home stays visible behind modal")
     Harness_Ok(Test_FindCall(log, "home", "BlurFocus") <> invalid, "home still blurred behind modal")
+    Harness_Ok(not screens.home.screenActive, "home inactive behind modal")
+    Harness_Ok(screens.dialog.screenActive, "modal dialog is the active top")
     call = Test_FindCall(log, "dialog", "SetFocus")
     Harness_Ok(call <> invalid and call.value = true, "modal dialog focused")
 
     Harness_Ok(stack.pop(), "pop returns true")
     Harness_Ok(screens.dialog.visible = false, "dialog hidden after pop")
     Harness_Ok(screens.home.visible, "home still visible after pop")
+    Harness_Ok(screens.home.screenActive, "home active again after modal pop")
     call = Test_FindCall(log, "home", "SetFocus")
     Harness_Ok(call <> invalid and call.value = true, "home refocused after pop")
 end sub
@@ -184,6 +191,8 @@ sub Test_Pop_RestoresPrevious()
     Harness_Equal(stack.count(), 1, "count back to 1")
     Harness_Ok(screens.home.visible, "home visible again")
     Harness_Ok(screens.detail.visible = false, "popped detail hidden")
+    Harness_Ok(not screens.detail.screenActive, "popped detail no longer active")
+    Harness_Ok(screens.home.screenActive, "restored home is active again")
 
     Harness_Ok(Test_FindCall(log, "detail", "BlurFocus") <> invalid, "popped detail blurred")
     Harness_Ok(Test_FindCall(log, "detail", "OnExit") <> invalid, "popped detail exited")
@@ -209,6 +218,8 @@ sub Test_PushNode_LikePush()
     Harness_Equal(stack.count(), 2, "count is 2 after pushNode")
     Harness_Ok(player.visible, "player visible after pushNode")
     Harness_Ok(not home.visible, "outgoing home hidden after pushNode")
+    Harness_Ok(not home.screenActive, "outgoing home inactive after pushNode")
+    Harness_Ok(player.screenActive, "player node is the active top")
 
     call = Test_FindCall(log, "player", "OnEnter")
     Harness_Ok(call <> invalid and call.withParams.url = "http://example/lib.m3u8", "pushNode OnEnter received params")

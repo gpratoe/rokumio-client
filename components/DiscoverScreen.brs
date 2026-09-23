@@ -326,7 +326,7 @@ sub onDiscoverLoaded()
     if result = invalid or not result.ok or result.metas = invalid
         if m.metas.Count() = 0
             m.status.text = "Failed to load " + Chr(34) + label + Chr(34) + "."
-            m.chips.SetFocus(true)
+            if m.top.screenActive then m.chips.SetFocus(true)
         end if
         return
     end if
@@ -340,19 +340,18 @@ sub onDiscoverLoaded()
             m.grid.content = CreateObject("roSGNode", "ContentNode")
             m.grid.numRows = 0
             m.status.text = "No results for " + Chr(34) + label + Chr(34) + "."
-            m.chips.SetFocus(true)
+            if m.top.screenActive then m.chips.SetFocus(true)
             return
         end if
         UpdateGrid()
         m.status.text = ""
-        m.chips.SetFocus(true)
+        if m.top.screenActive then m.chips.SetFocus(true)
     else
         for each meta in result.metas
             m.metas.Push(meta)
         end for
         m.allLoaded = not result.hasMore or result.metas.Count() = 0
         UpdateGrid(AppendRestoreRow())
-        m.grid.SetFocus(true)
     end if
 end sub
 

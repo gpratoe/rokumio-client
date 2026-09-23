@@ -399,7 +399,7 @@ sub RenderActiveProvider()
             m.streamsPlaceholder.text = label
             m.streamsPlaceholder.visible = true
         end if
-        m.top.SetFocus(true)
+        if m.top.screenActive then m.top.SetFocus(true)
         return
     end if
 
@@ -426,7 +426,7 @@ sub RenderActiveProvider()
     if not m.listFilled
         m.listFilled = true
         m.streamsList.jumpToRowItem = [0, 0]
-        m.streamsList.SetFocus(true)
+        if m.top.screenActive then m.streamsList.SetFocus(true)
     end if
 end sub
 
