@@ -16,7 +16,7 @@ sub discover()
             answer = catalog.Catalog(m.top.addonAddress, m.top.metaType, m.top.catalogId, m.top.extra)
             result.ok = answer.ok
             result.error = answer.error
-            result.hasMore = answer.hasMore = true
+            result.hasMore = answer.hasMore
             if answer.ok and answer.metas <> invalid then result.metas = answer.metas
         else
             result.error = "missing discover filters"
@@ -26,6 +26,6 @@ sub discover()
         print "[rokumio] DiscoverLoaderTask done, metas=" + result.metas.Count().ToStr()
     catch e
         print "[rokumio] DiscoverLoaderTask error: " + e.message
-        m.top.result = { ok: false, metas: [], error: e.message }
+        m.top.result = { ok: false, metas: [], hasMore: false, error: e.message }
     end try
 end sub

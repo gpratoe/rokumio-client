@@ -80,7 +80,10 @@ class CatalogStore
         end if
 
         result.metas = metas
-        result.hasMore = response.json.hasMore = true
+        ' Explicit boolean read of the server's flag — the chained
+        ' `result.hasMore = response.json.hasMore = true` idiom is unambiguous
+        ' to mishandle (it IS a comparison), so state it plainly.
+        result.hasMore = (response.json.hasMore = true)
         result.ok = true
         return result
     end function
