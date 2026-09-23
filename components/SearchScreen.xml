@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="SearchScreen" extends="Group">
+<component name="SearchScreen" extends="Screen">
     <!-- Search: Cinemeta only. A KeyboardDialog prompt on entry, then results
          as poster rows grouped by type (Movies / Series). OK on a result
          publishes a pushRequest the Scene routes to Details. The * (options)
@@ -9,11 +9,9 @@
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
 
         <!-- Screen contract: called by ScreenStack for show/hide/focus/back. -->
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/SearchScreen.brs" />

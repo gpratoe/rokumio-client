@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="Screen" extends="Group">
+    <!-- The base every screen extends. It owns the one contract every screen
+         shares — the ScreenStack lifecycle + the store hand-off — so a screen
+         only declares what it adds, and the stack's callFunc calls are always
+         answered (by a screen override or by these defaults).
+
+         Screens keep their own script implementations for whatever they
+         actually do (OnEnter/OnExit/OnBackPressed overrides stay declared in
+         the child's interface, exactly as before this base existed); functions
+         a child never implements fall through to the defaults here. -->
+    <interface>
+        <!-- Screen contract: called by ScreenStack for show/hide/focus/back.
+             callFunc only runs for functions declared in the interface. Stores
+             are class instances and cannot cross components through a field,
+             so they arrive via callFunc. -->
+        <function name="SetStores" />
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+        <function name="BlurFocus" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/Screen.brs" />
+</component>

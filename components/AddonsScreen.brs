@@ -28,12 +28,6 @@ sub init()
     m.installTask = invalid
 end sub
 
-' Stores are class instances, which cannot cross components through an interface
-' field, so the Scene hands them over with callFunc instead.
-function SetStores(stores as object) as void
-    m.stores = stores
-end function
-
 function OnEnter(params as object) as void
     CancelInstall()
     BuildRows()

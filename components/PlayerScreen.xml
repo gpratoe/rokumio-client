@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="PlayerScreen" extends="Group">
+<component name="PlayerScreen" extends="Screen">
     <!-- Minimal player pushed from StreamsScreen with { stream, serverAddress,
          metaType, metaId, videoId, season, episode, position, name, poster,
          logo, ... }. The stream is resolved here (logo pulse while the torrent
@@ -9,11 +9,9 @@
          LibraryStore.SetPosition. The buffering logo is the one branded piece
          that stays. -->
     <interface>
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
         <field id="closeRequest" type="assocarray" alwaysNotify="true" />
         <field id="watchStateUpdate" type="assocarray" alwaysNotify="true" />
     </interface>

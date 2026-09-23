@@ -51,12 +51,6 @@ sub init()
     m.epMetaTask = invalid
 end sub
 
-' Stores are class instances, which cannot cross components through an interface
-' field, so the Scene hands them over with callFunc instead.
-function SetStores(stores as object) as void
-    m.stores = stores
-end function
-
 function OnEnter(params as object) as void
     ' Re-entry after the player pops: params is invalid and the Group was given
     ' focus by the stack. The stream list must take it back.

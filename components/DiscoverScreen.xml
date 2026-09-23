@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="DiscoverScreen" extends="Group">
+<component name="DiscoverScreen" extends="Screen">
     <!-- Discover: browse Cinemeta by filter. Three chips (Type · Chart · Genre)
          sit above a poster grid. OK on a chip opens a dropdown menu of the
          chip's options — Up/Down to move, OK to pick, Back to dismiss — so a
@@ -13,11 +13,9 @@
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
 
         <!-- Screen contract: called by ScreenStack for show/hide/focus/back. -->
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/DiscoverScreen.brs" />

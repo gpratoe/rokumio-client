@@ -53,10 +53,6 @@ sub init()
     m.subtitlePicker = SubtitlesStore(invalid)
 end sub
 
-function SetStores(stores as object) as void
-    m.stores = stores
-end function
-
 function OnEnter(params as object) as void
     if params = invalid or params.stream = invalid then return
     m.playParams = params

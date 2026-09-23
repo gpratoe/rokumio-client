@@ -35,10 +35,6 @@ sub init()
     m.top.ObserveField("taskNode", "onTaskNodeChanged")
 end sub
 
-function SetStores(stores as object) as void
-    m.stores = stores
-end function
-
 function OnEnter(params as object) as void
     BindTask(m.top.taskNode)
 end function

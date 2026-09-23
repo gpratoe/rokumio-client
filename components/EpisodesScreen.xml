@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="EpisodesScreen" extends="Group">
+<component name="EpisodesScreen" extends="Screen">
     <!-- The dedicated episode browser for a series. Pushed from DetailsScreen
          ("Episodes") with { addonAddress, meta, resume }. A Home-style RowList
          shows one row per season (tiles are episodes); the top header tracks the
@@ -8,11 +8,9 @@
     <interface>
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
 
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/EpisodesScreen.brs" />

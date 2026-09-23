@@ -1,16 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="AddonsScreen" extends="Group">
+<component name="AddonsScreen" extends="Screen">
     <!-- Installed add-on manager. An "Add add-on" row installs by fetching a
          manifest URL (system KeyboardDialog), and every installed add-on below
          it can be removed through a confirmation dialog unless it is a
          protected built-in. The list is rebuilt from AddonsStore on every entry
          and after each install/remove. -->
     <interface>
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/AddonsScreen.brs" />

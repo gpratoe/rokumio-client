@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="StreamsScreen" extends="Group">
+<component name="StreamsScreen" extends="Screen">
     <!-- Stream picker for a movie or episode, pushed with
          { addonAddress, metaType, metaId, videoId, season, episode, position,
            name, poster, logo, background } plus the panel's data the pusher
@@ -17,11 +17,9 @@
     <interface>
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
 
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/StreamsScreen.brs" />

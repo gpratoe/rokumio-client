@@ -66,19 +66,42 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs')
 ];
 
+// The ScreenStack drives every screen through the five callFunc'd contract
+// functions — SetStores plus the four lifecycle hooks. They now live on the
+// Screen base component and are inherited, so a screen only declares what it
+// adds or overrides. Pin the contract at its source: the base must carry the
+// five, every standard screen must extend it (a screen that skipped extends
+// would not inherit SetStores and MainScene's callFunc would silently no-op),
+// and a screen that re-declares a contract function locally must actually
+// implement it (declare-without-impl was how BlurFocus silently no-opped before
+// the base existed).
 function checkScreenContract() {
     const fs = require('fs');
-    const contract = ['OnEnter', 'OnExit', 'OnBackPressed', 'BlurFocus'];
+    const contract = ['SetStores', 'OnEnter', 'OnExit', 'OnBackPressed', 'BlurFocus'];
     const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen'];
+    const declaredSet = (name) => {
+        const xml = fs.readFileSync(path.join(projectRoot, 'components', `${name}.xml`), 'utf8');
+        return new Set([...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1]));
+    };
     let ok = true;
+    const base = declaredSet('Screen');
+    for (const fn of contract) {
+        if (!base.has(fn)) {
+            console.error(`Screen.xml (the base) is missing <function name="${fn}" /> from its interface`);
+            ok = false;
+        }
+    }
     for (const name of screens) {
         const xml = fs.readFileSync(path.join(projectRoot, 'components', `${name}.xml`), 'utf8');
-        const declared = new Set(
-            [...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1])
-        );
+        if (!/<component[^>]*extends="Screen"/.test(xml)) {
+            console.error(`${name}.xml must extends="Screen" so it inherits the base contract`);
+            ok = false;
+        }
+        const src = fs.readFileSync(path.join(projectRoot, 'components', `${name}.brs`), 'utf8');
         for (const fn of contract) {
-            if (!declared.has(fn)) {
-                console.error(`${name}.xml is missing <function name="${fn}" /> from its interface`);
+            if (!declaredSet(name).has(fn)) continue;
+            if (!new RegExp(`function\\s+${fn}\\s*\\(`).test(src)) {
+                console.error(`${name}.xml declares <function name="${fn}" /> but ${name}.brs has no implementation`);
                 ok = false;
             }
         }

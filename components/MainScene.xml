@@ -8,7 +8,6 @@
 
     <!-- Core + stores are included once here; Roku loads them for the whole
          subtree, so every screen component sees them. -->
-    <script type="text/brightscript" uri="pkg:/source/core/Screen.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/ScreenStack.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />

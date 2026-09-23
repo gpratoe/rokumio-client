@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="DetailsScreen" extends="Group">
+<component name="DetailsScreen" extends="Screen">
     <interface>
         <!-- The one action Details reports upward: a push request (movie Play,
              series Resume / "Episodes" → EpisodesScreen). The Scene observes
@@ -13,11 +13,9 @@
         <field id="libraryChange" type="assocarray" alwaysNotify="true" />
 
         <!-- Screen contract: called by ScreenStack for show/hide/focus/back. -->
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/DetailsScreen.brs" />

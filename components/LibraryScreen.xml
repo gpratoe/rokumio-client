@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="LibraryScreen" extends="Group">
+<component name="LibraryScreen" extends="Screen">
     <!-- Library: the saved items for the current session. Two chips (Type · Sort)
          sit above a poster grid, the same dropdown pattern DiscoverScreen uses:
          OK on a chip opens the menu of that chip's options — Up/Down to move,
@@ -16,11 +16,9 @@
         <!-- Screen contract: called by ScreenStack for show/hide/focus/back.
              RefreshRows is the Scene's poke to re-slice after a background
              library sync lands while this screen is top. -->
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
         <function name="RefreshRows" />
     </interface>
 

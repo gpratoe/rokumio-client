@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="LinkStremioScreen" extends="Group">
+<component name="LinkStremioScreen" extends="Screen">
     <!-- Link-code pairing screen: a centered column that shows the QR code,
          the scan URL in accent green and a countdown to the pairing deadline
          while the user completes pairing on their phone. A spinner covers the
@@ -9,11 +9,9 @@
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
         <field id="taskNode" type="node" value="" />
 
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/LinkStremioScreen.brs" />

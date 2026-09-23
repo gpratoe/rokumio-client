@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="HomeScreen" extends="Group">
+<component name="HomeScreen" extends="Screen">
     <interface>
         <!-- The one action Home reports upward: a push request. The Scene
              observes it and calls ScreenStack.push with a target + params. -->
@@ -9,11 +9,9 @@
              callFunc only runs for functions declared in the interface. Stores
              are class instances and cannot cross components through a field,
              so they arrive via callFunc. -->
-        <function name="SetStores" />
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <function name="BlurFocus" />
         <function name="RebuildRows" />
         <function name="RefreshContinueWatching" />
     </interface>

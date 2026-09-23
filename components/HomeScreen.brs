@@ -37,12 +37,6 @@ sub init()
     m.railBuilt = false
 end sub
 
-' Stores are class instances, which cannot cross components through an interface
-' field, so the Scene hands them over with callFunc instead.
-function SetStores(stores as object) as void
-    m.stores = stores
-end function
-
 ' Kick off the catalog walk. The walking happens off the UI thread in a
 ' HomeCatalogsTask (a hung add-on then costs the worker, not startup); it
 ' republishes the row set after every completed catalog, and onCatalogState
