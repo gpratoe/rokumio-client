@@ -91,14 +91,11 @@ sub StartResolve(stream as object, serverAddress as dynamic)
         return
     end if
     if serverAddress = invalid then serverAddress = ""
-    task = CreateObject("roSGNode", "StreamResolveTask")
-    task.id = "playerResolve"
-    m.top.AppendChild(task)
-    task.stream = stream
-    task.serverAddress = serverAddress
-    task.observeField("result", "onResolveResult")
+    task = AsyncTask_Launch(m.top, "StreamResolveTask", "onResolveResult", {
+        stream: stream
+        serverAddress: serverAddress
+    }, "playerResolve")
     m.resolveTask = task
-    task.control = "RUN"
 end sub
 
 sub StartResolvePulse()
@@ -133,8 +130,7 @@ sub onResolveResult()
     task = m.resolveTask
     m.resolveTask = invalid
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     StopResolvePulse()
 
@@ -147,10 +143,9 @@ end sub
 
 sub CancelResolve()
     if m.resolveTask <> invalid
-        m.resolveTask.unobserveField("result")
-        m.resolveTask.control = "STOP"
-        if m.resolveTask.getParent() <> invalid then m.top.RemoveChild(m.resolveTask)
+        task = m.resolveTask
         m.resolveTask = invalid
+        AsyncTask_Reap(task, m.top, true)
     end if
     StopResolvePulse()
 end sub
@@ -170,15 +165,12 @@ sub StartSubtitles(params as object)
     address = FindSubtitlesAddress(m.stores.addons.GetAll())
     if address = "" then return
 
-    task = CreateObject("roSGNode", "SubtitleLoaderTask")
-    task.id = "playerSubtitles"
-    m.top.AppendChild(task)
-    task.addonAddress = address
-    task.metaType = params.metaType
-    task.videoId = params.videoId
-    task.observeField("result", "onSubtitleResult")
+    task = AsyncTask_Launch(m.top, "SubtitleLoaderTask", "onSubtitleResult", {
+        addonAddress: address
+        metaType: params.metaType
+        videoId: params.videoId
+    }, "playerSubtitles")
     m.subtitleTask = task
-    task.control = "RUN"
     print "[rokumio] PlayerScreen subtitle task started address='" + address + "'"
 end sub
 
@@ -209,8 +201,7 @@ sub onSubtitleResult()
     task = m.subtitleTask
     m.subtitleTask = invalid
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     if result = invalid or not result.ok or result.subtitles = invalid or result.subtitles.Count() = 0
         ClearSubtitles()
@@ -229,10 +220,9 @@ end sub
 
 sub CancelSubtitles()
     if m.subtitleTask <> invalid
-        m.subtitleTask.unobserveField("result")
-        m.subtitleTask.control = "STOP"
-        if m.subtitleTask.getParent() <> invalid then m.top.RemoveChild(m.subtitleTask)
+        task = m.subtitleTask
         m.subtitleTask = invalid
+        AsyncTask_Reap(task, m.top, true)
     end if
 end sub
 

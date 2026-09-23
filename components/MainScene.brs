@@ -245,16 +245,13 @@ sub PumpWatchStatePush()
     if item = invalid then return
     m.pendingWatchState = invalid
 
-    task = CreateObject("roSGNode", "WatchStatePushTask")
-    task.id = "watchStatePushTask"
-    m.top.AppendChild(task)
-    task.authKey = m.stores.auth.GetAuthKey()
-    task.item = item
-    task.observeField("result", "onWatchStatePushResult")
+    task = AsyncTask_Launch(m.top, "WatchStatePushTask", "onWatchStatePushResult", {
+        authKey: m.stores.auth.GetAuthKey()
+        item: item
+    }, "watchStatePushTask")
     m.watchStatePushTask = task
     m.inFlightWatchState = packet
     m.pushingWatchState = true
-    task.control = "RUN"
 end sub
 
 ' One push settled. Free the worker and pump any state that arrived meanwhile.
@@ -267,8 +264,7 @@ sub onWatchStatePushResult()
     m.pushingWatchState = false
     if task = invalid then return
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     if result <> invalid and result.ok
         print "[rokumio] watch state pushed videoId='" + m.inFlightWatchState.videoId + "'"
@@ -307,16 +303,13 @@ sub PumpLibraryWritePush()
     if item = invalid then return
     m.pendingLibraryChange = invalid
 
-    task = CreateObject("roSGNode", "LibraryWritePushTask")
-    task.id = "libraryWritePushTask"
-    m.top.AppendChild(task)
-    task.authKey = m.stores.auth.GetAuthKey()
-    task.item = item
-    task.observeField("result", "onLibraryWritePushResult")
+    task = AsyncTask_Launch(m.top, "LibraryWritePushTask", "onLibraryWritePushResult", {
+        authKey: m.stores.auth.GetAuthKey()
+        item: item
+    }, "libraryWritePushTask")
     m.libraryWritePushTask = task
     m.inFlightLibraryChange = change
     m.pushingLibraryChange = true
-    task.control = "RUN"
 end sub
 
 ' One push settled. Free the worker and pump any change that arrived meanwhile.
@@ -329,8 +322,7 @@ sub onLibraryWritePushResult()
     m.pushingLibraryChange = false
     if task = invalid then return
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     if result <> invalid and result.ok
         print "[rokumio] library change pushed metaId='" + m.inFlightLibraryChange.metaId + "' added=" + m.inFlightLibraryChange.added.ToStr()
@@ -551,13 +543,10 @@ end sub
 sub DoLogout()
     print "[rokumio] DoLogout"
     if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetAuthKey() <> ""
-        task = CreateObject("roSGNode", "LogoutTask")
-        task.id = "logoutTask"
-        m.top.AppendChild(task)
-        task.authKey = m.stores.auth.GetAuthKey()
-        task.observeField("result", "onLogoutResult")
+        task = AsyncTask_Launch(m.top, "LogoutTask", "onLogoutResult", {
+            authKey: m.stores.auth.GetAuthKey()
+        }, "logoutTask")
         m.logoutTask = task
-        task.control = "RUN"
     end if
 
     if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.Logout()
@@ -580,8 +569,7 @@ sub onLogoutResult()
     m.logoutTask = invalid
     if task = invalid then return
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
     if result <> invalid and result.ok
         print "[rokumio] account logged out at api.strem.io"
     else
@@ -598,15 +586,10 @@ end sub
 ' the pairing task; a relaunched stremio session skips this (its addons are
 ' already in the stremio_addons registry key from the login that synced them).
 sub StartAddonSync()
-    task = CreateObject("roSGNode", "AddonSyncTask")
-    task.id = "addonSyncTask"
-    m.top.AppendChild(task)
+    fields = {}
+    if m.stores <> invalid and m.stores.auth <> invalid then fields.authKey = m.stores.auth.GetAuthKey()
+    task = AsyncTask_Launch(m.top, "AddonSyncTask", "onAddonSyncResult", fields, "addonSyncTask")
     m.addonSyncTask = task
-    if m.stores <> invalid and m.stores.auth <> invalid
-        task.authKey = m.stores.auth.GetAuthKey()
-    end if
-    task.observeField("result", "onAddonSyncResult")
-    task.control = "RUN"
 end sub
 
 ' One sync settled. Register every descriptor through AddonsStore (duplicates
@@ -618,8 +601,7 @@ sub onAddonSyncResult()
     m.addonSyncTask = invalid
     if task = invalid then return
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     added = 0
     skipped = 0
@@ -651,15 +633,10 @@ end sub
 ' background each time. The task returns the raw library item array; MainScene
 ' passes it to LibraryStore.SyncFromStremio, the single mapping authority.
 sub StartLibrarySync()
-    task = CreateObject("roSGNode", "LibrarySyncTask")
-    task.id = "librarySyncTask"
-    m.top.AppendChild(task)
+    fields = {}
+    if m.stores <> invalid and m.stores.auth <> invalid then fields.authKey = m.stores.auth.GetAuthKey()
+    task = AsyncTask_Launch(m.top, "LibrarySyncTask", "onLibrarySyncResult", fields, "librarySyncTask")
     m.librarySyncTask = task
-    if m.stores <> invalid and m.stores.auth <> invalid
-        task.authKey = m.stores.auth.GetAuthKey()
-    end if
-    task.observeField("result", "onLibrarySyncResult")
-    task.control = "RUN"
 end sub
 
 ' One library sync settled. Reconcile the store with the remote collection and
@@ -671,8 +648,7 @@ sub onLibrarySyncResult()
     m.librarySyncTask = invalid
     if task = invalid then return
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     if result = invalid or not result.ok or result.items = invalid
         print "[rokumio] library sync failed"
@@ -756,13 +732,8 @@ sub PumpImport()
     if m.import.pending.Count() > 0
         url = m.import.pending.Shift()
         print "[rokumio] PumpImport: fetching " + url
-        task = CreateObject("roSGNode", "AddonsInstallTask")
-        task.id = "deepLinkInstall"
-        m.top.AppendChild(task)
-        task.address = url
-        task.observeField("result", "onImportTaskResult")
+        task = AsyncTask_Launch(m.top, "AddonsInstallTask", "onImportTaskResult", { address: url }, "deepLinkInstall")
         m.import.task = task
-        task.control = "RUN"
         return
     end if
     FinishImport()
@@ -778,8 +749,7 @@ sub onImportTaskResult()
     if task = invalid then return
     m.import.task = invalid
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     resultId = ""
     resultError = ""

@@ -62,12 +62,8 @@ sub StartCatalogLoad()
         m.catalogRowsBuilt = true
         return
     end if
-    task = CreateObject("roSGNode", "HomeCatalogsTask")
+    task = AsyncTask_Launch(m.top, "HomeCatalogsTask", "onCatalogState", { addons: addons }, invalid)
     m.catalogTask = task
-    m.top.AppendChild(task)
-    task.ObserveField("result", "onCatalogState")
-    task.addons = addons
-    task.control = "RUN"
 end sub
 
 ' Rows arrive as full result snapshots ({ rows, done }); apply only what is not
@@ -129,9 +125,9 @@ end sub
 sub FinishCatalogLoad()
     m.catalogRowsBuilt = true
     if m.catalogTask <> invalid
-        m.catalogTask.UnobserveField("result")
-        m.top.RemoveChild(m.catalogTask)
+        task = m.catalogTask
         m.catalogTask = invalid
+        AsyncTask_Reap(task, m.top, false)
     end if
 end sub
 
@@ -506,15 +502,12 @@ sub OpenContinueWatching(item as object)
     }
     ShowHomeBusy(true)
 
-    task = CreateObject("roSGNode", "MetaLoaderTask")
-    task.id = "continueWatchingLoader"
-    m.top.AppendChild(task)
-    task.addonAddress = address
-    task.metaType = item.type
-    task.metaId = item.id
-    task.observeField("result", "onContinueWatchingLoaded")
+    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onContinueWatchingLoaded", {
+        addonAddress: address
+        metaType: item.type
+        metaId: item.id
+    }, "continueWatchingLoader")
     m.openTask = task
-    task.control = "RUN"
 end sub
 
 ' Stop a pending Continue-Watching open: tear down any in-flight task, clear the
@@ -526,9 +519,7 @@ sub CancelOpen()
     if m.openTask <> invalid
         task = m.openTask
         m.openTask = invalid
-        task.unobserveField("result")
-        task.control = "STOP"
-        if task.getParent() <> invalid then m.top.RemoveChild(task)
+        AsyncTask_Reap(task, m.top, true)
     end if
     m.pendingOpen = invalid
     ShowHomeBusy(false)
@@ -542,15 +533,14 @@ sub onContinueWatchingLoaded()
     if m.openTask = invalid then return
     task = m.openTask
     m.openTask = invalid
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    result = task.result
+    AsyncTask_Reap(task, m.top, false)
 
     pending = m.pendingOpen
     m.pendingOpen = invalid
     ShowHomeBusy(false)
     if pending = invalid then return
 
-    result = task.result
     meta = pending.meta
     if result <> invalid and result.ok and result.meta <> invalid then meta = result.meta
     m.top.pushRequest = {

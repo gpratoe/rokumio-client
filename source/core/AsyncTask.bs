@@ -1,0 +1,57 @@
+' AsyncTask — the one choreography every off-the-UI-thread load used to
+' hand-roll: create a <X>Task node, append it, set its fields, observe result,
+' run it, then reap it (drop the observer, STOP the worker, remove the node)
+' once the observer fires or the load is cancelled.
+'
+' Usage, matching the pre-refactor shape exactly:
+'
+'   task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onMetaLoaded", {
+'       addonAddress: address
+'       metaType: meta.type
+'       metaId: meta.id
+'   }, "detailsMetaLoader")
+'   m.loadTask = task
+'
+' Reaping a finished task in the observer handler:
+'
+'   if m.loadTask = invalid then return
+'   task = m.loadTask
+'   m.loadTask = invalid
+'   AsyncTask_Reap(task, m.top, false)
+'
+' Cancelling a possibly-still-running task:
+'
+'   AsyncTask_Reap(task, m.top, true)   ' STOP must come first — removing a
+'                                       ' running Task node does not kill its
+'                                       ' worker thread.
+'
+' Components must include this file to see it:
+'   <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+
+' Launch a task node and run it. Returns the node so the caller can slot it for
+' stale-result guards. parent is the screen node the task child is appended to;
+' callback is the observer for the task's "result" field; fields is the
+' interface values to set before the run; id is an optional node identity.
+function AsyncTask_Launch(parent as object, taskName as string, callback as string, fields as object, id as dynamic) as object
+    task = CreateObject("roSGNode", taskName)
+    if id <> invalid and id <> "" then task.id = id
+    parent.AppendChild(task)
+    if fields <> invalid
+        for each key in fields
+            task[key] = fields[key]
+        end for
+    end if
+    task.ObserveField("result", callback)
+    task.control = "RUN"
+    return task
+end function
+
+' Tear a task down: drop the observer so a late result can never land, then (when
+' stop) send STOP so a still-running worker's read-loop exits before the node is
+' freed, then remove it from the tree.
+sub AsyncTask_Reap(task as object, parent as object, doStop as boolean)
+    if task = invalid then return
+    task.UnobserveField("result")
+    if doStop then task.control = "STOP"
+    if task.getParent() <> invalid then parent.RemoveChild(task)
+end sub

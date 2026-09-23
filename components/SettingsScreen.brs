@@ -205,13 +205,8 @@ sub TestServer() as void
     if m.heartbeatTask <> invalid then return
 
     m.status.text = "Testing server…"
-    task = CreateObject("roSGNode", "HeartbeatTask")
-    task.id = "heartbeatTask"
-    m.top.AppendChild(task)
-    task.address = address
-    task.observeField("result", "onTestServerResult")
+    task = AsyncTask_Launch(m.top, "HeartbeatTask", "onTestServerResult", { address: address }, "heartbeatTask")
     m.heartbeatTask = task
-    task.control = "RUN"
 end sub
 
 ' The heartbeat finished. A stale result that landed after CancelTestServer is
@@ -221,8 +216,7 @@ sub onTestServerResult()
     task = m.heartbeatTask
     m.heartbeatTask = invalid
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     print "[rokumio] TestServer /heartbeat -> ok=" + result.ok.ToStr() + " alive=" + result.alive.ToStr() + " error='" + result.error + "'"
     if result.alive
@@ -234,9 +228,8 @@ end sub
 
 sub CancelTestServer()
     if m.heartbeatTask <> invalid
-        m.heartbeatTask.unobserveField("result")
-        m.heartbeatTask.control = "STOP"
-        if m.heartbeatTask.getParent() <> invalid then m.top.RemoveChild(m.heartbeatTask)
+        task = m.heartbeatTask
         m.heartbeatTask = invalid
+        AsyncTask_Reap(task, m.top, true)
     end if
 end sub

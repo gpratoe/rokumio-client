@@ -274,17 +274,14 @@ sub FetchDiscover()
     CancelLoad()
 
     m.status.text = "Loading…"
-    task = CreateObject("roSGNode", "DiscoverLoaderTask")
-    task.id = "discoverLoader"
-    m.top.AppendChild(task)
-    task.addonAddress = m.cinemetaAddress
-    task.metaType = m.type
-    task.catalogId = CatalogId()
-    task.extra = PageExtra(0)
-    task.pageOffset = 0
-    task.observeField("result", "onDiscoverLoaded")
+    task = AsyncTask_Launch(m.top, "DiscoverLoaderTask", "onDiscoverLoaded", {
+        addonAddress: m.cinemetaAddress
+        metaType: m.type
+        catalogId: CatalogId()
+        extra: PageExtra(0)
+        pageOffset: 0
+    }, "discoverLoader")
     m.loadTask = task
-    task.control = "RUN"
 end sub
 
 ' The user scrolled near the bottom of the fetched results: fetch the next page
@@ -296,17 +293,14 @@ sub LoadMore()
     if m.allLoaded then return
     if m.metas.Count() = 0 then return
 
-    task = CreateObject("roSGNode", "DiscoverLoaderTask")
-    task.id = "discoverLoaderMore"
-    m.top.AppendChild(task)
-    task.addonAddress = m.cinemetaAddress
-    task.metaType = m.type
-    task.catalogId = CatalogId()
-    task.extra = PageExtra(m.metas.Count())
-    task.pageOffset = m.metas.Count()
-    task.observeField("result", "onDiscoverLoaded")
+    task = AsyncTask_Launch(m.top, "DiscoverLoaderTask", "onDiscoverLoaded", {
+        addonAddress: m.cinemetaAddress
+        metaType: m.type
+        catalogId: CatalogId()
+        extra: PageExtra(m.metas.Count())
+        pageOffset: m.metas.Count()
+    }, "discoverLoaderMore")
     m.loadTask = task
-    task.control = "RUN"
 end sub
 
 ' Near the bottom of the fetched results, pull the next page. The 3-row horizon
@@ -328,8 +322,7 @@ sub onDiscoverLoaded()
     if m.loadTask = invalid then return
     task = m.loadTask
     m.loadTask = invalid
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     wantedOffset = task.pageOffset
     if wantedOffset <> m.metas.Count() then return
@@ -419,10 +412,9 @@ end sub
 
 sub CancelLoad()
     if m.loadTask <> invalid
-        m.loadTask.unobserveField("result")
-        m.loadTask.control = "STOP"
-        if m.loadTask.getParent() <> invalid then m.top.RemoveChild(m.loadTask)
+        task = m.loadTask
         m.loadTask = invalid
+        AsyncTask_Reap(task, m.top, true)
     end if
 end sub
 

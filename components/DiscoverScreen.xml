@@ -21,6 +21,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/DiscoverScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
 
     <children>
         <Rectangle id="discoverBg" width="1920" height="1080" color="0x0" />

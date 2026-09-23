@@ -136,13 +136,8 @@ sub StartInstall(address as string)
     if m.installTask <> invalid then return
 
     m.status.text = "Installing…"
-    task = CreateObject("roSGNode", "AddonsInstallTask")
-    task.id = "addonsInstall"
-    m.top.AppendChild(task)
-    task.address = address
-    task.observeField("result", "onInstallResult")
+    task = AsyncTask_Launch(m.top, "AddonsInstallTask", "onInstallResult", { address: address }, "addonsInstall")
     m.installTask = task
-    task.control = "RUN"
 end sub
 
 ' The install finished. A stale result that landed after CancelInstall (or
@@ -153,8 +148,7 @@ sub onInstallResult()
     task = m.installTask
     m.installTask = invalid
     result = task.result
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
+    AsyncTask_Reap(task, m.top, false)
 
     if result <> invalid and result.ok and result.record <> invalid
         if m.stores <> invalid and m.stores.addons.Register(result.record)
@@ -172,10 +166,9 @@ end sub
 
 sub CancelInstall()
     if m.installTask <> invalid
-        m.installTask.unobserveField("result")
-        m.installTask.control = "STOP"
-        if m.installTask.getParent() <> invalid then m.top.RemoveChild(m.installTask)
+        task = m.installTask
         m.installTask = invalid
+        AsyncTask_Reap(task, m.top, true)
     end if
 end sub
 

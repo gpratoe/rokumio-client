@@ -20,6 +20,7 @@
 
     <script type="text/brightscript" uri="pkg:/source/stores/SubtitlesStore.bs" />
     <script type="text/brightscript" uri="pkg:/components/PlayerScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
 
     <children>
         <Rectangle id="playerBg" width="1920" height="1080" color="0x000000FF" />

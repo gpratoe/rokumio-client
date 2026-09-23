@@ -109,15 +109,12 @@ sub RunSearch(query as string)
     m.results.SetFocus(true)
 
     for each row in m.rows
-        task = CreateObject("roSGNode", "SearchLoaderTask")
-        task.id = "searchLoader" + row.metaType
-        m.top.AppendChild(task)
-        task.addonAddress = m.cinemetaAddress
-        task.query = query
-        task.metaType = row.metaType
-        task.observeField("result", "onSearchLoaded")
+        task = AsyncTask_Launch(m.top, "SearchLoaderTask", "onSearchLoaded", {
+            addonAddress: m.cinemetaAddress
+            query: query
+            metaType: row.metaType
+        }, "searchLoader" + row.metaType)
         m.searchTasks[row.metaType] = task
-        task.control = "RUN"
     end for
 end sub
 
@@ -140,6 +137,7 @@ sub onSearchLoaded(event as object)
     if row = invalid then return
 
     result = task.result
+    AsyncTask_Reap(task, m.top, false)
     if result <> invalid and result.metas <> invalid and result.metas.Count() > 0
         row.metas = result.metas
         row.state = "loaded"
@@ -149,9 +147,6 @@ sub onSearchLoaded(event as object)
     else
         row.state = "empty"
     end if
-
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
 
     RenderRows()
     UpdateSearchStatus()
@@ -226,11 +221,7 @@ sub CancelSearch()
     if m.searchTasks <> invalid
         for each key in m.searchTasks
             task = m.searchTasks[key]
-            if task <> invalid
-                task.unobserveField("result")
-                task.control = "STOP"
-                if task.getParent() <> invalid then m.top.RemoveChild(task)
-            end if
+            if task <> invalid then AsyncTask_Reap(task, m.top, true)
         end for
     end if
     m.searchTasks = invalid

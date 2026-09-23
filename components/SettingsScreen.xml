@@ -13,6 +13,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/SettingsScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
 
     <children>
         <Rectangle id="settingsBg" width="1920" height="1080" color="0x0" />

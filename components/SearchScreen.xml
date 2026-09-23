@@ -17,6 +17,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/SearchScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
 
     <children>
         <Rectangle id="searchBg" width="1920" height="1080" color="0x0" />

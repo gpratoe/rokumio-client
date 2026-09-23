@@ -113,15 +113,12 @@ sub MaybeRefreshMeta()
 
     if not m.stores.episodes.NeedsMetaFetch(m.meta) then return
 
-    task = CreateObject("roSGNode", "MetaLoaderTask")
-    task.id = "detailsMetaLoader"
-    m.top.AppendChild(task)
-    task.addonAddress = m.addonAddress
-    task.metaType = m.meta.type
-    task.metaId = m.meta.id
-    task.observeField("result", "onMetaLoaded")
+    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onMetaLoaded", {
+        addonAddress: m.addonAddress
+        metaType: m.meta.type
+        metaId: m.meta.id
+    }, "detailsMetaLoader")
     m.loadTask = task
-    task.control = "RUN"
 end sub
 
 ' Tear down an in-flight meta refresh. A newer entry supersedes it, and leaving
@@ -132,9 +129,7 @@ sub CancelMetaLoad()
     if m.loadTask <> invalid
         task = m.loadTask
         m.loadTask = invalid
-        task.unobserveField("result")
-        task.control = "STOP"
-        if task.getParent() <> invalid then m.top.RemoveChild(task)
+        AsyncTask_Reap(task, m.top, true)
     end if
 end sub
 
@@ -146,10 +141,9 @@ sub onMetaLoaded()
     if m.loadTask = invalid then return
     task = m.loadTask
     m.loadTask = invalid
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
-
     result = task.result
+    AsyncTask_Reap(task, m.top, false)
+
     if result = invalid or not result.ok or result.meta = invalid then return
     if result.meta.id <> invalid and m.meta <> invalid and result.meta.id <> m.meta.id then return
 

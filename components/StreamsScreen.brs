@@ -162,17 +162,14 @@ sub LoadStreams(params as object)
     m.loadTasks = []
 
     for i = 0 to providers.Count() - 1
-        task = CreateObject("roSGNode", "StreamsLoaderTask")
-        task.id = "streamsLoader" + i.ToStr()
-        m.top.AppendChild(task)
-        task.metaType = ParamString(params.metaType)
-        task.videoId = ParamString(params.videoId)
-        task.addonAddress = providers[i].address
-        task.providerIndex = i
-        task.providerName = providers[i].name
-        task.observeField("result", "onStreamsLoaded")
+        task = AsyncTask_Launch(m.top, "StreamsLoaderTask", "onStreamsLoaded", {
+            metaType: ParamString(params.metaType)
+            videoId: ParamString(params.videoId)
+            addonAddress: providers[i].address
+            providerIndex: i
+            providerName: providers[i].name
+        }, "streamsLoader" + i.ToStr())
         m.loadTasks.Push(task)
-        task.control = "RUN"
     end for
     print "[rokumio] LoadStreams tasks started=" + m.loadTasks.Count().ToStr()
 
@@ -322,11 +319,7 @@ end sub
 sub CancelStreamsLoad()
     if m.loadTasks <> invalid
         for each task in m.loadTasks
-            if task <> invalid
-                task.control = "STOP"
-                task.unobserveField("result")
-                if task.getParent() <> invalid then m.top.RemoveChild(task)
-            end if
+            if task <> invalid then AsyncTask_Reap(task, m.top, true)
         end for
     end if
     m.loadTasks = invalid
@@ -345,15 +338,12 @@ sub StartEpisodeLoad(params as object)
     if params.episodeOverview <> invalid and params.episodeOverview <> "" then return
     if m.epMetaTask <> invalid then return
 
-    task = CreateObject("roSGNode", "MetaLoaderTask")
-    task.id = "episodeMetaLoader"
-    m.top.AppendChild(task)
-    task.addonAddress = ParamString(params.addonAddress)
-    task.metaType = "series"
-    task.metaId = ParamString(params.metaId)
-    task.observeField("result", "onEpisodeMetaLoaded")
+    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onEpisodeMetaLoaded", {
+        addonAddress: ParamString(params.addonAddress)
+        metaType: "series"
+        metaId: ParamString(params.metaId)
+    }, "episodeMetaLoader")
     m.epMetaTask = task
-    task.control = "RUN"
 end sub
 
 ' The series meta came back. If it holds the target episode, fill the two panel
@@ -364,10 +354,9 @@ sub onEpisodeMetaLoaded()
     if m.epMetaTask = invalid then return
     task = m.epMetaTask
     m.epMetaTask = invalid
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
-
     result = task.result
+    AsyncTask_Reap(task, m.top, false)
+
     if result = invalid or not result.ok or result.meta = invalid then return
     if m.params = invalid then return
 
@@ -380,10 +369,9 @@ end sub
 
 sub CancelEpisodeLoad()
     if m.epMetaTask <> invalid
-        m.epMetaTask.unobserveField("result")
-        m.epMetaTask.control = "STOP"
-        if m.epMetaTask.getParent() <> invalid then m.top.RemoveChild(m.epMetaTask)
+        task = m.epMetaTask
         m.epMetaTask = invalid
+        AsyncTask_Reap(task, m.top, true)
     end if
 end sub
 

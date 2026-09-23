@@ -74,15 +74,12 @@ sub LoadSeries()
     m.epDesc.text = "Loading episodes…"
 
     CancelLoad()
-    task = CreateObject("roSGNode", "MetaLoaderTask")
-    task.id = "episodesLoader"
-    m.top.AppendChild(task)
-    task.addonAddress = m.addonAddress
-    task.metaType = "series"
-    task.metaId = m.meta.id
-    task.observeField("result", "onSeriesLoaded")
+    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onSeriesLoaded", {
+        addonAddress: m.addonAddress
+        metaType: "series"
+        metaId: m.meta.id
+    }, "episodesLoader")
     m.loadTask = task
-    task.control = "RUN"
 end sub
 
 ' Tear down an in-flight season load (a newer entry supersedes it). STOP is the
@@ -93,9 +90,7 @@ sub CancelLoad()
     if m.loadTask <> invalid
         task = m.loadTask
         m.loadTask = invalid
-        task.unobserveField("result")
-        task.control = "STOP"
-        if task.getParent() <> invalid then m.top.RemoveChild(task)
+        AsyncTask_Reap(task, m.top, true)
     end if
 end sub
 
@@ -105,10 +100,9 @@ sub onSeriesLoaded()
     if m.loadTask = invalid then return
     task = m.loadTask
     m.loadTask = invalid
-    task.unobserveField("result")
-    if task.getParent() <> invalid then m.top.RemoveChild(task)
-
     result = task.result
+    AsyncTask_Reap(task, m.top, false)
+
     if result = invalid or not result.ok or result.meta = invalid
         m.epTitle.text = ""
         m.epDesc.text = "Series information could not be loaded."
