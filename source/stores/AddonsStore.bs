@@ -437,7 +437,15 @@ class AddonsStore
         if m.registry = invalid then return
         raw = m.registry.Read(m.RegistryKey())
         if raw <> ""
-            parsed = ParseJson(raw)
+            ' The Roku runtime throws on malformed JSON rather than returning
+            ' invalid (see Transport.Parse); a corrupt addons key must mean
+            ' "start with the defaults", not a cold-start crash.
+            parsed = invalid
+            try
+                parsed = ParseJson(raw)
+            catch e
+                parsed = invalid
+            end try
             if parsed <> invalid and Type(parsed) = "roAssociativeArray"
                 m.installed = parsed
                 ' Records persisted before resources normalization may carry object
@@ -451,7 +459,12 @@ class AddonsStore
 
         removedRaw = m.registry.Read(m.RemovedKey())
         if removedRaw <> ""
-            parsedRemoved = ParseJson(removedRaw)
+            parsedRemoved = invalid
+            try
+                parsedRemoved = ParseJson(removedRaw)
+            catch e
+                parsedRemoved = invalid
+            end try
             if parsedRemoved <> invalid and Type(parsedRemoved) = "roArray"
                 m.removed = parsedRemoved
             end if

@@ -75,7 +75,15 @@ class AuthStore
         if m.registry = invalid then return
         raw = m.registry.Read("session")
         if raw = "" then return
-        parsed = ParseJson(raw)
+        ' The Roku runtime throws on malformed JSON rather than returning
+        ' invalid (see Transport.Parse); a corrupt session key must mean "no
+        ' session", not a cold-start crash.
+        parsed = invalid
+        try
+            parsed = ParseJson(raw)
+        catch e
+            return
+        end try
         if parsed = invalid then return
         if parsed.session <> invalid then m.session = parsed.session
         if parsed.authKey <> invalid then m.authKey = parsed.authKey
