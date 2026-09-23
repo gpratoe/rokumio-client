@@ -351,20 +351,21 @@ sub onDiscoverLoaded()
             m.metas.Push(meta)
         end for
         m.allLoaded = not result.hasMore or result.metas.Count() = 0
-        UpdateGrid(AppendRestoreRow())
+        UpdateGrid(AppendRestorePosition())
     end if
 end sub
 
-' The row index to keep visible after an append: the first row of the freshly
-' added block when the focused row already fell off the end, otherwise the
-' currently focused row.
-function AppendRestoreRow() as integer
-    if m.grid.rowItemFocused = invalid or m.grid.rowItemFocused.Count() < 2 then return 0
-    before = m.grid.rowItemFocused[0]
+' The grid position to keep after an append: the focused row and tile, or the
+' first tile of the freshly added block when the focused row already fell off
+' the end. Because rowItemFocused is read before the content rebuild, the tile
+' column survives, so the exact selected item keeps focus.
+function AppendRestorePosition() as object
+    if m.grid.rowItemFocused = invalid or m.grid.rowItemFocused.Count() < 2 then return [0, 0]
+    position = [m.grid.rowItemFocused[0], m.grid.rowItemFocused[1]]
     newRows = (m.metas.Count() + m.chunk - 1) / m.chunk
-    if before < 0 then return 0
-    if before >= newRows then return newRows - 1
-    return before
+    if position[0] < 0 then return [0, 0]
+    if position[0] >= newRows then position[0] = newRows - 1
+    return position
 end function
 
 ' The human summary of the current filters, e.g. "Featured · Movies · Sci-Fi".
@@ -376,8 +377,8 @@ end function
 
 ' Lay all loaded metas out as poster rows of m.chunk tiles so the RowList
 ' clips/scrolls them vertically. jumpToRow keeps the view anchored after an
-' append.
-sub UpdateGrid(rowToShow = -1 as integer)
+' append, preserving the focused row and tile.
+sub UpdateGrid(rowToShow = invalid as dynamic)
     content = CreateObject("roSGNode", "ContentNode")
     for r = 0 to (m.metas.Count() - 1) / m.chunk
         row = content.CreateChild("ContentNode")
@@ -398,8 +399,8 @@ sub UpdateGrid(rowToShow = -1 as integer)
     end for
     m.grid.content = content
     m.grid.numRows = (m.metas.Count() + m.chunk - 1) / m.chunk
-    if rowToShow >= 0 and m.grid.numRows > 0
-        m.grid.jumpToRowItem = [rowToShow, 0]
+    if rowToShow <> invalid and m.grid.numRows > 0
+        m.grid.jumpToRowItem = rowToShow
     end if
 end sub
 
