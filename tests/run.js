@@ -37,6 +37,7 @@ async function writeCombinedScript() {
         'tests/watchstatepush.test.brs',
         'tests/librarywritepush.test.brs',
         'tests/logouttask.test.brs',
+        'tests/stremioapistore.test.brs',
         'tests/linkcode.test.brs',
         'tests/playbackstore.test.brs',
         'tests/subtitlesstore.test.brs',
@@ -59,6 +60,7 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'DeepLinkStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'LibraryStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'StremioApiStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'PlaybackStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'SubtitlesStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs')
