@@ -12,14 +12,11 @@ sub init()
 end sub
 
 sub sync()
-    print "[rokumio] LibrarySyncTask starting"
     try
         store = StremioApiStore(Transport(), m.top.authKey)
         result = store.LibraryGet()
-        print "[rokumio] LibrarySyncTask items=" + result.items.Count().ToStr() + " ok=" + result.ok.ToStr()
         m.top.result = result
     catch e
-        print "[rokumio] LibrarySyncTask error: " + e.message
         m.top.result = { ok: false, items: [], error: e.message }
     end try
 end sub

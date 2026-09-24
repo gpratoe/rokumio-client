@@ -8,7 +8,6 @@ sub init()
     m.top.functionName = "search"
 end sub
 sub search()
-    print "[rokumio] SearchLoaderTask search() starting type=" + m.top.metaType
     try
         http = Transport()
         catalog = CatalogStore(http)
@@ -26,9 +25,7 @@ sub search()
 
         result = { metas: metas, metaType: m.top.metaType, error: error }
         m.top.result = result
-        print "[rokumio] SearchLoaderTask done, type=" + m.top.metaType + " metas=" + metas.Count().ToStr()
     catch e
-        print "[rokumio] SearchLoaderTask error: " + e.message
         m.top.result = { metas: [], metaType: m.top.metaType, error: e.message }
     end try
 end sub

@@ -6,7 +6,6 @@ sub init()
     m.top.functionName = "discover"
 end sub
 sub discover()
-    print "[rokumio] DiscoverLoaderTask discover() starting"
     try
         result = { ok: false, metas: [], hasMore: false, error: "" }
         http = Transport()
@@ -23,9 +22,7 @@ sub discover()
         end if
 
         m.top.result = result
-        print "[rokumio] DiscoverLoaderTask done, metas=" + result.metas.Count().ToStr()
     catch e
-        print "[rokumio] DiscoverLoaderTask error: " + e.message
         m.top.result = { ok: false, metas: [], hasMore: false, error: e.message }
     end try
 end sub

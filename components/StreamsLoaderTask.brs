@@ -11,7 +11,6 @@ sub init()
     m.top.functionName = "load"
 end sub
 sub load()
-    print "[rokumio] StreamsLoaderTask load() starting addon=" + m.top.addonAddress
     try
         http = Transport()
         playback = PlaybackStore(http)
@@ -33,9 +32,7 @@ sub load()
             providerIndex: m.top.providerIndex
             providerName: m.top.providerName
         }
-        print "[rokumio] StreamsLoaderTask done, streams=" + streams.Count().ToStr()
     catch e
-        print "[rokumio] StreamsLoaderTask error: " + e.message
         m.top.result = {
             streams: []
             error: e.message

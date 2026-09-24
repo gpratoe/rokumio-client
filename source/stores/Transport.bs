@@ -48,7 +48,6 @@ function CreateSyncHttpClient() as object
         port = CreateObject("roMessagePort")
         transfer.SetMessagePort(port)
 
-        print "[rokumio] " + request.method + " " + request.url
         issued = false
         if request.method = "POST"
             payload = ""
@@ -59,7 +58,6 @@ function CreateSyncHttpClient() as object
         end if
         if not issued
             result.error = "request could not be issued"
-            print "[rokumio]   -> could not be issued"
             return result
         end if
 
@@ -67,12 +65,10 @@ function CreateSyncHttpClient() as object
         if event = invalid
             transfer.AsyncCancel()
             result.error = "request timed out"
-            print "[rokumio]   -> timed out after " + request.timeoutMs.ToStr() + "ms"
             return result
         end if
         if Type(event) <> "roUrlEvent"
             result.error = "unexpected port message"
-            print "[rokumio]   -> unexpected port message"
             return result
         end if
 
@@ -88,8 +84,6 @@ function CreateSyncHttpClient() as object
                 result.error = "HTTP " + result.status.ToStr()
             end if
         end if
-        print "[rokumio]   -> status=" + result.status.ToStr() + " ok=" + result.ok.ToStr() + " bytes=" + result.body.Len().ToStr()
-        if result.error <> "" then print "[rokumio]   -> error: " + result.error
         return result
     end function
 

@@ -12,14 +12,11 @@ sub init()
 end sub
 
 sub sync()
-    print "[rokumio] AddonSyncTask starting"
     try
         store = StremioApiStore(Transport(), m.top.authKey)
         result = store.AddonCollectionGet()
-        print "[rokumio] AddonSyncTask descriptors=" + result.descriptors.Count().ToStr() + " ok=" + result.ok.ToStr()
         m.top.result = result
     catch e
-        print "[rokumio] AddonSyncTask error: " + e.message
         m.top.result = { ok: false, descriptors: [], error: e.message }
     end try
 end sub

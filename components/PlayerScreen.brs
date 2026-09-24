@@ -167,7 +167,6 @@ sub StartSubtitles(params as object)
         videoId: params.videoId
     }, "playerSubtitles")
     m.subtitleTask = task
-    print "[rokumio] PlayerScreen subtitle task started address='" + address + "'"
 end sub
 
 ' Address of the add-on to ask for captions: the first installed (non-built-in)
@@ -207,7 +206,6 @@ sub onSubtitleResult()
     m.subtitleTracks = result.subtitles
     m.subtitleNodesApplied = false
     m.subtitleIndex = m.subtitlePicker.PickTrack(result.subtitles, DeviceLocale())
-    print "[rokumio] PlayerScreen subtitles=" + result.subtitles.Count().ToStr() + " pick=" + m.subtitleIndex.ToStr()
     ' Playback never waits for this fetch, so a list that lands here applies to
     ' the live content node (and writes video.subtitleTrack) mid-play; the
     ' native Options dialog picks the tracks up from the updated SubtitleTracks.
@@ -398,7 +396,6 @@ sub StartPlayback(url as string)
     m.video.content = content
     m.video.SetFocus(true)
     m.video.control = "play"
-    print "[rokumio] PlayerScreen url='" + url + "' format='" + streamFormat + "' playStart=" + startOffset.ToStr()
 end sub
 
 ' The stream format has to be told to the Video node — Roku does not reliably
@@ -421,7 +418,6 @@ end function
 sub onVideoStateChanged()
     if m.video = invalid then return
     state = m.video.state
-    print "[rokumio] PlayerScreen state='" + state.ToStr() + "'"
     if state = invalid then return
     if m.pendingStop
         ' Waiting on an asynchronous stop (see RequestStopAndWait): the player is
@@ -430,7 +426,6 @@ sub onVideoStateChanged()
         ' the buffered stream start outputting audio anyway. "stopping" (OS 12.5+
         ' while asyncStopSemantics is on) still counts as in-progress.
         if state = "stopped" or state = "finished" or state = "error"
-            print "[rokumio] PlayerScreen stop confirmed, tearing down"
             m.pendingStop = false
             TeardownVideo()
             FireCloseRequest()
@@ -484,7 +479,6 @@ sub onBufferingStatusChanged()
     if m.video = invalid then return
     status = m.video.bufferingStatus
     if status = invalid
-        print "[rokumio] bufferingStatus invalid -> buffering done"
         HideBuffering()
         return
     end if
@@ -492,7 +486,6 @@ sub onBufferingStatusChanged()
     if pct = invalid then pct = 0
     if pct < 0 then pct = 0
     if pct > 100 then pct = 100
-    print "[rokumio] buffering pct=" + pct.ToStr()
     m.logoFront.clippingRect = [0, 0, Int(900 * pct / 100), 506]
 end sub
 
@@ -542,7 +535,6 @@ function RequestStopAndWait() as boolean
         TeardownVideo()
         return false
     end if
-    print "[rokumio] PlayerScreen stopping (state='" + state.ToStr() + "')"
     if m.video.HasField("asyncStopSemantics") and not m.video.asyncStopSemantics
         m.video.asyncStopSemantics = true
     end if
@@ -561,7 +553,6 @@ end function
 ' survives the destroy cannot start playing audio, then leave anyway.
 sub onStopWatchdogFire()
     if not m.pendingStop then return
-    print "[rokumio] PlayerScreen stop watchdog fired, forcing teardown"
     if m.video <> invalid
         if m.video.HasField("asyncStopSemantics") then m.video.asyncStopSemantics = true
         m.video.mute = true
@@ -589,7 +580,6 @@ end sub
 ' Ask MainScene to pop this screen. The pop runs OnExit (guarded, nothing left to
 ' do) and tears the whole component out of the tree — the true release.
 sub FireCloseRequest()
-    print "[rokumio] PlayerScreen closeRequest"
     m.top.closeRequest = { requested: true }
 end sub
 

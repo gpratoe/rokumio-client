@@ -6,14 +6,11 @@ sub init()
     m.top.functionName = "heartbeat"
 end sub
 sub heartbeat()
-    print "[rokumio] HeartbeatTask starting"
     try
         http = Transport()
         store = PlaybackStore(http)
         m.top.result = store.Heartbeat(m.top.address)
-        print "[rokumio] HeartbeatTask done ok=" + m.top.result.ok.ToStr() + " alive=" + m.top.result.alive.ToStr()
     catch e
-        print "[rokumio] HeartbeatTask error: " + e.message
         m.top.result = { ok: false, alive: false, error: e.message }
     end try
 end sub

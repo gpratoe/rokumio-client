@@ -76,9 +76,7 @@ class PlaybackStore
 
         body = {}
         if stream.fileIdx <> invalid then body.guessFileIdx = stream.fileIdx
-        print "[rokumio] CreateSession server='" + serverAddress + "' infoHash='" + stream.infoHash + "'"
         response = m.transport.PostLong(serverAddress + "/" + stream.infoHash + "/create", body)
-        print "[rokumio]   -> ok=" + response.ok.ToStr() + " status=" + response.status.ToStr() + " error='" + response.error + "'"
         if not response.ok or response.json = invalid
             result.error = response.error
             return result
@@ -99,7 +97,6 @@ class PlaybackStore
             return result
         end if
 
-        print "[rokumio] CreateSession fileIdx=" + fileIdx.ToStr()
 
         result.infoHash = stream.infoHash
         result.fileIdx = fileIdx
@@ -184,13 +181,11 @@ class PlaybackStore
             return result
         end if
 
-        print "[rokumio] ResolvePlayback server='" + serverAddress + "' infoHash='" + m.StreamInfoHash(stream) + "'"
 
         url = stream.url
         if url <> invalid and url.Trim() <> ""
             result.ok = true
             result.url = url.Trim()
-            print "[rokumio]   -> direct url '" + result.url + "'"
             return result
         end if
 
@@ -202,7 +197,6 @@ class PlaybackStore
 
         result.url = m.PlaybackUrl(serverAddress, session.infoHash, session.fileIdx)
         result.ok = true
-        print "[rokumio]   -> hls url '" + result.url + "'"
         return result
     end function
 

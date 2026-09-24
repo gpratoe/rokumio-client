@@ -10,15 +10,12 @@ sub init()
 end sub
 
 sub load()
-    print "[rokumio] MetaLoaderTask load() starting"
     try
         http = Transport()
         store = EpisodesStore(http)
         answer = store.GetMeta(m.top.addonAddress, m.top.metaType, m.top.metaId)
         m.top.result = { ok: answer.ok, meta: answer.meta, error: answer.error }
-        print "[rokumio] MetaLoaderTask done ok=" + answer.ok.ToStr()
     catch e
-        print "[rokumio] MetaLoaderTask error: " + e.message
         m.top.result = { ok: false, meta: invalid, error: e.message }
     end try
 end sub

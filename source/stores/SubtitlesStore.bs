@@ -46,7 +46,6 @@ class SubtitlesStore
 
         result.subtitles = subtitles
         result.ok = true
-        print "[rokumio] SubtitlesStore subtitles=" + subtitles.Count().ToStr() + " url='" + url + "'"
         return result
     end function
 

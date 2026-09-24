@@ -212,7 +212,6 @@ sub onTestServerResult()
     result = task.result
     AsyncTask_Reap(task, m.top, false)
 
-    print "[rokumio] TestServer /heartbeat -> ok=" + result.ok.ToStr() + " alive=" + result.alive.ToStr() + " error='" + result.error + "'"
     if result.alive
         m.status.text = "Server OK."
     else

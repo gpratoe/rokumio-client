@@ -11,7 +11,6 @@ sub init()
 end sub
 
 sub install()
-    print "[rokumio] AddonsInstallTask starting"
     try
         http = Transport()
         store = AddonsStore(http)
@@ -20,7 +19,6 @@ sub install()
         if result.ok and result.id <> invalid and result.id <> ""
             record = store.Get(result.id)
         end if
-        print "[rokumio] AddonsInstallTask ok=" + result.ok.ToStr() + " id='" + result.id + "' error='" + result.error + "'"
         m.top.result = {
             ok: result.ok
             id: result.id
@@ -28,7 +26,6 @@ sub install()
             record: record
         }
     catch e
-        print "[rokumio] AddonsInstallTask error: " + e.message
         m.top.result = { ok: false, id: "", error: e.message, record: invalid }
     end try
 end sub

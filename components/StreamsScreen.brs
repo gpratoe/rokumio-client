@@ -133,7 +133,6 @@ end sub
 ' cross into the tasks. Failure handling mirrors Home: on total failure the grid
 ' stays empty, and a hung add-on only delays its own provider, never the others.
 sub LoadStreams(params as object)
-    print "[rokumio] LoadStreams called"
     if m.stores = invalid or m.stores.addons = invalid then return
     if m.loadTasks <> invalid and m.loadTasks.Count() > 0 then return
 
@@ -147,7 +146,6 @@ sub LoadStreams(params as object)
             end if
         end if
     end for
-    print "[rokumio] LoadStreams providers=" + providers.Count().ToStr()
 
     m.providers = providers
     m.providersTotal = providers.Count()
@@ -165,7 +163,6 @@ sub LoadStreams(params as object)
         }, "streamsLoader" + i.ToStr())
         m.loadTasks.Push(task)
     end for
-    print "[rokumio] LoadStreams tasks started=" + m.loadTasks.Count().ToStr()
 
     UpdateStreamsStatus()
 end sub

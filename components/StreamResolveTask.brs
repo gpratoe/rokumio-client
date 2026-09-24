@@ -10,15 +10,12 @@ sub init()
 end sub
 
 sub resolve()
-    print "[rokumio] StreamResolveTask starting"
     try
         http = Transport()
         store = PlaybackStore(http)
         resolved = store.ResolvePlayback(m.top.serverAddress, m.top.stream)
-        print "[rokumio] StreamResolveTask infoHash='" + store.StreamInfoHash(m.top.stream) + "' -> ok=" + resolved.ok.ToStr() + " url='" + resolved.url + "' error='" + resolved.error + "'"
         m.top.result = resolved
     catch e
-        print "[rokumio] StreamResolveTask error: " + e.message
         m.top.result = { ok: false, url: "", error: e.message }
     end try
 end sub

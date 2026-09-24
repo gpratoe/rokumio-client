@@ -11,14 +11,11 @@ sub init()
 end sub
 
 sub push()
-    print "[rokumio] LibraryWritePushTask starting"
     try
         store = StremioApiStore(Transport(), m.top.authKey)
         result = store.LibraryPut(m.top.item, "Could not write library change")
-        print "[rokumio] LibraryWritePushTask ok=" + result.ok.ToStr() + " error='" + result.error + "'"
         m.top.result = result
     catch e
-        print "[rokumio] LibraryWritePushTask error: " + e.message
         m.top.result = { ok: false, error: e.message }
     end try
 end sub

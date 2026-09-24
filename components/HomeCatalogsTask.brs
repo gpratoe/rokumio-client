@@ -12,7 +12,6 @@ sub init()
 end sub
 
 sub load()
-    print "[rokumio] HomeCatalogsTask load() starting"
     rows = []
     try
         http = Transport()
@@ -48,9 +47,7 @@ sub load()
         end for
 
         m.top.result = { rows: rows, done: true }
-        print "[rokumio] HomeCatalogsTask done, rows=" + rows.Count().ToStr()
     catch e
-        print "[rokumio] HomeCatalogsTask error: " + e.message
         m.top.result = { rows: rows, done: true, error: e.message }
     end try
 end sub

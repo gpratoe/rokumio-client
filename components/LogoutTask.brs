@@ -12,18 +12,14 @@ end sub
 
 sub logout()
     if m.top.authKey = invalid or m.top.authKey = ""
-        print "[rokumio] LogoutTask nothing to revoke"
         m.top.result = { ok: true, error: "" }
         return
     end if
-    print "[rokumio] LogoutTask starting"
     try
         store = StremioApiStore(Transport(), m.top.authKey)
         result = store.Logout()
-        print "[rokumio] LogoutTask ok=" + result.ok.ToStr() + " error='" + result.error + "'"
         m.top.result = result
     catch e
-        print "[rokumio] LogoutTask error: " + e.message
         m.top.result = { ok: false, error: e.message }
     end try
 end sub

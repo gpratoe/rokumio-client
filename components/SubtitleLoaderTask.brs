@@ -8,7 +8,6 @@ sub init()
     m.top.functionName = "load"
 end sub
 sub load()
-    print "[rokumio] SubtitleLoaderTask starting"
     try
         http = Transport()
         store = SubtitlesStore(http)
@@ -16,11 +15,9 @@ sub load()
         if answer.ok
             m.top.result = { ok: true, subtitles: answer.subtitles, error: "" }
         else
-            print "[rokumio] SubtitleLoaderTask error: " + answer.error
             m.top.result = { ok: false, subtitles: [], error: answer.error }
         end if
     catch e
-        print "[rokumio] SubtitleLoaderTask error: " + e.message
         m.top.result = { ok: false, subtitles: [], error: e.message }
     end try
 end sub

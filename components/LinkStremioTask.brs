@@ -17,15 +17,9 @@ sub init()
 end sub
 
 sub startAuth()
-    print "[rokumio] LinkStremioTask starting"
     http = Transport()
     try
         createRes = http.Get("https://link.stremio.com/api/v2/create?type=Create")
-        if createRes.ok and createRes.json <> invalid
-            print "[rokumio] LinkStremioTask create body=" + FormatJson(createRes.json)
-        else
-            print "[rokumio] LinkStremioTask create failed ok=" + createRes.ok.ToStr() + " error='" + createRes.error + "'"
-        end if
         result = invalid
         if createRes.ok and createRes.json <> invalid then result = createRes.json.result
         if result = invalid or result.code = invalid or result.code = ""
@@ -73,13 +67,10 @@ sub startAuth()
         user = invalid
         if userRes.ok and userRes.json <> invalid and userRes.json.result <> invalid
             user = userRes.json.result
-        else
-            print "[rokumio] LinkStremioTask getUser failed ok=" + userRes.ok.ToStr() + " error='" + userRes.error + "'"
         end if
 
         m.top.result = { ok: true, authKey: authKey, user: user, error: "" }
     catch e
-        print "[rokumio] LinkStremioTask error: " + e.message
         m.top.result = { ok: false, authKey: "", user: invalid, error: "Login failed" }
     end try
 end sub

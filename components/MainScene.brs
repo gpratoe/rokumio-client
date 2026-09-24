@@ -274,14 +274,7 @@ sub onWatchStatePushResult()
     m.watchStatePushTask = invalid
     m.pushingWatchState = false
     if task = invalid then return
-    result = task.result
     AsyncTask_Reap(task, m.top, false)
-
-    if result <> invalid and result.ok
-        print "[rokumio] watch state pushed videoId='" + m.inFlightWatchState.videoId + "'"
-    else
-        print "[rokumio] watch state push failed"
-    end if
     m.inFlightWatchState = invalid
     PumpWatchStatePush()
 end sub
@@ -332,14 +325,7 @@ sub onLibraryWritePushResult()
     m.libraryWritePushTask = invalid
     m.pushingLibraryChange = false
     if task = invalid then return
-    result = task.result
     AsyncTask_Reap(task, m.top, false)
-
-    if result <> invalid and result.ok
-        print "[rokumio] library change pushed metaId='" + m.inFlightLibraryChange.metaId + "' added=" + m.inFlightLibraryChange.added.ToStr()
-    else
-        print "[rokumio] library change push failed"
-    end if
     m.inFlightLibraryChange = invalid
     PumpLibraryWritePush()
 end sub
@@ -562,7 +548,6 @@ end sub
 ' the user can pick their next session. The server call is fire-and-forget — the
 ' user is logged out here regardless of its outcome.
 sub DoLogout()
-    print "[rokumio] DoLogout"
     if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetAuthKey() <> ""
         task = AsyncTask_Launch(m.top, "LogoutTask", "onLogoutResult", {
             authKey: m.stores.auth.GetAuthKey()
@@ -582,21 +567,13 @@ sub DoLogout()
     m.stack.push("authScreen")
 end sub
 
-' The server logout settled. Log the outcome and reap the worker; the local
-' session is already cleared, nothing to gate on.
+' The server logout settled. Reap the worker; the local session is already
+' cleared, nothing to gate on.
 sub onLogoutResult()
     task = m.logoutTask
     m.logoutTask = invalid
     if task = invalid then return
-    result = task.result
     AsyncTask_Reap(task, m.top, false)
-    if result <> invalid and result.ok
-        print "[rokumio] account logged out at api.strem.io"
-    else
-        error = ""
-        if result <> invalid and result.error <> invalid then error = result.error
-        print "[rokumio] server logout failed: " + error
-    end if
 end sub
 
 ' Kick the account addon sync for a freshly-logged-in stremio session. The API
@@ -636,12 +613,10 @@ sub onAddonSyncResult()
                     skipped = skipped + 1
                 else
                     failed = failed + 1
-                    print "[rokumio] addon sync dropped '" + outcome.id + "': " + outcome.error
                 end if
             end if
         end for
     end if
-    print "[rokumio] addon sync added=" + added.ToStr() + " skipped=" + skipped.ToStr() + " failed=" + failed.ToStr()
     if added > 0 and m.homeScreen <> invalid
         m.homeScreen.callFunc("RebuildRows")
     end if
@@ -671,7 +646,6 @@ sub onLibrarySyncResult()
     AsyncTask_Reap(task, m.top, false)
 
     if result = invalid or not result.ok or result.items = invalid
-        print "[rokumio] library sync failed"
         return
     end if
     if m.stores = invalid or m.stores.library = invalid then return
@@ -698,11 +672,9 @@ end sub
 ' while one runs is dropped.
 sub HandleDeepLink(args as object)
     if args = invalid
-        print "[rokumio] HandleDeepLink: args invalid"
         return
     end if
     if m.import <> invalid
-        print "[rokumio] HandleDeepLink: import already running, dropping"
         return
     end if
 
@@ -711,13 +683,10 @@ sub HandleDeepLink(args as object)
         if keys <> "" then keys = keys + ","
         keys = keys + key
     end for
-    print "[rokumio] HandleDeepLink args keys: " + keys
 
     parse = DeepLinkStore().Parse(args)
-    print "[rokumio] HandleDeepLink kind=" + parse.kind + " verb='" + parse.verb + "' ok=" + parse.ok.ToStr() + " error='" + parse.error + "' addons=" + parse.addons.Count().ToStr() + " settings=" + (parse.settings <> invalid).ToStr()
 
     if parse.kind = "none"
-        print "[rokumio] HandleDeepLink: not a rokumio deep link, ignoring"
         return
     end if
     if parse.kind = "unknown"
@@ -751,7 +720,6 @@ sub PumpImport()
     if m.import.task <> invalid then return
     if m.import.pending.Count() > 0
         url = m.import.pending.Shift()
-        print "[rokumio] PumpImport: fetching " + url
         task = AsyncTask_Launch(m.top, "AddonsInstallTask", "onImportTaskResult", { address: url }, "deepLinkInstall")
         m.import.task = task
         return
@@ -777,14 +745,12 @@ sub onImportTaskResult()
         if result.id <> invalid then resultId = result.id
         if result.error <> invalid then resultError = result.error
     end if
-    print "[rokumio] import task ok=" + (result <> invalid and result.ok).ToStr() + " id='" + resultId + "' error='" + resultError + "'"
 
     if result <> invalid and result.ok and result.record <> invalid
         registered = false
         if m.stores <> invalid and m.stores.addons <> invalid
             registered = m.stores.addons.Register(result.record)
         end if
-        print "[rokumio] AddonsStore.Register('" + resultId + "') = " + registered.ToStr()
         if registered
             m.import.added = m.import.added + 1
         else
@@ -797,7 +763,6 @@ sub onImportTaskResult()
         if resultId <> "" then line = resultId + ": " + line
         m.import.failures.Push(line)
     end if
-    print "[rokumio] import counts added=" + m.import.added.ToStr() + " skipped=" + m.import.skipped.ToStr() + " failed=" + m.import.failed.ToStr()
     PumpImport()
 end sub
 
@@ -808,7 +773,6 @@ end sub
 sub FinishImport()
     if m.import = invalid then return
 
-    print "[rokumio] FinishImport requested=" + m.import.requested.ToStr() + " added=" + m.import.added.ToStr() + " skipped=" + m.import.skipped.ToStr() + " failed=" + m.import.failed.ToStr()
 
     blocks = []
     bullets = []
@@ -838,7 +802,6 @@ sub FinishImport()
     end if
 
     if m.import.settings <> invalid and m.import.settings.serverAddress <> invalid
-        print "[rokumio] FinishImport serverAddress sent"
         if m.stores <> invalid and m.stores.settings <> invalid
             if m.stores.settings.SetServerAddress(m.import.settings.serverAddress)
                 blocks.Push("Server linked.")
@@ -856,7 +819,6 @@ sub FinishImport()
     ' so drop its rows and re-walk them now. The fill happens off the UI thread
     ' behind the summary dialog; nothing to block on here.
     if m.import.added > 0
-        print "[rokumio] FinishImport: invalidating Home rows"
         if m.homeScreen <> invalid then m.homeScreen.callFunc("RebuildRows")
     end if
 
@@ -870,7 +832,6 @@ function AddonWord(count as integer) as string
 end function
 
 sub ShowImportDialog(title as string, blocks as object, bullets = invalid as object)
-    print "[rokumio] ShowImportDialog title='" + title + "' message=" + FormatJson(blocks)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.id = "deepLinkImportDialog"
     dialog.title = title

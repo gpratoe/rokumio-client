@@ -582,7 +582,6 @@ class LibraryStore
         m.saved = saved
         m.savedOrder = savedOrder
         m.accountWatched = accountWatched
-        print "[rokumio] LibraryStore sync cw=" + m.positions.Count().ToStr() + " saved=" + m.savedOrder.Count().ToStr() + " total=" + m.stremioLibrary.Count().ToStr()
         m.Save()
     end sub
 
