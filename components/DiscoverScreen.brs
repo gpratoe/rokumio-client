@@ -259,6 +259,16 @@ sub onGridFocused()
     if rows >= 4 and row >= rows - 3 then LoadMore()
 end sub
 
+' A landing may grab chips focus only when the dropdown is closed — an open
+' menu keeps its focus through the landing so a load finishing can't yank the
+' user out of a pick (the batch #2 / #4 screen-active rule, plus the menu
+' guard).
+sub LandingChipsFocus()
+    if m.top.screenActive and not m.filterBar.callFunc("IsMenuOpen")
+        m.filterBar.callFunc("FocusChips")
+    end if
+end sub
+
 ' A catalog page came back. Stale results are dropped: a page whose offset no
 ' longer matches the metas already shown landed after a filter change (which
 ' resets the list), and the m.loadTask guard drops anything that arrived after
@@ -277,7 +287,7 @@ sub onDiscoverLoaded()
     if result = invalid or not result.ok or result.metas = invalid
         if m.metas.Count() = 0
             m.status.text = "Failed to load " + Chr(34) + label + Chr(34) + "."
-            if m.top.screenActive then m.filterBar.callFunc("FocusChips")
+            LandingChipsFocus()
         end if
         return
     end if
@@ -291,12 +301,12 @@ sub onDiscoverLoaded()
             m.grid.content = CreateObject("roSGNode", "ContentNode")
             m.grid.numRows = 0
             m.status.text = "No results for " + Chr(34) + label + Chr(34) + "."
-            if m.top.screenActive then m.filterBar.callFunc("FocusChips")
+            LandingChipsFocus()
             return
         end if
         UpdateGrid()
         m.status.text = ""
-        if m.top.screenActive then m.filterBar.callFunc("FocusChips")
+        LandingChipsFocus()
     else
         for each meta in result.metas
             m.metas.Push(meta)
