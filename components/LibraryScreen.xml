@@ -51,20 +51,6 @@
             font="font:SmallSystemFont"
             color="0x2BD675FF" />
 
-        <!-- The filter chips, one row of ChipTiles rebuilt whenever a value
-             changes: the content-type filter and the sort order. -->
-        <RowList
-            id="libraryChips"
-            translation="[150, 232]"
-            numRows="1"
-            itemSize="[1760, 56]"
-            itemSpacing="[0, 8]"
-            rowItemSize="[[260, 56]]"
-            rowItemSpacing="[[12, 0]]"
-            showRowLabel="false"
-            drawFocusFeedback="false"
-            itemComponentName="ChipTile" />
-
         <!-- Current filter summary, e.g. "All · Recently added". -->
         <Label
             id="libraryHeader"
@@ -91,22 +77,12 @@
             drawFocusFeedback="false"
             itemComponentName="PosterTile" />
 
-        <!-- The dropdown: a panel below the chips listing one chip's options in
-             a single-column RowList (vertical clipping free). Opens on chip OK;
-             the panel is declared last so the menu paints over the grid. -->
-        <Group id="libraryMenuGroup" translation="[150, 300]" visible="false">
-            <Rectangle id="libraryMenuBackdrop" width="252" height="62" color="0x101813FF" />
-            <RowList
-                id="libraryMenu"
-                numRows="1"
-                itemSize="[248, 56]"
-                itemSpacing="[0, 6]"
-                rowItemSize="[[240, 56]]"
-                rowItemSpacing="[[4, 0]]"
-                showRowLabel="false"
-                drawFocusFeedback="false"
-                itemComponentName="ChipTile"
-                vertFocusAnimationStyle="floatingFocus"/>
-        </Group>
+        <!-- The filter chips + dropdown (FilterBar). The component owns the chip
+             row, the option menu and their geometry; the screen supplies the
+             chip options and the commit effect. Declared last (a custom
+             component renders in its own pass, in declaration order) so the
+             dropdown paints over the results grid; the chip row at y 232 does
+             not overlap the grid at y 342, so ordering it after is harmless. -->
+        <FilterBar id="filterBar" translation="[150, 232]" />
     </children>
 </component>

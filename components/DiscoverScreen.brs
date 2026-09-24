@@ -14,26 +14,19 @@
 sub init()
     m.status = m.top.FindNode("discoverStatus")
     m.header = m.top.FindNode("discoverHeader")
-    m.chips = m.top.FindNode("discoverChips")
+    m.filterBar = m.top.FindNode("filterBar")
     m.grid = m.top.FindNode("discoverGrid")
-    m.menuGroup = m.top.FindNode("discoverMenuGroup")
-    m.menuBackdrop = m.top.FindNode("discoverMenuBackdrop")
-    m.menu = m.top.FindNode("discoverMenu")
 
-    m.chips.ObserveField("rowItemSelected", "onChipSelected")
-    m.menu.ObserveField("rowItemSelected", "onMenuSelected")
+    m.filterBar.ObserveField("chipActivated", "onChipActivated")
+    m.filterBar.ObserveField("optionPicked", "onOptionPicked")
     m.grid.ObserveField("rowItemSelected", "onResultSelected")
     m.grid.ObserveField("itemFocused", "onGridFocused")
 
     m.chunk = 6
-    m.chipsX = 150
-    m.chipPitch = 272
     m.type = "movie"
     m.chart = "Popular"
     m.genre = "All"
     m.metas = []
-    m.activeChip = 0
-    m.menuOptions = []
     m.loaded = false
     m.allLoaded = false
     m.loadTask = invalid
@@ -46,7 +39,7 @@ function OnEnter(params as object) as void
         if addon <> invalid then m.cinemetaAddress = addon.address
     end if
 
-    if m.menuGroup.visible then CloseMenu()
+    if m.filterBar.callFunc("IsMenuOpen") then m.filterBar.callFunc("HideMenu")
 
     ' Re-entry after Details: results are still here, just take focus back.
     if m.metas.Count() > 0
@@ -55,8 +48,8 @@ function OnEnter(params as object) as void
     end if
 
     if not m.loaded then FetchDiscover()
-    BuildChips()
-    m.chips.SetFocus(true)
+    SetChips()
+    m.filterBar.callFunc("FocusChips")
 end function
 
 function OnExit() as void
@@ -70,29 +63,20 @@ end function
 sub BlurFocus()
 end sub
 
-' --- chips ------------------------------------------------------------------
+' --- filter chips (data) ----------------------------------------------------
 
-' The focused chip's value is stored raw (m.type/m.chart/m.genre); the chips
-' show "Type · Movies"-style labels so each chip's role is readable. The genre
-' chip is skipped while New is selected (New's only filter is the year).
-sub BuildChips()
+' The chip row itself lives in FilterBar; the screen owns the values
+' (m.type/m.chart/m.genre) and their labels. "Type · Movies"-style labels make
+' each chip's role readable; the genre chip is skipped while New is selected
+' (New's only filter is the year). Rebuilt on every pick so the label always
+' reflects the active value.
+sub SetChips()
     entries = [
         { raw: m.type, label: "Type · " + TypeLabel(m.type) }
         { raw: m.chart, label: "Chart · " + m.chart }
     ]
     if m.chart <> "New" then entries.Push({ raw: m.genre, label: "Genre · " + m.genre })
-
-    m.chipEntries = entries
-    if m.activeChip >= entries.Count() then m.activeChip = entries.Count() - 1
-
-    content = CreateObject("roSGNode", "ContentNode")
-    row = content.CreateChild("ContentNode")
-    for each entry in entries
-        item = row.CreateChild("ContentNode")
-        item.title = entry.label
-    end for
-    m.chips.content = content
-    m.chips.jumpToRowItem = [0, m.activeChip]
+    m.filterBar.callFunc("SetChips", entries)
 end sub
 
 function TypeLabel(metaType as string) as string
@@ -100,44 +84,16 @@ function TypeLabel(metaType as string) as string
     return "Movies"
 end function
 
-' --- dropdown ---------------------------------------------------------------
-
-' OK on a chip opens the dropdown for it, positioned under the chips row and
-' pre-scrolled to the current value: whatever is focused is the value that OK
-' will commit, Back leaves everything untouched.
-sub onChipSelected()
-    data = m.chips.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    chip = data[1]
-    if chip < 0 or chip >= m.chipEntries.Count() then return
-
+' The chip OK'd in the FilterBar: hand it that chip's options and the index of
+' the current value, and the component opens the dropdown pre-scrolled there —
+' whatever is focused is the value that OK will commit, Back leaves everything
+' untouched.
+sub onChipActivated()
+    chip = m.filterBar.chipActivated
+    if chip < 0 then return
     options = OptionsFor(chip)
     if options.Count() = 0 then return
-    m.menuOptions = options
-    m.activeChip = chip
-
-    content = CreateObject("roSGNode", "ContentNode")
-    for each option in options
-        row = content.CreateChild("ContentNode")
-        item = row.CreateChild("ContentNode")
-        item.title = option.label
-    end for
-    m.menu.content = content
-
-    shown = options.Count()
-    if shown > 9 then shown = 9
-    m.menu.numRows = shown
-    m.menuBackdrop.width = 252
-    m.menuBackdrop.height = shown * 56 + (shown - 1) * 6 + 4
-
-    ' Hang the dropdown under the activating chip, not always the first one.
-    ' The chips are one row of 260px tiles with a 12px gap (DiscoverScreen.xml),
-    ' so menu x walks with the chip index; y lines up below the row.
-    m.menuGroup.translation = [m.chipsX + chip * m.chipPitch, 300]
-
-    m.menuGroup.visible = true
-    m.menu.jumpToRowItem = [CurrentOptionIndex(), 0]
-    m.menu.SetFocus(true)
+    m.filterBar.callFunc("ShowMenu", options, CurrentOptionIndex(chip))
 end sub
 
 function OptionsFor(chip as integer) as object
@@ -162,55 +118,50 @@ function OptionsFor(chip as integer) as object
     return options
 end function
 
-function CurrentOptionIndex() as integer
-    if m.activeChip = 0
+function CurrentOptionIndex(chip as integer) as integer
+    if chip = 0
         if m.type = "series" then return 1
         return 0
-    else if m.activeChip = 1
+    else if chip = 1
         if m.chart = "New" then return 1
         if m.chart = "Featured" then return 2
         return 0
     end if
+    options = OptionsFor(chip)
     index = 0
-    for i = 0 to m.menuOptions.Count() - 1
-        if m.menuOptions[i].raw = m.genre then index = i
+    for i = 0 to options.Count() - 1
+        if options[i].raw = m.genre then index = i
     end for
     return index
 end function
 
-' OK inside the dropdown commits the highlighted option, then re-fetches. The
-' menu lays one option per row, so rowItemSelected is [optionRow, 0] — the
-' option index is the row (data[0]); a single-column row always reports 0 for
-' the column. Re-picking the current value just closes the menu.
-sub onMenuSelected()
-    data = m.menu.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    index = data[0]
-    if index < 0 or index >= m.menuOptions.Count() then return
-    option = m.menuOptions[index]
+' An option OK'd in the FilterBar's dropdown, then re-fetches. Re-picking the
+' current value just closes the menu. The raw value and the commit effect are
+' the screen's; the component reports which chip and which row were picked.
+sub onOptionPicked()
+    pick = m.filterBar.optionPicked
+    if pick = invalid or pick.chip = invalid or pick.index = invalid then return
+    chip = pick.chip
+    options = OptionsFor(chip)
+    index = pick.index
+    if index < 0 or index >= options.Count() then return
+    option = options[index]
 
-    if m.activeChip = 0
-        if option.raw = m.type then CloseMenu() : return
+    if chip = 0
+        if option.raw = m.type then m.filterBar.callFunc("HideMenu") : return
         m.type = option.raw
-    else if m.activeChip = 1
-        if option.raw = m.chart then CloseMenu() : return
+    else if chip = 1
+        if option.raw = m.chart then m.filterBar.callFunc("HideMenu") : return
         m.chart = option.raw
-    else if m.activeChip = 2
-        if option.raw = m.genre then CloseMenu() : return
+    else if chip = 2
+        if option.raw = m.genre then m.filterBar.callFunc("HideMenu") : return
         m.genre = option.raw
     end if
 
-    CloseMenu()
-    BuildChips()
+    m.filterBar.callFunc("HideMenu")
+    SetChips()
     ResetDiscover()
     FetchDiscover()
-end sub
-
-' Dismiss the dropdown and hand focus back to the chips. Called on Back (no
-' change) and after a pick (the pick already committed above).
-sub CloseMenu()
-    m.menuGroup.visible = false
-    m.chips.SetFocus(true)
 end sub
 
 ' --- fetching ---------------------------------------------------------------
@@ -326,7 +277,7 @@ sub onDiscoverLoaded()
     if result = invalid or not result.ok or result.metas = invalid
         if m.metas.Count() = 0
             m.status.text = "Failed to load " + Chr(34) + label + Chr(34) + "."
-            if m.top.screenActive then m.chips.SetFocus(true)
+            if m.top.screenActive then m.filterBar.callFunc("FocusChips")
         end if
         return
     end if
@@ -340,12 +291,12 @@ sub onDiscoverLoaded()
             m.grid.content = CreateObject("roSGNode", "ContentNode")
             m.grid.numRows = 0
             m.status.text = "No results for " + Chr(34) + label + Chr(34) + "."
-            if m.top.screenActive then m.chips.SetFocus(true)
+            if m.top.screenActive then m.filterBar.callFunc("FocusChips")
             return
         end if
         UpdateGrid()
         m.status.text = ""
-        if m.top.screenActive then m.chips.SetFocus(true)
+        if m.top.screenActive then m.filterBar.callFunc("FocusChips")
     else
         for each meta in result.metas
             m.metas.Push(meta)
@@ -430,37 +381,22 @@ sub onResultSelected()
     }
 end sub
 
-' Menu open: Back dismisses it (nothing changes), and the arrow keys are kept
-' inside the dropdown instead of leaking to the stack/Scene. Otherwise Down
-' from the chips enters the results grid and Up from the grid returns.
+' Focus travel between the chips and the results grid. The dropdown's own keys
+' are handled inside FilterBar (it owns the menu focus); with the menu closed
+' Down from the chips enters the results grid and Up from the grid returns.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
-
-    if m.menuGroup.visible
-        if key = "back"
-            CloseMenu()
-            return true
-        end if
-        if key = "options"
-            CloseMenu()
-            return true
-        end if
-        if key = "up" or key = "down" or key = "left" or key = "right"
-            return true
-        end if
-        return false
-    end if
 
     ' The asterisk key is a one-press escape hatch: from anywhere in the
     ' results grid it drops focus back up onto the filter chips.
     if key = "options" and m.grid.HasFocus()
-        m.chips.SetFocus(true)
+        m.filterBar.callFunc("FocusChips")
         return true
-    else if key = "down" and m.chips.HasFocus()
+    else if key = "down" and m.filterBar.callFunc("FocusIsOnChips")
         m.grid.SetFocus(true)
         return true
     else if key = "up" and m.grid.HasFocus()
-        m.chips.SetFocus(true)
+        m.filterBar.callFunc("FocusChips")
         return true
     end if
     return false

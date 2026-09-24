@@ -280,6 +280,48 @@ function checkHomeScreenContract() {
     return ok;
 }
 
+// DiscoverScreen and LibraryScreen embed the shared FilterBar (chips + dropdown)
+// and must talk to it only through its interface: callFunc handlers for the tag
+// side and the chipActivated/optionPicked observers for the events. Pin the
+// interface functions the component declares, that both screens call into it
+// (not into gone chips/menu nodes), and that no screen XML still hand-rolls the
+// now-shared row/menu nodes.
+function checkFilterBarContract() {
+    const fs = require('fs');
+    const root = projectRoot;
+    const xml = fs.readFileSync(path.join(root, 'components', 'FilterBar.xml'), 'utf8');
+    const declared = new Set(
+        [...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1])
+    );
+    const expected = ['SetChips', 'ShowMenu', 'HideMenu', 'FocusChips', 'FocusIsOnChips', 'IsMenuOpen'];
+    let ok = true;
+    for (const fn of expected) {
+        if (!declared.has(fn)) {
+            console.error(`FilterBar.xml is missing <function name="${fn}" /> from its interface`);
+            ok = false;
+        }
+    }
+    for (const screen of ['DiscoverScreen', 'LibraryScreen']) {
+        const brs = fs.readFileSync(path.join(root, 'components', `${screen}.brs`), 'utf8');
+        if (!brs.includes(`m.filterBar = m.top.FindNode("filterBar")`)) {
+            console.error(`${screen}.brs does not embed the shared FilterBar (FindNode "filterBar")`);
+            ok = false;
+        }
+        for (const observe of ['"chipActivated"', '"optionPicked"']) {
+            if (!brs.includes(`ObserveField(${observe}`)) {
+                console.error(`${screen}.brs does not observe filterBar.${observe} — membership/deferred picks would silently no-op`);
+                ok = false;
+            }
+        }
+        const screenXml = fs.readFileSync(path.join(root, 'components', `${screen}.xml`), 'utf8');
+        if (screenXml.includes('Chips"') || screenXml.includes('Menu"')) {
+            console.error(`${screen}.xml still hand-rolls chips/menu nodes — use <FilterBar> instead`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 // The watch-state write-back worker must keep its contract (authKey + item in,
 // result out with alwaysNotify) so the MainScene pump cannot silently mismatch
 // a field the Task never declared.
@@ -433,7 +475,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
         process.exit(1);
     }
 
