@@ -38,6 +38,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/FilterBar.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <RowList
@@ -57,7 +58,7 @@
              whatever sits under it (the screen declares FilterBar after its own
              grid for that reason). -->
         <Group id="menuGroup" visible="false">
-            <Rectangle id="menuBackdrop" width="252" height="62" color="0x101813FF" />
+            <Rectangle id="menuBackdrop" width="252" height="62" />
             <RowList
                 id="menu"
                 numRows="1"

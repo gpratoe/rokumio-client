@@ -19,6 +19,12 @@ sub init()
     m.filterBar = m.top.FindNode("filterBar")
     m.grid = m.top.FindNode("libraryGrid")
 
+    t = Theme()
+    m.top.FindNode("libraryTitle").color = t.accent
+    m.top.FindNode("librarySub").color = t.textSecondary
+    m.status.color = t.accent
+    m.header.color = t.textSecondary
+
     m.filterBar.ObserveField("chipActivated", "onChipActivated")
     m.filterBar.ObserveField("optionPicked", "onOptionPicked")
     m.grid.ObserveField("rowItemSelected", "onResultSelected")

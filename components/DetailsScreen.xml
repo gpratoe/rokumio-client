@@ -20,31 +20,30 @@
 
     <script type="text/brightscript" uri="pkg:/components/DetailsScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <!-- Background: flat theme base, then the Cinemeta `background` artwork
              (when provided) cropped to fill, dimmed by a scrim so the hero and
              text stay readable. -->
-        <Rectangle id="detailsBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Rectangle id="detailsBg" width="1920" height="1080" />
         <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
-        <Rectangle id="bgScrim" width="1920" height="1080" color="0x00000099" />
+        <Rectangle id="bgScrim" width="1920" height="1080" />
 
         <!-- Hero: left poster, right name/type/description. -->
-        <Poster id="heroPoster" translation="[80, 120]" width="360" height="510" failBackgroundColor="0x0B110DFF" />
+        <Poster id="heroPoster" translation="[80, 120]" width="360" height="510" />
         <Label
             id="detailName"
             translation="[520, 140]"
             width="1320"
             height="90"
-            font="font:LargeBoldSystemFont"
-            color="0xE9F2ECFF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="detailType"
             translation="[520, 248]"
             width="1320"
             height="40"
-            font="font:MediumSystemFont"
-            color="0x2BD675FF" />
+            font="font:MediumSystemFont" />
         <Label
             id="detailDesc"
             translation="[520, 306]"
@@ -52,8 +51,7 @@
             height="260"
             wrap="true"
             vertAlign="top"
-            font="font:SmallSystemFont"
-            color="0x8FA399FF" />
+            font="font:SmallSystemFont" />
 
         <!-- One shared chip row below the hero poster. Series load Resume / "Play
              S1E1" + "Episodes"; movies load Play / add-to-library. The chips

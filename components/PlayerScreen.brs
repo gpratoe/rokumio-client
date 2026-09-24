@@ -42,6 +42,10 @@ sub init()
     m.logoFront = m.top.FindNode("logoFront")
     m.resolvePulse = m.top.FindNode("resolvePulse")
 
+    t = Theme()
+    m.top.FindNode("playerBg").color = t.playerBg
+    m.status.color = t.textPrimary
+
     m.stopWatchdog = m.top.FindNode("stopWatchdog")
     m.stopWatchdog.ObserveField("fire", "onStopWatchdogFire")
     m.pendingStop = false
@@ -358,7 +362,7 @@ function DeviceLocale() as string
 end function
 
 sub CustomizeVideoNode()
-    m.video.trickPlayBar.filledBarBlendColor = "0x2BD675FF"
+    m.video.trickPlayBar.filledBarBlendColor = Theme().accent
 end sub
 
 ' The Video node is declared in XML so Roku owns its native UI lifecycle. Each

@@ -16,6 +16,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/SearchScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <Rectangle id="searchBg" width="1920" height="1080" color="0x0" />
@@ -25,24 +26,21 @@
             width="1760"
             height="70"
             text="Search"
-            font="font:LargeBoldSystemFont"
-            color="0x2BD675FF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="searchSub"
             translation="[150, 128]"
             width="1760"
             height="40"
             text="Type a title, then OK · * to search again · Back to exit"
-            font="font:SmallSystemFont"
-            color="0x8FA399FF" />
+            font="font:SmallSystemFont" />
 
         <Label
             id="searchStatus"
             translation="[150, 180]"
             width="1760"
             height="40"
-            font="font:SmallSystemFont"
-            color="0x2BD675FF" />
+            font="font:SmallSystemFont" />
 
         <!-- Results grid: poster rows grouped by type. numRows stays 2 for the
              whole query — each row always exists so navigation works while its
@@ -59,7 +57,6 @@
             showRowLabel="[true]"
             rowLabelOffset="[0, 10]"
             rowLabelFont="font:MediumBoldSystemFont"
-            rowLabelTextColor="0x8FA399FF"
             drawFocusFeedback="false"
             itemComponentName="PosterTile" />
     </children>

@@ -22,6 +22,12 @@ sub init()
     m.progressFill = m.top.FindNode("progressFill")
     m.watchedGlyph = m.top.FindNode("watchedGlyph")
 
+    t = Theme()
+    m.titleText.color = t.textPrimary
+    m.poster.failBackgroundColor = t.tileFace
+    m.progressTrack.color = t.progressTrack
+    m.progressFill.color = t.progressFill
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
@@ -34,13 +40,14 @@ end sub
 ' except itemContent, so unless the look is rebuilt there a tile carries stale
 ' dimming (opacity 0.55) into a fresh row on another screen/media.
 sub UpdateLook()
+    t = Theme()
     if m.top.itemHasFocus
-        m.tileBorder.color = "0x5BEF95FF"
-        m.tileBg.color = "0x18231CFF"
+        m.tileBorder.color = t.accentFocus
+        m.tileBg.color = t.tileFaceFocus
         m.top.scale = [1.1, 1.1]
     else
-        m.tileBorder.color = "0x2BD67500"
-        m.tileBg.color = "0x0B110DFF"
+        m.tileBorder.color = t.accentClear
+        m.tileBg.color = t.tileFace
         m.top.scale = [1.0, 1.0]
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55

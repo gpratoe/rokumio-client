@@ -12,10 +12,11 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/PrefRow.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <Rectangle id="rowBorder" width="1000" height="110" color="0x2BD67500">
-            <Rectangle id="rowFace" width="992" height="102" translation="[4, 4]" color="0x0B110DFF" />
+        <Rectangle id="rowBorder" width="1000" height="110">
+            <Rectangle id="rowFace" width="992" height="102" translation="[4, 4]" />
             <Label
                 id="rowTitle"
                 width="600"
@@ -23,8 +24,7 @@
                 translation="[24, 0]"
                 horizAlign="left"
                 vertAlign="center"
-                font="font:MediumBoldSystemFont"
-                color="0xE9F2ECFF" />
+                font="font:MediumBoldSystemFont" />
             <Label
                 id="rowValue"
                 width="336"
@@ -32,8 +32,7 @@
                 translation="[640, 0]"
                 horizAlign="right"
                 vertAlign="center"
-                font="font:MediumSystemFont"
-                color="0x8FA399FF" />
+                font="font:MediumSystemFont" />
         </Rectangle>
     </children>
 </component>

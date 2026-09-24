@@ -8,6 +8,8 @@ sub init()
     m.glyph = m.top.FindNode("railGlyph")
     m.zoomAnim = m.top.FindNode("zoomAnim")
 
+    m.border.color = Theme().accentClear
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
@@ -18,14 +20,15 @@ end sub
 ' must be rebuilt on itemContent changes too, or a recycled tile carries stale
 ' dimming into a fresh row).
 sub UpdateLook()
+    t = Theme()
     if m.top.itemHasFocus
         m.zoomAnim.control = "start"
-        m.glyph.blendColor = "0x2BD675FF"
+        m.glyph.blendColor = t.accent
         m.top.opacity = 1.0
     else
         m.zoomAnim.control = "stop"
         m.glyph.scale = [1.0,1.0]
-        m.glyph.blendColor = "0x8FA399FF"
+        m.glyph.blendColor = t.textSecondary
         m.top.opacity = 0.30
     end if
 end sub

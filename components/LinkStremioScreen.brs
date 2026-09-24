@@ -21,6 +21,16 @@ sub init()
     m.statusLabel = m.top.FindNode("pairStatus")
     m.ticker = m.top.FindNode("pairTicker")
 
+    t = Theme()
+    m.titleLabel.color = t.accent
+    m.qrFallback.color = t.textSecondary
+    m.top.FindNode("pairStep1Prefix").color = t.textWhite
+    m.linkLabel.color = t.accent
+    m.top.FindNode("pairStep2").color = t.textWhite
+    m.timerLabel.color = t.textSecondary
+    m.top.FindNode("pairRefreshHint").color = t.accent
+    m.statusLabel.color = t.textSecondary
+
     ' The screen group itself takes focus at push (all its focusable children
     ' start inside the hidden column), which puts this subtree in the Roku focus
     ' chain. Without it, the push-time SetFocus cascade finds nothing focusable

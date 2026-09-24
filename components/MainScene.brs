@@ -59,6 +59,7 @@ sub init()
     m.libraryScreen = m.top.FindNode("libraryScreen")
     m.libraryScreen.ObserveField("pushRequest", "onLibraryAction")
     m.uiRoot = m.top.FindNode("uiRoot")
+    m.top.FindNode("background").color = Theme().screenBg
     ' Settings can start the link-code flow; logout reuses the pairing worker.
     ' Both flags are session-flow state with no store counterpart.
     m.loginFromSettings = false

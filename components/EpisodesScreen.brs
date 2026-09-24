@@ -19,6 +19,13 @@ sub init()
     m.epDesc = m.top.FindNode("epDesc")
     m.epList = m.top.FindNode("epList")
 
+    t = Theme()
+    m.top.FindNode("bgScrim").color = t.scrim
+    m.epName.color = t.accent
+    m.epTitle.color = t.accent
+    m.epDesc.color = t.textSecondary
+    m.epList.rowLabelTextColor = t.textSecondary
+
     m.epList.ObserveField("rowItemFocused", "onItemFocused")
     m.epList.ObserveField("rowItemSelected", "onItemSelected")
 

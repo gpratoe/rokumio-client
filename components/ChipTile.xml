@@ -11,12 +11,13 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/ChipTile.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <!-- chipBorder is the frame, chipFace the inset face so focus draws a
              border instead of painting over the chip. -->
-        <Rectangle id="chipBorder" width="240" height="56" color="0x2BD67500">
-            <Rectangle id="chipFace" width="232" height="48" translation="[4, 4]" color="0x0B110DFF" />
+        <Rectangle id="chipBorder" width="240" height="56">
+            <Rectangle id="chipFace" width="232" height="48" translation="[4, 4]" />
             <Label
                 id="chipText"
                 width="224"
@@ -24,8 +25,7 @@
                 translation="[8, 8]"
                 horizAlign="center"
                 vertAlign="middle"
-                font="font:MediumSystemFont"
-                color="0x8FA399FF" />
+                font="font:MediumSystemFont" />
         </Rectangle>
     </children>
 </component>

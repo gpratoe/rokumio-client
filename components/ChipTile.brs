@@ -8,6 +8,9 @@ sub init()
     m.face = m.top.FindNode("chipFace")
     m.text = m.top.FindNode("chipText")
 
+    t = Theme()
+    m.text.color = t.textSecondary
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
@@ -20,15 +23,16 @@ end sub
 ' there a tile carries stale dimming (opacity 0.55) into a fresh RowList on
 ' another screen/media.
 sub UpdateLook()
+    t = Theme()
     if m.top.itemHasFocus
-        m.border.color = "0x5BEF95FF"
-        m.face.color = "0x233329FF"
-        m.text.color = "0xE9F2ECFF"
+        m.border.color = t.accentFocus
+        m.face.color = t.itemFace
+        m.text.color = t.textPrimary
         m.top.scale = [1.05, 1.05]
     else
-        m.border.color = "0x2BD67500"
-        m.face.color = "0x0B110DFF"
-        m.text.color = "0x8FA399FF"
+        m.border.color = t.accentClear
+        m.face.color = t.tileFace
+        m.text.color = t.textSecondary
         m.top.scale = [1.0, 1.0]
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55

@@ -18,6 +18,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/HomeScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
@@ -27,22 +28,20 @@
             width="1760"
             height="70"
             text="Rokumio"
-            font="font:LargeBoldSystemFont"
-            color="0x2BD675FF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="homeSub"
             translation="[150, 128]"
             width="1760"
             height="40"
             text="Move between rows, OK for details, Back to exit, * Focus nav-rail and back"
-            font="font:SmallSystemFont"
-            color="0x8FA399FF" />
+            font="font:SmallSystemFont" />
 
         <!-- Left rail: the vertical icon menu (Search, Discover, Library,
              Add-ons, Settings, Support). A one-column RowList of RailTiles; OK
              on an icon publishes a pushRequest the Scene routes. Focus reaches
              it from the grid via Left/Right. -->
-        <Rectangle id="railBg" width="140" height="1080" color="0xFFFFFF06"/>
+        <Rectangle id="railBg" width="140" height="1080"/>
         <RowList
             id="rail"
             translation="[0, 380]"
@@ -71,7 +70,6 @@
             showRowLabel="[true]"
             rowLabelOffset="[0, 10]"
             rowLabelFont="font:MediumBoldSystemFont"
-            rowLabelTextColor="0x8FA399FF"
             drawFocusFeedback="false"
             itemComponentName="PosterTile" />
     </children>

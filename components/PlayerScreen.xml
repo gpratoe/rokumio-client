@@ -19,9 +19,10 @@
     <script type="text/brightscript" uri="pkg:/source/stores/SubtitlesStore.bs" />
     <script type="text/brightscript" uri="pkg:/components/PlayerScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <Rectangle id="playerBg" width="1920" height="1080" color="0x000000FF" />
+        <Rectangle id="playerBg" width="1920" height="1080" />
         <Video
             id="video"
             width="1920"
@@ -34,7 +35,6 @@
             width="1840"
             height="44"
             font="font:MediumSystemFont"
-            color="0xE9F2ECFF"
             horizAlign="center" />
 
         <Group id="bufferingGroup" visible="false" translation="[510, 287]">

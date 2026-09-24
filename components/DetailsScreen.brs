@@ -29,6 +29,14 @@ sub init()
     m.detailDesc = m.top.FindNode("detailDesc")
     m.chipsRow = m.top.FindNode("chipsRow")
 
+    t = Theme()
+    m.top.FindNode("detailsBg").color = t.screenBg
+    m.top.FindNode("bgScrim").color = t.scrim
+    m.heroPoster.failBackgroundColor = t.tileFace
+    m.detailName.color = t.textPrimary
+    m.detailType.color = t.accent
+    m.detailDesc.color = t.textSecondary
+
     m.chipsRow.ObserveField("rowItemSelected", "onChipSelected")
 end sub
 

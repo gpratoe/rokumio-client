@@ -24,11 +24,12 @@
 
     <script type="text/brightscript" uri="pkg:/components/StreamsScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <Rectangle id="streamBg" width="1920" height="1080" color="0x0A0F0CFF" />
+        <Rectangle id="streamBg" width="1920" height="1080" />
         <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
-        <Rectangle id="bgScrim" width="1920" height="1080" color="0x00000099" />
+        <Rectangle id="bgScrim" width="1920" height="1080" />
 
         <!-- Left: title + optional episode line + synopsis. No poster. -->
         <Label
@@ -38,15 +39,13 @@
             height="90"
             horizAlign="left"
             wrap="true"
-            font="font:LargeBoldSystemFont"
-            color="0xE9F2ECFF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="headSub"
             translation="[80, 250]"
             width="620"
             height="40"
-            font="font:MediumSystemFont"
-            color="0x2BD675FF" />
+            font="font:MediumSystemFont" />
         <Label
             id="synopsis"
             translation="[80, 306]"
@@ -55,8 +54,7 @@
             wrap="true"
             horizAlign="left"
             vertAlign="top"
-            font="font:SmallSystemFont"
-            color="0x8FA399FF" />
+            font="font:SmallSystemFont" />
         <Label
             id="status"
             translation="[80, 975]"
@@ -65,8 +63,7 @@
             wrap="true"
             horizAlign="left"
             vertAlign="top"
-            font="font:SmallSystemFont"
-            color="0x2BD675FF" />
+            font="font:SmallSystemFont" />
 
         <!-- Right: provider header (arrows + name + segment dots) above the
              selectable stream list. The arrows appear only for directions the
@@ -86,8 +83,7 @@
             height="40"
             horizAlign="left"
             wrap="true"
-            font="font:MediumBoldSystemFont"
-            color="0xE9F2ECFF" />
+            font="font:MediumBoldSystemFont" />
         <Poster
             id="arrowRight"
             translation="[1768, 92]"
@@ -118,7 +114,6 @@
             horizAlign="left"
             vertAlign="top"
             font="font:MediumSystemFont"
-            color="0x8FA399FF"
             visible="false" />
     </children>
 </component>

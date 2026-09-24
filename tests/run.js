@@ -434,6 +434,35 @@ function checkLibraryScreenContract() {
     return ok;
 }
 
+// The theme migration moved every painted color into theme.reads in init()
+// plus script includes, because XML color attributes cannot call code. Two
+// failure modes would slip past the interpreter: a component calling
+// Theme()/AppPalette() without including Theme.bs (a bare-global lookup that
+// dies at runtime, not at load), and a new hardcoded color creeping back into
+// an XML. Pin both statically.
+function checkThemeContract() {
+    const fs = require('fs');
+    const components = fs.readdirSync(path.join(projectRoot, 'components')).filter(f => f.endsWith('.xml'));
+    let ok = true;
+    for (const name of components) {
+        const xml = fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8');
+        const brsPath = path.join(projectRoot, 'components', name.replace(/\.xml$/, '.brs'));
+        if (fs.existsSync(brsPath)) {
+            const brs = fs.readFileSync(brsPath, 'utf8');
+            if (/Theme\(|AppPalette\(/.test(brs) && !/Theme\.bs/.test(xml)) {
+                console.error(`${name}.xml must include <script uri="pkg:/source/core/Theme.bs"> — its .brs calls Theme()/AppPalette()`);
+                ok = false;
+            }
+        }
+        const literal = xml.match(/color="0x[0-9A-Fa-f]{6,8}"/);
+        if (literal) {
+            console.error(`${name}.xml:2 hardcodes color ${literal[0]} — every painted color must come from Theme()`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
@@ -475,7 +504,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
         process.exit(1);
     }
 

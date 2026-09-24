@@ -16,6 +16,13 @@ sub init()
         m.lines.Push(m.top.FindNode("tileLine" + i.ToStr()))
     end for
 
+    t = Theme()
+    m.title.color = t.textPrimary
+    m.lines[0].color = t.textPrimary
+    for i = 1 to m.lines.Count() - 1
+        m.lines[i].color = t.textSecondary
+    end for
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
@@ -28,12 +35,13 @@ end sub
 ' there a tile carries stale dimming (opacity 0.55) into a fresh RowList on
 ' another screen/media.
 sub UpdateLook()
+    t = Theme()
     if m.top.itemHasFocus
-        m.border.color = "0x5BEF95FF"
-        m.face.color = "0x233329FF"
+        m.border.color = t.accentFocus
+        m.face.color = t.itemFace
     else
-        m.border.color = "0x2BD67500"
-        m.face.color = "0x0B110DFF"
+        m.border.color = t.accentClear
+        m.face.color = t.tileFace
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub

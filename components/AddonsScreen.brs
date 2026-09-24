@@ -22,6 +22,11 @@ sub init()
     m.status = m.top.FindNode("addonsStatus")
     m.list = m.top.FindNode("addonsList")
 
+    t = Theme()
+    m.title.color = t.accent
+    m.sub.color = t.textSecondary
+    m.status.color = t.accent
+
     m.list.ObserveField("rowItemSelected", "onRowSelected")
 
     m.rows = []

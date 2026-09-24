@@ -9,6 +9,10 @@ sub init()
     m.title = m.top.FindNode("rowTitle")
     m.value = m.top.FindNode("rowValue")
 
+    t = Theme()
+    m.title.color = t.textPrimary
+    m.value.color = t.textSecondary
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
@@ -19,15 +23,16 @@ end sub
 ' must be rebuilt on itemContent changes too, or a recycled tile carries stale
 ' dimming into a fresh row).
 sub UpdateLook()
+    t = Theme()
     if m.top.itemHasFocus
-        m.border.color = "0x5BEF95FF"
-        m.face.color = "0x233329FF"
-        m.value.color = "0xE9F2ECFF"
+        m.border.color = t.accentFocus
+        m.face.color = t.itemFace
+        m.value.color = t.textPrimary
         m.top.scale = [1.02, 1.02]
     else
-        m.border.color = "0x2BD67500"
-        m.face.color = "0x0B110DFF"
-        m.value.color = "0x8FA399FF"
+        m.border.color = t.accentClear
+        m.face.color = t.tileFace
+        m.value.color = t.textSecondary
         m.top.scale = [1.0, 1.0]
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55

@@ -12,6 +12,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/EpisodeTile.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <!-- tileBorder is the frame (full tile), tileBg the inset face so focus
@@ -19,10 +20,10 @@
              carries the thumbnail; with no uri it stays transparent and tileBg
              shows through. titleText is the fallback for tiles with no art (or
              whose art failed to load): hidden whenever art is showing. -->
-        <Rectangle id="tileBorder" width="320" height="180" color="0x2BD67500">
-            <Rectangle id="tileBg" width="312" height="172" translation="[4, 4]" color="0x0B110DFF" />
-            <Poster id="poster" width="312" height="172" translation="[4, 4]" failBackgroundColor="0x0B110DFF" />
-            <Label id="titleText" width="296" height="164" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" color="0xE9F2ECFF" />
+        <Rectangle id="tileBorder" width="320" height="180">
+            <Rectangle id="tileBg" width="312" height="172" translation="[4, 4]" />
+            <Poster id="poster" width="312" height="172" translation="[4, 4]" />
+            <Label id="titleText" width="296" height="164" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" />
             <!-- Optional watched badge (40px check, top-right). Hidden until a
                  screen passes itemContent.watched. -->
             <Poster id="watchedBadge" width="40" height="40" translation="[272, 8]" visible="false" />

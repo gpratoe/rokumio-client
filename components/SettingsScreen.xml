@@ -12,6 +12,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/SettingsScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <Rectangle id="settingsBg" width="1920" height="1080" color="0x0" />
@@ -22,16 +23,14 @@
             width="1760"
             height="70"
             text="Settings"
-            font="font:LargeBoldSystemFont"
-            color="0x2BD675FF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="settingsSub"
             translation="[80, 128]"
             width="1760"
             height="40"
             text="OK edits a row's value, Back returns to Home"
-            font="font:SmallSystemFont"
-            color="0x8FA399FF" />
+            font="font:SmallSystemFont" />
 
         <RowList
             id="settingsList"
@@ -50,7 +49,6 @@
             translation="[80, 620]"
             width="1760"
             height="40"
-            font="font:SmallSystemFont"
-            color="0x2BD675FF" />
+            font="font:SmallSystemFont" />
     </children>
 </component>

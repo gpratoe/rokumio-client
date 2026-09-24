@@ -37,6 +37,18 @@ sub init()
     m.providerName = m.top.FindNode("providerName")
     m.providerSegments = m.top.FindNode("providerSegments")
     m.streamsPlaceholder = m.top.FindNode("streamsPlaceholder")
+    m.bg = m.top.FindNode("streamBg")
+    m.scrim = m.top.FindNode("bgScrim")
+
+    t = Theme()
+    m.bg.color = t.screenBg
+    m.scrim.color = t.scrim
+    m.headTitle.color = t.textPrimary
+    m.headSub.color = t.accent
+    m.synopsis.color = t.textSecondary
+    m.status.color = t.accent
+    m.providerName.color = t.textPrimary
+    m.streamsPlaceholder.color = t.textSecondary
 
     m.streamsList.ObserveField("rowItemSelected", "onStreamSelected")
 
@@ -254,11 +266,12 @@ sub UpdateHeader()
 
     if m.segments.Count() <> m.providers.Count() then RebuildSegments()
     m.providerSegments.visible = m.segments.Count() > 1
+    t = Theme()
     for i = 0 to m.segments.Count() - 1
         if i = m.activeIndex
-            m.segments[i].color = "0x2BD675FF"
+            m.segments[i].color = t.accent
         else
-            m.segments[i].color = "0x2A3530FF"
+            m.segments[i].color = t.segmentIdle
         end if
     end for
 end sub
@@ -274,7 +287,7 @@ sub RebuildSegments()
         segment.width = 28
         segment.height = 6
         segment.translation = [i * 36, 0]
-        segment.color = "0x2A3530FF"
+        segment.color = Theme().segmentIdle
         m.providerSegments.AppendChild(segment)
         m.segments.Push(segment)
     end for

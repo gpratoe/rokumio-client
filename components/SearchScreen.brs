@@ -13,6 +13,12 @@ sub init()
     m.status = m.top.FindNode("searchStatus")
     m.results = m.top.FindNode("searchResults")
 
+    t = Theme()
+    m.top.FindNode("searchTitle").color = t.accent
+    m.top.FindNode("searchSub").color = t.textSecondary
+    m.status.color = t.accent
+    m.results.rowLabelTextColor = t.textSecondary
+
     m.results.ObserveField("rowItemSelected", "onResultSelected")
 
     m.lastQuery = ""

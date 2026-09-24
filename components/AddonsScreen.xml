@@ -13,6 +13,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/AddonsScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <Rectangle id="addonsBg" width="1920" height="1080" color="0x0" />
@@ -23,16 +24,14 @@
             width="1760"
             height="70"
             text="Add-ons"
-            font="font:LargeBoldSystemFont"
-            color="0x2BD675FF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="addonsSub"
             translation="[80, 128]"
             width="1760"
             height="40"
             text="OK adds or removes an add-on, Back returns to Home"
-            font="font:SmallSystemFont"
-            color="0x8FA399FF" />
+            font="font:SmallSystemFont" />
 
         <ChevronList
             id="addonsList"
@@ -46,7 +45,6 @@
             translation="[80, 1000]"
             width="1760"
             height="40"
-            font="font:SmallSystemFont"
-            color="0x2BD675FF" />
+            font="font:SmallSystemFont" />
     </children>
 </component>

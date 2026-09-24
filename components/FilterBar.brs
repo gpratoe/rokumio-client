@@ -9,6 +9,8 @@ sub init()
     m.menuBackdrop = m.top.FindNode("menuBackdrop")
     m.menu = m.top.FindNode("menu")
 
+    m.menuBackdrop.color = Theme().dropdownBg
+
     m.chips.ObserveField("rowItemSelected", "onChipPressed")
     m.menu.ObserveField("rowItemSelected", "onMenuPressed")
 

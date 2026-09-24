@@ -29,6 +29,13 @@ sub init()
     m.rail.ObserveField("rowItemSelected", "onRailItemSelected")
     m.homeSub = m.top.FindNode("homeSub")
     m.homeHint = ""
+
+    t = Theme()
+    m.top.FindNode("homeTitle").color = t.accent
+    m.homeSub.color = t.textSecondary
+    m.top.FindNode("railBg").color = t.railTint
+    m.catalog.rowLabelTextColor = t.textSecondary
+
     m.catalogRowsBuilt = false
     m.catalogRows = []
     m.gridRows = []

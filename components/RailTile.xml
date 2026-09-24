@@ -12,6 +12,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/RailTile.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <!-- railBorder is the frame, railFace the inset face so focus draws a
@@ -25,7 +26,7 @@
                 easeFunction="linear" />
         </Animation>
 
-        <Rectangle id="railBorder" width="80" height="80" color="0x2BD67500">
+        <Rectangle id="railBorder" width="80" height="80">
             <Poster
                 id="railGlyph"
                 width="60"

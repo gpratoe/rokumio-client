@@ -26,12 +26,13 @@
     <script type="text/brightscript" uri="pkg:/source/stores/PlaybackStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/SubtitlesStore.bs" />
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <Group id="uiRoot">
             <!-- Everything inside uiRoot is authored in 1920x1080 design space.
                  Screens are children of uiRoot; the stack shows one at a time. -->
-            <Rectangle id="background" width="1920" height="1080" color="0x0A0F0CFF" />
+            <Rectangle id="background" width="1920" height="1080" />
 
             <HomeScreen id="homeScreen" visible="false" />
             <AuthScreen id="authScreen" visible="false" />

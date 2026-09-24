@@ -18,6 +18,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/AuthScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <Rectangle id="authBg" width="1920" height="1080" color="0x0" />
@@ -27,16 +28,14 @@
             width="1760"
             height="70"
             text="Rokumio"
-            font="font:LargeBoldSystemFont"
-            color="0x2BD675FF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="authSub"
             translation="[80, 420]"
             width="1760"
             height="60"
             text="Browse as a guest, or log in with Stremio to sync your add-ons and library"
-            font="font:MediumSystemFont"
-            color="0x8FA399FF" />
+            font="font:MediumSystemFont" />
 
         <RowList
             id="authList"

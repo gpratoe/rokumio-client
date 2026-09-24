@@ -13,12 +13,13 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/StreamTile.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <!-- tileBorder is the frame, tileFace the inset face so focus draws a
              real mint frame instead of painting over the card. -->
-        <Rectangle id="tileBorder" width="1080" height="280" color="0x2BD67500">
-            <Rectangle id="tileFace" width="1072" height="270" translation="[4, 4]" color="0x0B110DFF" />
+        <Rectangle id="tileBorder" width="1080" height="280">
+            <Rectangle id="tileFace" width="1072" height="270" translation="[4, 4]" />
             <Label
                 id="tileTitle"
                 width="1040"
@@ -26,8 +27,7 @@
                 translation="[18, 32]"
                 horizAlign="left"
                 vertAlign="center"
-                font="font:MediumBoldSystemFont"
-                color="0xE9F2ECFF" />
+                font="font:MediumBoldSystemFont" />
             <Label
                 id="tileLine1"
                 width="1040"
@@ -35,8 +35,7 @@
                 translation="[18, 92]"
                 horizAlign="left"
                 vertAlign="center"
-                font="font:SmallSystemFont"
-                color="0xE9F2ECFF" />
+                font="font:SmallSystemFont" />
             <Label
                 id="tileLine2"
                 width="1040"
@@ -44,8 +43,7 @@
                 translation="[18, 130]"
                 horizAlign="left"
                 vertAlign="center"
-                font="font:SmallSystemFont"
-                color="0x8FA399FF" />
+                font="font:SmallSystemFont" />
             <Label
                 id="tileLine3"
                 width="1040"
@@ -53,8 +51,7 @@
                 translation="[18, 168]"
                 horizAlign="left"
                 vertAlign="center"
-                font="font:SmallSystemFont"
-                color="0x8FA399FF" />
+                font="font:SmallSystemFont" />
             <Label
                 id="tileLine4"
                 width="1040"
@@ -62,8 +59,7 @@
                 translation="[18, 206]"
                 horizAlign="left"
                 vertAlign="center"
-                font="font:SmallSystemFont"
-                color="0x8FA399FF" />
+                font="font:SmallSystemFont" />
             <Label
                 id="tileLine5"
                 width="1040"
@@ -71,8 +67,7 @@
                 translation="[18, 244]"
                 horizAlign="left"
                 vertAlign="center"
-                font="font:SmallSystemFont"
-                color="0x8FA399FF" />
+                font="font:SmallSystemFont" />
         </Rectangle>
     </children>
 </component>

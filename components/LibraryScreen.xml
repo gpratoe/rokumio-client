@@ -23,6 +23,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/LibraryScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <Rectangle id="libraryBg" width="1920" height="1080" color="0x0" />
@@ -32,24 +33,21 @@
             width="1760"
             height="70"
             text="Library"
-            font="font:LargeBoldSystemFont"
-            color="0x2BD675FF" />
+            font="font:LargeBoldSystemFont" />
         <Label
             id="librarySub"
             translation="[150, 128]"
             width="1760"
             height="40"
             text="OK on a chip to open its menu · Up/Down to reach the results · Back to exit · * Focus filters"
-            font="font:SmallSystemFont"
-            color="0x8FA399FF" />
+            font="font:SmallSystemFont" />
 
         <Label
             id="libraryStatus"
             translation="[150, 176]"
             width="1760"
             height="40"
-            font="font:SmallSystemFont"
-            color="0x2BD675FF" />
+            font="font:SmallSystemFont" />
 
         <!-- Current filter summary, e.g. "All · Recently added". -->
         <Label
@@ -57,8 +55,7 @@
             translation="[150, 300]"
             width="1760"
             height="40"
-            font="font:MediumSystemFont"
-            color="0x8FA399FF" />
+            font="font:MediumSystemFont" />
 
         <!-- Saved items chunked into poster rows of 6 so the RowList
              clips/scrolls vertically. Same PosterTile contract as Home and
