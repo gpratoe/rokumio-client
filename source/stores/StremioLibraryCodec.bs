@@ -2,7 +2,8 @@
 ' extracted from LibraryStore so the store keeps state and persistence while
 ' every server-format rule lives in one pure, directly-testable class.
 '
-' Four functions, no instance state: ParseLibraryItem and SortByMtimeDesc feed
+' Four functions with no state of their own — everything they classify and
+' build is a parameter: ParseLibraryItem and SortByMtimeDesc feed
 ' the pull side (SyncFromStremio); BuildWatchStateItem and
 ' BuildLibraryChangeItem feed the push side (the player position write-back and
 ' the add/remove toggle). The two builders are deliberately cache-read-only:
@@ -11,7 +12,9 @@
 ' replaces it wholesale. Because they read store state, that state is injected
 ' as parameters (sessionType, library, now) instead of m.*; the store guards
 ' the session gate and stamps the clock, and the "for tests" injection is then
-' explicit rather than a defaulted arg.
+' explicit rather than a defaulted arg. The one instance field is the episode
+' id translator VideoIdCodec, so ParseLibraryItem never re-implements the
+' "{metaId}:{season}:{episode}" format.
 '
 ' Pure data mapping plus parameterized reads of an injected cache, so it behaves
 ' identically in the interpreter test harness and on a device. Constructed once
@@ -21,6 +24,10 @@
 ' resolve to invalid when invoked from a screen.
 
 class StremioLibraryCodec
+
+    sub new()
+        m.videoId = VideoIdCodec()
+    end sub
 
     ' Classify one datastoreGet library item and pre-map it into the store's
     ' shape. An item that cannot be resolved to a video id (or is not a valid
@@ -69,11 +76,11 @@ class StremioLibraryCodec
 
         season = 0
         episode = 0
-        parts = videoId.Split(":")
-        if parts.Count() = 3
-            season = parts[1].ToInt()
-            episode = parts[2].ToInt()
-        else if parts.Count() <> 1
+        parsed = m.videoId.Parse(videoId)
+        if parsed <> invalid
+            season = parsed.season
+            episode = parsed.episode
+        else if Instr(1, videoId, ":") > 0
             return invalid
         end if
 

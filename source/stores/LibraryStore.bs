@@ -86,6 +86,7 @@ class LibraryStore
         ' the stored instance is callable from any component.
         m.codec = WatchedCodec()
         m.time = TimeUtil()
+        m.videoId = VideoIdCodec()
         m.stremioCodec = StremioLibraryCodec()
         m.Load()
     end sub
@@ -362,7 +363,7 @@ class LibraryStore
     ' "orderedEpisodes" is the series' ordered video id list.
     function EpisodeWatched(metaId as string, season as integer, episode as integer, orderedEpisodes as object) as boolean
         if orderedEpisodes = invalid or Type(orderedEpisodes) <> "roArray" then return false
-        videoId = metaId + ":" + season.ToStr() + ":" + episode.ToStr()
+        videoId = m.videoId.Build(metaId, season, episode)
         if m.HasKey(m.watched, videoId) then return true
         if m.HasKey(m.watched, metaId) then return true
         account = m.AccountLayer(metaId)
@@ -373,6 +374,33 @@ class LibraryStore
         if watched <> invalid and m.HasKey(watched, videoId) then return true
         return false
     end function
+
+    ' The watched mark for one regular episode — whether it has aired and, when
+    ' aired, whether it is precisely watched. The aired gate exists because an
+    ' account bitfield for a series marked fully watched paints the whole known
+    ' list, placeholders included, and literally decoding that would put checks
+    ' on episodes that don't exist yet. One source for the badge rule shared by
+    ' the build and the re-paint, so it cannot drift. `nowIso` is injectable for
+    ' tests; production passes the store's TimeUtil stamp.
+    function EpisodeMark(metaId as string, season as integer, ep as object, orderedEpisodes as object, nowIso as dynamic) as object
+        mark = { aired: false, watched: false }
+        if metaId = "" or ep = invalid or ep.episode = invalid then return mark
+        if m.time = invalid then return mark
+        mark.aired = m.time.EpisodeAired(ep, nowIso)
+        if mark.aired then mark.watched = m.EpisodeWatched(metaId, season, ep.episode, orderedEpisodes)
+        return mark
+    end function
+
+    ' Once the full episode list is known, a series whose every regular episode
+    ' is watched crosses from in-progress (clock) to done (eye) on the grid
+    ' tiles that only carry a coarse SeriesStatus badge. `metaId` is injected so
+    ' the completion rule is store-pure and shared by the build and the in-place
+    ' re-paint. Persists through MarkSeriesDone on both sessions (display-side).
+    sub MarkAllIfDone(metaId as string, anyRegular as boolean, allDone as boolean) as void
+        if anyRegular and allDone and metaId <> ""
+            m.MarkSeriesDone(metaId)
+        end if
+    end sub
 
     ' Coarse series status for grid tiles that have no episode list. "done" when
     ' the whole series is known watched (local MarkSeriesDone, or the account

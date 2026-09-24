@@ -11,6 +11,7 @@ class EpisodesStore
 
     sub new(http as object)
         m.transport = http
+        m.videoId = VideoIdCodec()
     end sub
 
     ' Fetch {address}/meta/{type}/{id}.json. A series must carry a non-empty
@@ -76,8 +77,51 @@ class EpisodesStore
     end function
 
     ' "{imdbId}:{season}:{episode}" — the video id stream add-ons resolve.
+    ' Built through VideoIdCodec so the convention has one owner (the account
+    ' bitfield indexes the OrderedVideoIds list, and watched-state queries key
+    ' on the same string).
     function ResolveVideoId(seriesId as string, season as integer, episode as integer) as string
-        return seriesId + ":" + season.ToStr() + ":" + episode.ToStr()
+        return m.videoId.Build(seriesId, season, episode)
+    end function
+
+    ' Real seasons keep ascending order; season 0 (specials) is pushed to the
+    ' end of the list so it never masquerades as the first broadcast season.
+    function OrderedSeasons(allSeasons as object) as object
+        ordered = []
+        specials = []
+        for each season in allSeasons
+            if season = 0
+                specials.Push(0)
+            else
+                ordered.Push(season)
+            end if
+        end for
+        for each special in specials
+            ordered.Push(special)
+        end for
+        return ordered
+    end function
+
+    ' The series' ordered episode-id list, "{metaId}:{season}:{episode}" per
+    ' regular (non-special) episode in display order — the ordering the account
+    ' watched bitfield indexes (bit i is the i-th id here), so it must never
+    ' drift from what EpisodesScreen paints. Skips season 0 (specials).
+    function OrderedVideoIds(seriesId as string, meta as object) as object
+        ids = []
+        if seriesId = "" or meta = invalid or meta.videos = invalid then return ids
+        seasons = m.Seasons(meta)
+        ordered = m.OrderedSeasons(seasons)
+        for s = 0 to ordered.Count() - 1
+            season = ordered[s]
+            if season = 0 then continue for
+            episodes = m.EpisodesForSeason(meta, season)
+            for each ep in episodes
+                if ep.episode <> invalid
+                    ids.Push(m.ResolveVideoId(seriesId, season, ep.episode))
+                end if
+            end for
+        end for
+        return ids
     end function
 
     ' Whether a meta handed in from a list screen is too sparse to render a hero:

@@ -394,6 +394,47 @@ sub Test_Library_SeriesStatusLocal()
     Harness_Equal(done.SeriesStatus("ttQW"), "done", "series-done is done and beats progress")
 end sub
 
+sub Test_Library_EpisodeMark()
+    Harness_Suite("EpisodeMark gates the watched badge on the airdate")
+    store = LibraryStore(MockRegistry(), "stremio")
+    order = []
+    ep = { name: "Pilot", season: 1, episode: 2, released: "2020-04-01" }
+
+    mark = store.EpisodeMark("ttQW", 1, ep, order, "2024-06-01T00:00:00Z")
+    Harness_Ok(mark.aired, "an aired series episode is aired")
+    Harness_Ok(not mark.watched, "an unwatched episode is not watched")
+
+    store.MarkWatchedIfFinished("ttQW", "ttQW:1:2", 800, 1000)
+    mark = store.EpisodeMark("ttQW", 1, ep, order, "2024-06-01T00:00:00Z")
+    Harness_Ok(mark.watched, "a watched episode is marked watched")
+
+    future = { name: "Unreleased", season: 1, episode: 3, released: "2030-01-01" }
+    store.MarkWatchedIfFinished("ttQW", "ttQW:1:3", 800, 1000)
+    mark = store.EpisodeMark("ttQW", 1, future, order, "2024-06-01T00:00:00Z")
+    Harness_Ok(not mark.aired, "a future episode has not aired")
+    Harness_Ok(not mark.watched, "an un-aired episode never gets a check")
+
+    blank = store.EpisodeMark("ttQW", 1, invalid, order, "2024-06-01T00:00:00Z")
+    Harness_Ok(not blank.aired, "a missing episode yields a safe mark")
+    Harness_Ok(not blank.watched, "a missing episode yields a safe mark")
+end sub
+
+sub Test_Library_MarkAllIfDone()
+    Harness_Suite("MarkAllIfDone completes only when every regular episode is watched")
+    store = LibraryStore(MockRegistry(), "stremio")
+    Harness_Equal(store.SeriesStatus("ttQW"), "none", "baseline is none")
+    store.MarkAllIfDone("ttQW", true, true)
+    Harness_Equal(store.SeriesStatus("ttQW"), "done", "anyRegular+allDone marks the series done")
+
+    fresh = LibraryStore(MockRegistry(), "stremio")
+    fresh.MarkAllIfDone("ttQW", true, false)
+    Harness_Equal(fresh.SeriesStatus("ttQW"), "none", "one unwatched aired episode blocks completion")
+    fresh.MarkAllIfDone("ttQW", false, true)
+    Harness_Equal(fresh.SeriesStatus("ttQW"), "none", "no regular aired episodes means no completion")
+    fresh.MarkAllIfDone("", true, true)
+    Harness_Equal(fresh.SeriesStatus("ttQW"), "none", "a blank meta id cannot complete")
+end sub
+
 sub Test_Library_ProgressFor()
     Harness_Suite("ProgressFor returns the raw resume position for a meta")
     store = LibraryStore(MockRegistry())

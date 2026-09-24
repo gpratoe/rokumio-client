@@ -99,6 +99,40 @@ sub Test_Episodes_ResolveVideoId()
     Harness_Equal(store.ResolveVideoId("tt1234567", 12, 4), "tt1234567:12:4", "double-digit season/episode")
 end sub
 
+sub Test_Episodes_OrderedSeasons()
+    Harness_Suite("EpisodesStore.OrderedSeasons keeps ascending seasons with specials last")
+    store = EpisodesStore(ScriptedTransport([]))
+    order = store.OrderedSeasons([0, 1, 2])
+    Harness_Equal(order.Count(), 3, "all seasons survive")
+    Harness_Equal(order[0], 1, "real seasons first")
+    Harness_Equal(order[1], 2, "real seasons ascending")
+    Harness_Equal(order[2], 0, "specials last")
+    Harness_Equal(store.OrderedSeasons([]).Count(), 0, "empty input stays empty")
+    Harness_Equal(store.OrderedSeasons([0]).Count(), 1, "a specials-only series still lists the special")
+end sub
+
+sub Test_Episodes_OrderedVideoIds()
+    Harness_Suite("EpisodesStore.OrderedVideoIds returns the bitfield-indexing episode order")
+    meta = {
+        id: "tt1234567"
+        type: "series"
+        videos: [
+            { id: "tt1234567:2:1", name: "S2E1", season: 2, episode: 1 }
+            { id: "tt1234567:0:1", name: "Special", season: 0, episode: 1 }
+            { id: "tt1234567:1:1", name: "Pilot", season: 1, episode: 1 }
+            { id: "tt1234567:1:2", name: "Second", season: 1, episode: 2 }
+        ]
+    }
+    store = EpisodesStore(ScriptedTransport([]))
+    ids = store.OrderedVideoIds("tt1234567", meta)
+    Harness_Equal(ids.Count(), 3, "specials are skipped")
+    Harness_Equal(ids[0], "tt1234567:1:1", "season 1 first episode first")
+    Harness_Equal(ids[1], "tt1234567:1:2", "episode order kept")
+    Harness_Equal(ids[2], "tt1234567:2:1", "season 2 after season 1")
+    Harness_Equal(store.OrderedVideoIds("tt1234567", invalid).Count(), 0, "missing meta yields an empty list")
+    Harness_Equal(store.OrderedVideoIds("", meta).Count(), 0, "blank seriesId yields an empty list")
+end sub
+
 ' A complete meta (all hero fields present) never needs a fetch; a slim catalog
 ' record missing any of them does. A meta without a fetchable id/type cannot be
 ' topped up, so it is "no fetch" too.

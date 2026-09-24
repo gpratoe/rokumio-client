@@ -118,8 +118,8 @@ sub BuildList(meta as object)
         return
     end if
 
-    m.seasons = OrderedSeasons(allSeasons)
-    orderedEpisodes = OrderedVideoIds(meta)
+    m.seasons = m.stores.episodes.OrderedSeasons(allSeasons)
+    orderedEpisodes = m.stores.episodes.OrderedVideoIds(m.meta.id, meta)
 
     content = CreateObject("roSGNode", "ContentNode")
     anyRegular = false
@@ -138,7 +138,7 @@ sub BuildList(meta as object)
             item.title = EpisodeLabel(season, ep)
             if ep.thumbnail <> invalid and ep.thumbnail <> "" then item.hdPosterUrl = ep.thumbnail
             if season <> 0
-                mark = EpisodeMark(season, ep, orderedEpisodes, nowIso)
+                mark = m.stores.library.EpisodeMark(m.meta.id, season, ep, orderedEpisodes, nowIso)
                 item.watched = mark.watched
                 if mark.aired
                     anyRegular = true
@@ -154,30 +154,7 @@ sub BuildList(meta as object)
     if m.top.screenActive then m.epList.SetFocus(true)
     UpdateHeader(m.epList.jumpToRowItem)
 
-    MarkAllIfDone(anyRegular, allDone)
-end sub
-
-' The watched mark for one regular episode: whether it has aired — an account
-' bitfield for a series marked fully watched paints the whole known list,
-' placeholders included, and literally decoding that would put checks on
-' episodes that don't exist yet — and, when aired, whether it is precisely
-' watched. One source for the badge rule shared by the build and the re-paint.
-function EpisodeMark(season as integer, ep as object, orderedEpisodes as object, nowIso as dynamic) as object
-    mark = { aired: false, watched: false }
-    if m.stores = invalid or m.stores.time = invalid then return mark
-    mark.aired = m.stores.time.EpisodeAired(ep, nowIso)
-    if mark.aired then mark.watched = Watched(season, ep, orderedEpisodes)
-    return mark
-end function
-
-' Once the full episode list is known, a series whose every regular episode is
-' watched crosses from in-progress (clock) to done (eye) on the grid tiles that
-' only carry a coarse SeriesStatus badge. Shared by the build and the in-place
-' re-paint so the completion rule cannot drift.
-sub MarkAllIfDone(anyRegular as boolean, allDone as boolean) as void
-    if anyRegular and allDone and m.stores <> invalid and m.stores.library <> invalid
-        m.stores.library.MarkSeriesDone(m.meta.id)
-    end if
+    m.stores.library.MarkAllIfDone(m.meta.id, anyRegular, allDone)
 end sub
 
 ' Re-paint the episode watched badges in place after a return from a push
@@ -188,8 +165,8 @@ end sub
 sub RefreshWatchedMarks() as void
     if m.epList = invalid or m.epList.content = invalid then return
     if m.seasons.Count() = 0 or m.seasonEpisodes.Count() = 0 then return
-    if m.stores = invalid or m.stores.library = invalid or m.seriesMeta = invalid then return
-    orderedEpisodes = OrderedVideoIds(m.seriesMeta)
+    if m.stores = invalid or m.stores.episodes = invalid or m.stores.library = invalid or m.seriesMeta = invalid then return
+    orderedEpisodes = m.stores.episodes.OrderedVideoIds(m.meta.id, m.seriesMeta)
     anyRegular = false
     allDone = true
     nowIso = m.stores.time.NowIso()
@@ -201,7 +178,7 @@ sub RefreshWatchedMarks() as void
             ep = episodes[e]
             item = row.GetChild(e)
             if season <> 0
-                mark = EpisodeMark(season, ep, orderedEpisodes, nowIso)
+                mark = m.stores.library.EpisodeMark(m.meta.id, season, ep, orderedEpisodes, nowIso)
                 item.watched = mark.watched
                 if mark.aired
                     anyRegular = true
@@ -210,52 +187,8 @@ sub RefreshWatchedMarks() as void
             end if
         end for
     end for
-    MarkAllIfDone(anyRegular, allDone)
+    m.stores.library.MarkAllIfDone(m.meta.id, anyRegular, allDone)
 end sub
-
-' The series' ordered episode-id list, "{metaId}:{season}:{episode}" per regular
-' (non-special) episode in display order — the ordering the account watched
-' bitfield indexes.
-function OrderedVideoIds(meta as object) as object
-    ids = []
-    if m.stores = invalid or m.stores.episodes = invalid or m.meta = invalid then return ids
-    for s = 0 to m.seasons.Count() - 1
-        season = m.seasons[s]
-        if season = 0 then continue for
-        episodes = m.stores.episodes.EpisodesForSeason(meta, season)
-        for each ep in episodes
-            if ep.episode <> invalid
-                ids.Push(m.stores.episodes.ResolveVideoId(m.meta.id, season, ep.episode))
-            end if
-        end for
-    end for
-    return ids
-end function
-
-' Per-episode watched, precise (local set or the decoded account bitfield).
-function Watched(season as integer, ep as object, orderedEpisodes as object) as boolean
-    if m.stores = invalid or m.stores.library = invalid then return false
-    if ep = invalid or ep.episode = invalid then return false
-    return m.stores.library.EpisodeWatched(m.meta.id, season, ep.episode, orderedEpisodes)
-end function
-
-' Real seasons keep ascending order; season 0 (specials) is relabelled and moved
-' to the end of the list so it never masquerades as the first broadcast season.
-function OrderedSeasons(allSeasons as object) as object
-    ordered = []
-    specials = []
-    for each season in allSeasons
-        if season = 0
-            specials.Push(0)
-        else
-            ordered.Push(season)
-        end if
-    end for
-    for each special in specials
-        ordered.Push(special)
-    end for
-    return ordered
-end function
 
 function SeasonLabel(season as integer) as string
     if season = 0 then return "Special"
@@ -275,7 +208,7 @@ function EpisodeLabel(season as integer, ep as object) as string
 end function
 
 ' [seasonRow, itemIndex] for the resume hint's (season, episode), else the first
-' cell. Rows follow OrderedSeasons, so specials live at the end.
+' cell. Rows follow the store's OrderedSeasons order, so specials live at the end.
 function ResumePosition() as object
     if m.resume <> invalid
         for s = 0 to m.seasons.Count() - 1
