@@ -192,3 +192,134 @@ sub Test_WatchedCodec_ClampsToEpisodeList()
         Harness_Ok(watched2.DoesExist(truncated.ids[index]), "truncated id " + index.ToStr() + " watched")
     end for
 end sub
+sub Test_WatchedCodec_EncodeRoundTrips()
+    Harness_Suite("WatchedCodec encodes a set to the account silhouette and back")
+    codec = WatchedCodec()
+    ids = ["tt2934286:1:1", "tt2934286:1:2", "tt2934286:1:3", "tt2934286:1:4", "tt2934286:1:5"]
+    watched = { "tt2934286:1:2": true, "tt2934286:1:4": true }
+
+    encoded = codec.WatchedEncode(ids, watched, "tt2934286:1:4")
+    Harness_Ok(encoded <> "", "encode yields a string")
+    parts = encoded.Split(":")
+    Harness_Ok(parts.Count() >= 3, "silhouette is lastId:length:payload")
+    prefix = ""
+    for i = 0 to parts.Count() - 3
+        if i > 0 then prefix = prefix + ":"
+        prefix = prefix + parts[i]
+    end for
+    Harness_Equal(prefix, "tt2934286:1:4", "lastVideoId slot reported (colons kept)")
+    Harness_Equal(parts[parts.Count() - 2], "4", "length field is the last watched index + 1")
+
+    decoded = codec.WatchedDecode(encoded, ids)
+    Harness_Equal(decoded.Count(), 2, "decode back recovers the set size")
+    Harness_Ok(decoded["tt2934286:1:2"], "first watched id recovered")
+    Harness_Ok(decoded["tt2934286:1:4"], "second watched id recovered")
+    Harness_Ok(decoded["tt2934286:1:1"] = invalid, "unwatched id stays out")
+end sub
+
+sub Test_WatchedCodec_EncodeCanonicalAnchor()
+    Harness_Suite("WatchedCodec encode uses the canonical last-watched anchor, not the list size")
+    codec = WatchedCodec()
+    ids = ["tt2934286:1:1", "tt2934286:1:2", "tt2934286:1:3", "tt2934286:1:4", "tt2934286:1:5"]
+
+    watched = { "tt2934286:1:2": true, "tt2934286:1:4": true }
+    encoded = codec.WatchedEncode(ids, watched, "tt2934286:1:4")
+    parts = encoded.Split(":")
+    prefix = ""
+    for i = 0 to parts.Count() - 3
+        if i > 0 then prefix = prefix + ":"
+        prefix = prefix + parts[i]
+    end for
+    anchorLength = parts[parts.Count() - 2]
+    Harness_Equal(prefix, "tt2934286:1:4", "anchor id is the last watched episode")
+    Harness_Equal(anchorLength, (codec.IndexInIds(ids, prefix) + 1).ToStr(), "anchorLength stays index-of-anchor + 1 (canonical)")
+    Harness_Ok(codec.WatchedDecode(encoded, ids)["tt2934286:1:4"], "the anchor episode decodes watched")
+
+    watchedTail = { "tt2934286:1:1": true, "tt2934286:1:5": true }
+    encodedTail = codec.WatchedEncode(ids, watchedTail, "tt2934286:1:5")
+    partsTail = encodedTail.Split(":")
+    Harness_Equal(partsTail[partsTail.Count() - 2], "5", "a last-watched episode at the tail keeps the full-length anchor")
+    decodedTail = codec.WatchedDecode(encodedTail, ids)
+    Harness_Ok(decodedTail["tt2934286:1:1"], "earlier bit survives under a tail anchor")
+    Harness_Ok(decodedTail["tt2934286:1:5"], "tail bit survives under a tail anchor")
+
+    encodedEmpty = codec.WatchedEncode(ids, {}, "tt2934286:1:4")
+    partsEmpty = encodedEmpty.Split(":")
+    prefixEmpty = ""
+    for i = 0 to partsEmpty.Count() - 3
+        if i > 0 then prefixEmpty = prefixEmpty + ":"
+        prefixEmpty = prefixEmpty + partsEmpty[i]
+    end for
+    Harness_Equal(prefixEmpty, "tt2934286:1:4", "an empty set keeps the in-list anchor id")
+    Harness_Equal(partsEmpty[partsEmpty.Count() - 2], "4", "the anchor length still tracks its index + 1")
+    Harness_Equal(codec.WatchedDecode(encodedEmpty, ids).Count(), 0, "the all-zero payload decodes to nothing watched")
+
+    encodedAbsent = codec.WatchedEncode(ids, {}, "tt999:9:9")
+    partsAbsent = encodedAbsent.Split(":")
+    prefixAbsent = ""
+    for i = 0 to partsAbsent.Count() - 3
+        if i > 0 then prefixAbsent = prefixAbsent + ":"
+        prefixAbsent = prefixAbsent + partsAbsent[i]
+    end for
+    Harness_Equal(prefixAbsent, "tt2934286:1:1", "an id missing from the list falls back to the first id")
+    Harness_Equal(partsAbsent[partsAbsent.Count() - 2], "1", "the fallback anchor carries length 1")
+end sub
+
+sub Test_WatchedCodec_DecodesCanonicalBitfield()
+    Harness_Suite("WatchedCodec decodes the canonical stremio bitfield payload")
+    codec = WatchedCodec()
+
+    ' Node's own zlib produced eJz7//8/AAX9Av4= from three 0xff bytes — the same
+    ' payload the stremio tests embed as tt7767422:3:8:24:eJz7//8/AAX9Av4=. The
+    ' anchor is the series' 24th episode (index 23), so anchorLength == 24 is the
+    ' canonical expectation, and every one of the 24 bits is set.
+    ids = ["tt7767422:1:1", "tt7767422:1:2", "tt7767422:1:3", "tt7767422:1:4", "tt7767422:1:5", "tt7767422:1:6", "tt7767422:1:7", "tt7767422:1:8", "tt7767422:2:1", "tt7767422:2:2", "tt7767422:2:3", "tt7767422:2:4", "tt7767422:2:5", "tt7767422:2:6", "tt7767422:2:7", "tt7767422:2:8", "tt7767422:3:1", "tt7767422:3:2", "tt7767422:3:3", "tt7767422:3:4", "tt7767422:3:5", "tt7767422:3:6", "tt7767422:3:7", "tt7767422:3:8"]
+    Harness_Equal(codec.IndexInIds(ids, "tt7767422:3:8"), 23, "the fixture's anchor sits at index 23")
+
+    canonical = "tt7767422:3:8:24:eJz7//8/AAX9Av4="
+    watched = codec.WatchedDecode(canonical, ids)
+    Harness_Equal(watched.Count(), 24, "all 24 episodes watched")
+    Harness_Ok(watched["tt7767422:3:8"], "the anchor episode is watched")
+    Harness_Ok(watched["tt7767422:1:1"], "the first episode is watched")
+
+    canonicalParts = canonical.Split(":")
+    Harness_Equal(canonicalParts[canonicalParts.Count() - 2], "24", "anchorLength parses as index-of-anchor + 1")
+end sub
+
+sub Test_WatchedCodec_EncodeIsValidZlib()
+    Harness_Suite("WatchedCodec encode is a conformant zlib stream any inflater accepts")
+    codec = WatchedCodec()
+    ids = ["tt1:1:1", "tt1:1:2", "tt1:1:3", "tt1:1:4", "tt1:1:5", "tt1:1:6", "tt1:1:7", "tt1:1:8", "tt1:1:9", "tt1:1:10"]
+    watched = { "tt1:1:1": true, "tt1:1:10": true }
+    encoded = codec.WatchedEncode(ids, watched, "tt1:1:10")
+    parts = encoded.Split(":")
+    bytes = codec.Base64Decode(parts[parts.Count() - 1])
+    Harness_Equal(bytes[0], 120, "zlib CMF byte 0x78")
+    Harness_Equal(bytes[1], 1, "zlib FLG byte 0x01 (CMF*256+FLG mod 31 = 0)")
+    inflated = codec.Inflate(bytes)
+    Harness_Equal(inflated.Count(), 2, "stored block inflates to ceil(10/8) bytes")
+    Harness_Equal(inflated[0], 1, "bit 0 (episode 1) set")
+    Harness_Equal(inflated[1], 2, "bit 9 (episode 10) set")
+end sub
+
+sub Test_WatchedCodec_EncodeEmptySet()
+    Harness_Suite("WatchedCodec encodes an empty set as a zero bitfield")
+    codec = WatchedCodec()
+    ids = ["tt1:1:1", "tt1:1:2", "tt1:1:3"]
+    encoded = codec.WatchedEncode(ids, {}, "tt1:1:1")
+    decoded = codec.WatchedDecode(encoded, ids)
+    Harness_Equal(decoded.Count(), 0, "nothing watched decodes back")
+    parts = encoded.Split(":")
+    Harness_Equal(parts[parts.Count() - 2], "1", "empty set anchors on index 0 with length 1")
+    bytes = codec.Base64Decode(parts[parts.Count() - 1])
+    inflated = codec.Inflate(bytes)
+    Harness_Equal(inflated[0], 0, "all bits zero")
+end sub
+
+sub Test_WatchedCodec_EncodeGuards()
+    Harness_Suite("WatchedCodec encodes refuse invalid inputs")
+    codec = WatchedCodec()
+    Harness_Equal(codec.WatchedEncode([], {}, "tt"), "", "empty list refused")
+    Harness_Equal(codec.WatchedEncode(["tt"], {}, ""), "", "empty lastVideoId refused")
+    Harness_Equal(codec.WatchedEncode(invalid, {}, "tt"), "", "invalid list refused")
+end sub

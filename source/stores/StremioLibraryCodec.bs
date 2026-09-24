@@ -194,6 +194,64 @@ class StremioLibraryCodec
         return clone
     end function
 
+    ' Build the full LibraryItem a datastorePut push sends after the user marks
+    ' or unmarks episodes watched from the episode browser. Mirrors
+    ' BuildWatchStateItem: a stremio-only, cache-read-only builder that clones
+    ' the freshest cached copy so untracked server fields survive, or falls
+    ' back to a minimal temp entry. Unlike the position builder this authors
+    ' watch state wholesale — state.watched becomes the bitfield the store
+    ' already encoded against the series' ordered episode list, and
+    ' flaggedWatched is zeroed (the bitfield now carries the fine-grained truth
+    ' and the two flags must not fight). video_id/lastWatched point at the last
+    ' watched episode; the player's timeOffset/duration are left untouched since
+    ' this is a watched-status edit, not a playback position. bitfield must be a
+    ' valid "{id}:{len}:{payload}" string (the store never sends ""); lastVideoId
+    ' is its non-empty "last watched" slot.
+    function BuildWatchedItem(sessionType as string, library as object, now as string, metaId as string, videoId as string, bitfield as string, lastVideoId as string) as dynamic
+        if sessionType <> "stremio" then return invalid
+        if metaId = invalid or metaId = "" then return invalid
+        if lastVideoId = invalid or lastVideoId = "" then lastVideoId = videoId
+        if lastVideoId = invalid or lastVideoId = "" then lastVideoId = metaId
+
+        original = invalid
+        for each item in library
+            if item <> invalid and Type(item) = "roAssociativeArray" and item._id = metaId then original = item : exit for
+        end for
+        if original = invalid
+            return {
+                _id: metaId
+                removed: true
+                temp: true
+                _mtime: now
+                state: {
+                    lastWatched: now
+                    video_id: lastVideoId
+                    flaggedWatched: 0
+                    watched: bitfield
+                }
+            }
+        end if
+
+        clone = {}
+        for each key in original
+            clone[key] = original[key]
+        end for
+        state = {}
+        oldState = original.state
+        if oldState <> invalid and Type(oldState) = "roAssociativeArray"
+            for each key in oldState
+                state[key] = oldState[key]
+            end for
+        end if
+        state.video_id = lastVideoId
+        state.lastWatched = now
+        state.flaggedWatched = 0
+        state.watched = bitfield
+        clone.state = state
+        clone._mtime = now
+        return clone
+    end function
+
     ' Build the full LibraryItem a datastorePut push sends after an add/remove
     ' toggle. Mirrors BuildWatchStateItem: a stremio-only, cache-read-only
     ' builder. The push clones the freshest cached copy of the item (from the

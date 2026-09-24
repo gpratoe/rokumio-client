@@ -35,6 +35,9 @@ sub init()
     ' through the same one-action channel.
     m.episodesScreen = m.top.FindNode("episodesScreen")
     m.episodesScreen.ObserveField("pushRequest", "onEpisodesAction")
+    ' Watched-status edits from the episode browser report through watchedChange;
+    ' see onWatchedChange for the write-back pipeline.
+    m.episodesScreen.ObserveField("watchedChange", "onWatchedChange")
 
     ' StreamsScreen reports the player push after a stream is resolved; the
     ' player itself never pushes — Back pops it. The player is NOT a static child
@@ -329,6 +332,58 @@ sub onLibraryWritePushResult()
     AsyncTask_Reap(task, m.top, false)
     m.inFlightLibraryChange = invalid
     PumpLibraryWritePush()
+end sub
+
+' The episode browser published a watched-mark/unmark edit through
+' watchedChange. MainScene owns the write-back pipeline, exactly like the
+' watch-state and library-change ones: gate on a stremio session (guest never
+' touches the API — its local set already updated), then coalesce so at most one
+' push runs at a time. Each change carries the current ordered episode-id list
+' so the store can re-author the full bitfield for the pushed item.
+sub onWatchedChange()
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.stores.auth.GetSession() <> "stremio" then return
+    change = m.episodesScreen.watchedChange
+    if change = invalid then return
+    m.pendingWatchedChange = change
+    PumpWatchedPush()
+end sub
+
+' Start one push for the pending watched edit if none is in flight. The pending
+' slot is consumed into the worker; an edit that arrives while this worker runs
+' lands back in the slot and is pumped by onWatchedPushResult. The LibraryItem
+' to send is built by the store (the bitfield union + merge into the freshest
+' cached copy), so no merge logic lives here. Reuses WatchStatePushTask — it is
+' a generic single datastorePut worker.
+sub PumpWatchedPush()
+    if m.pushingWatchedChange then return
+    if m.pendingWatchedChange = invalid then return
+    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    change = m.pendingWatchedChange
+    item = m.stores.library.BuildWatchedStateItem(change.metaId, change.videoId, change.orderedVideoIds)
+    if item = invalid then return
+    m.pendingWatchedChange = invalid
+
+    task = AsyncTask_Launch(m.top, "WatchStatePushTask", "onWatchedPushResult", {
+        authKey: m.stores.auth.GetAuthKey()
+        item: item
+    }, "watchedPushTask")
+    m.watchedPushTask = task
+    m.inFlightWatchedChange = change
+    m.pushingWatchedChange = true
+end sub
+
+' One push settled. Free the worker and pump any edit that arrived meanwhile.
+' Failures are non-fatal: the local display layer keeps the mark, and the next
+' account sync re-adopts whatever the server settled on.
+sub onWatchedPushResult()
+    task = m.watchedPushTask
+    m.watchedPushTask = invalid
+    m.pushingWatchedChange = false
+    if task = invalid then return
+    AsyncTask_Reap(task, m.top, false)
+    m.inFlightWatchedChange = invalid
+    PumpWatchedPush()
 end sub
 
 ' The exit dialog signals dismissal through wasClosed (Back, Home, or its own

@@ -534,3 +534,127 @@ sub Test_Library_WatchedSwitchSessionSeparates()
     store.SwitchSession("guest")
     Harness_Ok(store.IsWatched("ttQW"), "guest watches restored after switching back")
 end sub
+
+sub Test_Library_WatchedEdits()
+    Harness_Suite("LibraryStore marks and unmarks episodes with the series-done key in sync")
+    store = LibraryStore(MockRegistry())
+    ids = ["ttQW:1:1", "ttQW:1:2", "ttQW:1:3"]
+    store.MarkEpisodeWatched("ttQW", "ttQW:1:2")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 2, ids), "marked episode watched")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 3, ids), "unmarked episode stays unwatched")
+
+    store.MarkUpToWatched("ttQW", ids, 1)
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 1, ids), "up-to marks the first")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 2, ids), "up-to marks through the target")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 3, ids), "up-to stops at the target")
+
+    store.MarkEpisodeUnwatched("ttQW", "ttQW:1:2")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 2, ids), "unwatch clears the episode")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 1, ids), "other episodes keep their mark")
+
+    store.MarkSeriesDone("ttQW")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 3, ids), "done series marks every episode")
+    store.MarkEpisodeUnwatched("ttQW", "ttQW:1:3")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 3, ids), "unwatch clears the done series key")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 1, ids), "episodes with their own mark stay watched")
+end sub
+
+sub Test_Library_WatchedSetForUnion()
+    Harness_Suite("LibraryStore WatchedSetFor unions local, done and account marks minus overrides")
+    account = LibraryStore(MockRegistry(), "stremio")
+    ids = ["ttUN:1:1", "ttUN:1:2", "ttUN:1:3", "ttUN:1:4"]
+    codec = WatchedCodec()
+    accountBits = { "ttUN:1:2": true, "ttUN:1:3": true, "ttUN:1:4": true }
+    bitfield = codec.WatchedEncode(ids, accountBits, "ttUN:1:4")
+    items = []
+    items.Push(LibraryItemFixture("ttUN", "series", "Union", "2024-06-01T00:00:00Z", { watched: bitfield }))
+    account.SyncFromStremio(items)
+
+    account.MarkEpisodeWatched("ttUN", "ttUN:1:1")
+    set = account.WatchedSetFor("ttUN", ids)
+    Harness_Equal(set.Count(), 4, "local (1) plus account (2,3,4) union")
+    Harness_Ok(set["ttUN:1:1"], "local mark present")
+
+    account.MarkEpisodeUnwatched("ttUN", "ttUN:1:2")
+    set = account.WatchedSetFor("ttUN", ids)
+    Harness_Equal(set.Count(), 3, "unwatch override drops the account-bit episode")
+    Harness_Ok(set["ttUN:1:2"] = invalid, "overridden episode gone")
+    Harness_Ok(not account.EpisodeWatched("ttUN", 1, 2, ids), "badge honors the override until sync")
+    Harness_Ok(account.EpisodeWatched("ttUN", 1, 3, ids), "sibling episodes still watched")
+
+    account.MarkUpToWatched("ttUN", ids, 1)
+    Harness_Equal(account.WatchedSetFor("ttUN", ids).Count(), 4, "re-mark upto clears the override")
+end sub
+
+sub Test_Library_FlaggedSeriesUnwatchOverride()
+    Harness_Suite("LibraryStore unwatch of a flagged-done series rewrites the bitfield minus the episode")
+    account = LibraryStore(MockRegistry(), "stremio")
+    ids = ["ttFL:1:1", "ttFL:1:2", "ttFL:1:3"]
+    items = []
+    items.Push(LibraryItemFixture("ttFL", "series", "Flagged", "2024-06-01T00:00:00Z", { timesWatched: 1 }))
+    account.SyncFromStremio(items)
+    Harness_Ok(account.IsWatched("ttFL"), "account flagged the series watched")
+    Harness_Ok(account.EpisodeWatched("ttFL", 1, 2, ids), "flagged series counts every episode watched")
+
+    account.MarkEpisodeUnwatched("ttFL", "ttFL:1:2")
+    Harness_Ok(not account.EpisodeWatched("ttFL", 1, 2, ids), "unwatch override hides the episode while the account still lists it")
+    set = account.WatchedSetFor("ttFL", ids)
+    Harness_Equal(set.Count(), 2, "flagged whole-series collapsed to bits minus one")
+    Harness_Ok(set["ttFL:1:1"], "episode 1 stays watched")
+    Harness_Ok(set["ttFL:1:3"], "episode 3 stays watched")
+    Harness_Ok(set["ttFL:1:2"] = invalid, "unwatched episode excluded")
+end sub
+
+sub Test_Library_BuildWatchedStateItem()
+    Harness_Suite("LibraryStore BuildWatchedStateItem authors state.watched for stremio pushes")
+    account = LibraryStore(MockRegistry(), "stremio")
+    ids = ["ttPW:1:1", "ttPW:1:2", "ttPW:1:3"]
+    items = []
+    items.Push(LibraryItemFixture("ttPW", "series", "Push", "2024-06-01T00:00:00Z", { videoId: "ttPW:1:1", timeOffset: 0, timesWatched: 0 }))
+    account.SyncFromStremio(items)
+
+    account.MarkEpisodeUnwatched("ttPW", "ttPW:1:1")
+    item = account.BuildWatchedStateItem("ttPW", "ttPW:1:1", ids)
+    Harness_Ok(item <> invalid, "item builds for a stremio session")
+    Harness_Equal(item.state.flaggedWatched, 0, "flaggedWatched zeroed when authoring a bitfield")
+    Harness_Ok(item.state.watched <> "" and item.state.watched <> invalid, "bitfield authored")
+    Harness_Equal(item._id, "ttPW", "clone keeps the freshest cached id")
+    Harness_Equal(item.state.video_id, "ttPW:1:1", "video_id falls back to the current episode when the set is empty")
+
+    account.MarkEpisodeWatched("ttPW", "ttPW:1:3")
+    item = account.BuildWatchedStateItem("ttPW", "ttPW:1:3", ids)
+    Harness_Equal(item.state.video_id, "ttPW:1:3", "last watched id reported once the set is non-empty")
+    decoded = account.codec.WatchedDecode(item.state.watched, ids)
+    Harness_Ok(decoded["ttPW:1:3"], "built bitfield carries the mark")
+
+    guest = LibraryStore(MockRegistry())
+    guest.MarkEpisodeWatched("ttPW", "ttPW:1:3")
+    Harness_Ok(guest.BuildWatchedStateItem("ttPW", "ttPW:1:3", ids) = invalid, "guest sessions never build a push item")
+end sub
+
+sub Test_Library_MarkUpToUnwatched()
+    Harness_Suite("LibraryStore MarkUpToUnwatched clears a slice and drops the done key")
+    store = LibraryStore(MockRegistry())
+    ids = ["ttQW:1:1", "ttQW:1:2", "ttQW:1:3"]
+    store.MarkUpToWatched("ttQW", ids, 2)
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 1, ids), "slice watched first")
+
+    store.MarkUpToUnwatched("ttQW", ids, 1)
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 1, ids), "unwatch clears within the slice")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 2, ids), "unwatch clears through the target")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 3, ids), "beyond the slice keeps its own mark")
+
+    store.MarkSeriesDone("ttQW")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 3, ids), "series done marks all watched again")
+    store.MarkUpToUnwatched("ttQW", ids, 0)
+    Harness_Ok(store.watched["ttQW"] = invalid, "whole-series done key dropped")
+    Harness_Ok(not store.EpisodeWatched("ttQW", 1, 1, ids), "slice start unwatched")
+    Harness_Ok(store.EpisodeWatched("ttQW", 1, 3, ids), "beyond-slice local mark survives the done collapse")
+
+    account = LibraryStore(MockRegistry(), "stremio")
+    account.MarkUpToWatched("ttUP", ids, 2)
+    account.MarkUpToUnwatched("ttUP", ids, 1)
+    set = account.WatchedSetFor("ttUP", ids)
+    Harness_Equal(set.Count(), 1, "up-to unwatch records overrides for the slice")
+    Harness_Ok(set["ttQW:1:3"], "beyond-slice episode still in the encoded set")
+end sub

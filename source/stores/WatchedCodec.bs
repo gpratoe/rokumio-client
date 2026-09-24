@@ -6,11 +6,14 @@
 '
 ' where lastVideoID is the video id of the last watched episode
 ' ("{imdbId}:{season}:{episode}"), lastLength is how many episodes the
-' bitfield currently covers, and the payload is that number of bits, one per
-' episode in the series' ordered video list (sorted season → episode →
-' release), in a byte array compressed with zlib and base64-encoded. Bit i
-' set = the i-th episode is watched. This is a DEFLATE stream wrapped in the
-' usual 2-byte zlib header plus a trailing Adler-32 checksum we ignore.
+' bitfield covers counting up to and including that last watched one (its
+' index in the ordered list + 1), and the payload is the full per-episode
+' bits, one per episode in the series' ordered video list (sorted season →
+' episode → release), in a byte array compressed with zlib and base64-encoded.
+' Bit i set = the i-th episode is watched. A receiver that sees a different
+' (e.g. grown) video list re-aligns the bits around the anchor so the last
+' watched episode stays on its own id. The payload is a DEFLATE stream wrapped
+' in the usual 2-byte zlib header plus a trailing Adler-32 checksum we ignore.
 '
 ' Decoding needs the ordered episode list (the bitfield is only an index into
 ' it), which only Cinemeta provides — so this is exercised on EpisodesScreen,
@@ -395,6 +398,111 @@ class WatchedCodec
             end if
         end while
         return false
+    end function
+
+    ' ---- bitfield encode ----
+
+    ' Base64-encode a byte array (standard alphabet, no line breaks, "=" padding).
+    function Base64Encode(bytes as object) as string
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        result = ""
+        n = bytes.Count()
+        if n = 0 then return result
+        i = 0
+        while i < n
+            b0 = bytes[i]
+            result = result + alphabet.Mid(b0 \ 4, 1)
+            if i + 1 < n
+                b1 = bytes[i + 1]
+                result = result + alphabet.Mid((b0 mod 4) * 16 + b1 \ 16, 1)
+                if i + 2 < n
+                    b2 = bytes[i + 2]
+                    result = result + alphabet.Mid((b1 mod 16) * 4 + b2 \ 64, 1)
+                    result = result + alphabet.Mid(b2 mod 64, 1)
+                else
+                    result = result + alphabet.Mid((b1 mod 16) * 4, 1)
+                    result = result + "="
+                end if
+            else
+                result = result + alphabet.Mid((b0 mod 4) * 16, 1)
+                result = result + "=="
+            end if
+            i = i + 3
+        end while
+        return result
+    end function
+
+    ' Wrap a byte array as one final stored (BTYPE=00) DEFLATE block inside a
+    ' zlib wrapper. Stored blocks are always legal DEFLATE, so any real
+    ' inflater — including the stremio server's zlib — accepts the stream and
+    ' this side never has to build Huffman tables. Header 78 01 (deflate, 32K
+    ' window, fastest level, no preset dict) passes Inflate()'s own guards, and
+    ' a correct Adler-32 trails so strict inflaters check out.
+    function DeflateStored(bytes as object) as object
+        out = [120, 1]
+        ' BFINAL=1, BTYPE=00, then pad bits: 0b00000001, already byte-aligned
+        ' after the 2-byte header.
+        out.Push(1)
+        len = bytes.Count()
+        out.Push(len mod 256)
+        out.Push(len \ 256)
+        notLen = 65535 - len
+        out.Push(notLen mod 256)
+        out.Push(notLen \ 256)
+        for each byteValue in bytes
+            out.Push(byteValue)
+        end for
+        a = 1
+        b = 0
+        for each byteValue in bytes
+            a = (a + byteValue) mod 65521
+            b = (b + a) mod 65521
+        end for
+        out.Push(b \ 256)
+        out.Push(b mod 256)
+        out.Push(a \ 256)
+        out.Push(a mod 256)
+        return out
+    end function
+
+    ' Encode a watched set into the account's state.watched string: the set is
+    ' { episodeVideoId: true } indexed against orderedEpisodeIds (bit i is the
+    ' i-th id; the whole payload is written, watched or not), and the stored
+    ' "last length" is lastVideoId's index in the list plus 1 — the canonical
+    ' anchor position stremio-watched-bitfield serializes, NOT the list size —
+    ' so a receiver re-aligning around the anchor maps the bits straight back.
+    ' lastVideoId must be a real id — the decoder refuses an empty prefix —
+    ' reported by the caller as the last watched episode. An empty set anchors
+    ' on the first id with length 1; the all-zero payload reads as nothing
+    ' watched everywhere. A stored block keeps the payload lossless and the
+    ' bits in place.
+    function WatchedEncode(orderedEpisodeIds as object, watched as object, lastVideoId as string) as string
+        if orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return ""
+        if watched = invalid or Type(watched) <> "roAssociativeArray" then return ""
+        if lastVideoId = invalid or lastVideoId = "" then return ""
+        n = orderedEpisodeIds.Count()
+        bytes = m.ZeroArray((n + 7) \ 8)
+        for i = 0 to n - 1
+            if watched[orderedEpisodeIds[i]] <> invalid
+                bytes[i \ 8] = bytes[i \ 8] + m.Power2(i mod 8)
+            end if
+        end for
+        anchorIndex = m.IndexInIds(orderedEpisodeIds, lastVideoId)
+        anchorVideoId = lastVideoId
+        if anchorIndex < 0 then
+            anchorIndex = 0
+            anchorVideoId = orderedEpisodeIds[0]
+        end if
+        return anchorVideoId + ":" + (anchorIndex + 1).ToStr() + ":" + m.Base64Encode(m.DeflateStored(bytes))
+    end function
+
+    ' The index of videoId in the ordered episode-id list, or -1 when absent.
+    function IndexInIds(orderedEpisodeIds as object, videoId as string) as integer
+        if orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" then return -1
+        for i = 0 to orderedEpisodeIds.Count() - 1
+            if orderedEpisodeIds[i] = videoId then return i
+        end for
+        return -1
     end function
 
     ' ---- bitfield ----

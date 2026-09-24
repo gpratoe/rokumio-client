@@ -7,6 +7,7 @@
          stream-push request upward. -->
     <interface>
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
+        <field id="watchedChange" type="assocarray" alwaysNotify="true" />
 
         <function name="OnEnter" />
         <function name="OnExit" />

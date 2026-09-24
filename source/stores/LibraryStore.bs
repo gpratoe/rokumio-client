@@ -65,6 +65,7 @@ class LibraryStore
     stremioLibrary as object
     watched as object
     accountWatched as object
+    unwatched as object
     codec as object
 
     sub new(registry = invalid as dynamic, sessionType = "guest" as string)
@@ -77,6 +78,7 @@ class LibraryStore
         m.stremioLibrary = []
         m.watched = {}
         m.accountWatched = {}
+        m.unwatched = {}
         ' Instance the codec here, not inside EpisodeWatched: Roku scopes
         ' user-defined global functions per component, so a bare WatchedCodec()
         ' call from a method invoked under another component's scope resolves to
@@ -360,15 +362,19 @@ class LibraryStore
     ' Per-episode watched, precise. Local set first; when the episode list is
     ' available the account bitfield is decoded against it (it is only an index
     ' into that ordering, so without the list the account part cannot answer).
-    ' "orderedEpisodes" is the series' ordered video id list.
+    ' An account that flagged the whole series watched (no bitfield) counts every
+    ' episode — mirroring WatchedSetFor, so badges and what a write would produce
+    ' can never disagree. "orderedEpisodes" is the series' ordered video id list.
     function EpisodeWatched(metaId as string, season as integer, episode as integer, orderedEpisodes as object) as boolean
         if orderedEpisodes = invalid or Type(orderedEpisodes) <> "roArray" then return false
         videoId = m.videoId.Build(metaId, season, episode)
         if m.HasKey(m.watched, videoId) then return true
         if m.HasKey(m.watched, metaId) then return true
+        if m.IsUnwatchOverridden(metaId, videoId) then return false
         account = m.AccountLayer(metaId)
         if account = invalid then return false
-        if account.bitfield = "" then return false
+        if account.watched and (account.bitfield = invalid or account.bitfield = "") then return true
+        if account.bitfield = invalid or account.bitfield = "" then return false
         if m.codec = invalid then return false
         watched = m.codec.WatchedDecode(account.bitfield, orderedEpisodes)
         if watched <> invalid and m.HasKey(watched, videoId) then return true
@@ -505,6 +511,154 @@ class LibraryStore
         return invalid
     end function
 
+    ' ---- watched edits ----
+
+    ' Mark one regular episode watched in the local display layer and persist.
+    ' The whole-series done key is left alone — a single episode mark never turns
+    ' a series done (MarkAllIfDone does that once the full list is known and
+    ' every tile is watched). Drops any session unwatch override for the episode.
+    sub MarkEpisodeWatched(metaId as string, videoId as string) as void
+        if metaId = "" or videoId = "" then return
+        m.watched[videoId] = true
+        m.ClearUnwatchOverride(metaId, videoId)
+        m.Save()
+    end sub
+
+    ' Clear one episode. A local unwatch also drops a previous whole-series done
+    ' key — a series with an unwatched episode cannot stay "done". On a stremio
+    ' session the unwatch is remembered for the session (m.unwatched), because
+    ' the account's bitfield still lists the episode watched until the corrected
+    ' bitfield is pushed and re-synced; the override is what keeps both the tile
+    ' badge and any re-encoded bitfield honoring "not watched" meanwhile.
+    sub MarkEpisodeUnwatched(metaId as string, videoId as string) as void
+        if metaId = "" or videoId = "" then return
+        if m.HasKey(m.watched, videoId) then m.watched.Delete(videoId)
+        if m.HasKey(m.watched, metaId) then m.watched.Delete(metaId)
+        if m.sessionType = "stremio" then m.RecordUnwatchOverride(metaId, videoId)
+        m.Save()
+    end sub
+
+    ' Mark every episode up to and including lastIndex (index into the given
+    ' ordered episode id list) watched, in one write. Clears session unwatch
+    ' overrides for those ids — they are watched again. The list is whatever
+    ' scoped a caller to (the whole series or one season row): the store is
+    ' agnostic, the bitfield it later authors stays series-global regardless.
+    sub MarkUpToWatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
+        if metaId = "" or orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return
+        if lastIndex < 0 then lastIndex = 0
+        if lastIndex >= orderedEpisodeIds.Count() then lastIndex = orderedEpisodeIds.Count() - 1
+        for i = 0 to lastIndex
+            id = orderedEpisodeIds[i]
+            m.watched[id] = true
+            m.ClearUnwatchOverride(metaId, id)
+        end for
+        m.Save()
+    end sub
+
+    ' The inverse of MarkUpToWatched: every episode up to and including lastIndex
+    ' is cleared locally, the whole-series done key is dropped (a series with an
+    ' unwatched episode cannot stay done), and — on a stremio session — the ids
+    ' are remembered as unwatch overrides so the badge and any re-encoded
+    ' bitfield keep honoring "not watched" until the correction re-syncs.
+    sub MarkUpToUnwatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
+        if metaId = "" or orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return
+        if lastIndex < 0 then lastIndex = 0
+        if lastIndex >= orderedEpisodeIds.Count() then lastIndex = orderedEpisodeIds.Count() - 1
+        for i = 0 to lastIndex
+            id = orderedEpisodeIds[i]
+            if m.HasKey(m.watched, id) then m.watched.Delete(id)
+            if m.sessionType = "stremio" then m.RecordUnwatchOverride(metaId, id)
+        end for
+        if m.HasKey(m.watched, metaId) then m.watched.Delete(metaId)
+        m.Save()
+    end sub
+
+    sub RecordUnwatchOverride(metaId as string, videoId as string) as void
+        ov = m.unwatched[metaId]
+        if ov = invalid then ov = {} : m.unwatched[metaId] = ov
+        ov[videoId] = true
+    end sub
+
+    sub ClearUnwatchOverride(metaId as string, videoId as string) as void
+        ov = m.unwatched[metaId]
+        if ov <> invalid
+            if ov[videoId] <> invalid then ov.Delete(videoId)
+        end if
+    end sub
+
+    ' Whether an episode is under a session unwatch override (a stremio account
+    ' still lists it watched until the correction lands and re-syncs).
+    function IsUnwatchOverridden(metaId as string, videoId as string) as boolean
+        if metaId = "" or videoId = "" then return false
+        ov = m.unwatched[metaId]
+        if ov <> invalid and ov[videoId] <> invalid then return true
+        return false
+    end function
+
+    ' The watched set for a series as it must be written to the account: the
+    ' local layer (per-episode keys plus the whole-series done key) unioned with
+    ' the account's own marks — its bitfield decoded against the ordered list,
+    ' or every id when the account flagged the whole series watched without a
+    ' bitfield — minus any session unwatch overrides. A written bitfield
+    ' replaces state.watched wholesale, so re-encoding only the local layer
+    ' would silently wipe the watch marks the account already holds.
+    function WatchedSetFor(metaId as string, orderedEpisodeIds as object) as object
+        set = {}
+        if metaId = "" or orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" then return set
+        n = orderedEpisodeIds.Count()
+        for i = 0 to n - 1
+            id = orderedEpisodeIds[i]
+            if m.HasKey(m.watched, id) then set[id] = true
+        end for
+        if m.HasKey(m.watched, metaId)
+            for i = 0 to n - 1
+                set[orderedEpisodeIds[i]] = true
+            end for
+        end if
+        account = m.AccountLayer(metaId)
+        if account <> invalid
+            if account.watched and (account.bitfield = invalid or account.bitfield = "")
+                for i = 0 to n - 1
+                    set[orderedEpisodeIds[i]] = true
+                end for
+            else if account.bitfield <> invalid and account.bitfield <> ""
+                if m.codec <> invalid
+                    decoded = m.codec.WatchedDecode(account.bitfield, orderedEpisodeIds)
+                    if decoded <> invalid
+                        for i = 0 to n - 1
+                            id = orderedEpisodeIds[i]
+                            if decoded[id] <> invalid then set[id] = true
+                        end for
+                    end if
+                end if
+            end if
+        end if
+        ov = m.unwatched[metaId]
+        if ov <> invalid
+            for i = 0 to n - 1
+                id = orderedEpisodeIds[i]
+                if ov[id] <> invalid then set.Delete(id)
+            end for
+        end if
+        return set
+    end function
+
+    ' The id to report as the bitfield's "last watched" slot: the last watched
+    ' id in display order, or the caller's current episode when the set has
+    ' nothing watched (that slot must never be empty — the decoder refuses it).
+    function LastWatchedId(set as object, orderedEpisodeIds as object, videoId as string) as string
+        if set = invalid or orderedEpisodeIds = invalid then return videoId
+        for i = orderedEpisodeIds.Count() - 1 to 0 step -1
+            id = orderedEpisodeIds[i]
+            if id <> invalid and set[id] <> invalid then return id
+        end for
+        if videoId = invalid or videoId = "" then
+            if orderedEpisodeIds.Count() > 0 then return orderedEpisodeIds[0]
+            return ""
+        end if
+        return videoId
+    end function
+
     ' Reconcile the store with the account's remote library (from the
     ' datastoreGet pull). The API is the authority, so the whole in-memory state
     ' is rebuilt, never merged: continue watching is re-derived and re-ordered,
@@ -610,6 +764,24 @@ class LibraryStore
         return m.stremioCodec.BuildLibraryChangeItem(m.sessionType, m.stremioLibrary, now, metaId, metaType, name, poster, added)
     end function
 
+    ' Build the LibraryItem a watched-mark/unmark push sends. Stremio sessions
+    ' only; stamps now when left to default. The bitfield is authored here from
+    ' WatchedSetFor (local + account, minus unwatch overrides) so the union
+    ' lands, then handed to BuildWatchedItem with the last-watched id. ordered
+    ' episode ids are the panel's current list — the same one the account
+    ' bitfield indexes and the badges are painted from.
+    function BuildWatchedStateItem(metaId as string, videoId as string, orderedEpisodeIds as object, now = "" as string) as dynamic
+        if m.sessionType <> "stremio" then return invalid
+        if metaId = invalid or metaId = "" then return invalid
+        if now = "" then now = m.time.NowIso()
+        if orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return invalid
+        set = m.WatchedSetFor(metaId, orderedEpisodeIds)
+        lastVideoId = m.LastWatchedId(set, orderedEpisodeIds, videoId)
+        bitfield = ""
+        if m.codec <> invalid then bitfield = m.codec.WatchedEncode(orderedEpisodeIds, set, lastVideoId)
+        return m.stremioCodec.BuildWatchedItem(m.sessionType, m.stremioLibrary, now, metaId, videoId, bitfield, lastVideoId)
+    end function
+
     ' Guest/stremio sessions persist under different keys so one session can
     ' never surface the other's saved content or continue-watching positions.
     function RegistryKey() as string
@@ -629,6 +801,7 @@ class LibraryStore
         m.positions = []
         m.watched = {}
         m.accountWatched = {}
+        m.unwatched = {}
         m.Load()
     end sub
 

@@ -33,6 +33,15 @@ sub init()
     m.seasonEpisodes = []
 end sub
 
+function onKeyEvent(key as string, press as boolean) as boolean
+    if key = "options" and press
+        if m.epList <> invalid and m.epList.HasFocus()
+            if ShowWatchDialog() then return true
+        end if
+    end if
+    return false
+end function
+
 function OnEnter(params as object) as void
     ' Re-entry after a push (streams, player, …): params is invalid and the
     ' screen Group was handed focus by the stack. The episode RowList must take
@@ -71,6 +80,7 @@ sub LoadSeries()
     m.epList.numRows = 0
     m.seasons = []
     m.seasonEpisodes = []
+    m.orderedVideoIds = []
     m.epTitle.text = ""
     m.epDesc.text = "Loading episodes…"
 
@@ -127,6 +137,7 @@ sub BuildList(meta as object)
 
     m.seasons = m.stores.episodes.OrderedSeasons(allSeasons)
     orderedEpisodes = m.stores.episodes.OrderedVideoIds(m.meta.id, meta)
+    m.orderedVideoIds = orderedEpisodes
 
     content = CreateObject("roSGNode", "ContentNode")
     anyRegular = false
@@ -245,6 +256,137 @@ sub onItemSelected()
     if entry = invalid then return
     PushEpisode(entry.season, entry.ep)
 end sub
+
+' The OPTIONS key on a focused regular (non-season-0) episode opens the
+' watched-status dialog — season 0 specials are not part of the ordered/
+' bitfield list, so they never offer it. Returns true when a dialog was shown.
+' The "rest of season" actions are scoped to the focused season's row: they
+' cover that season's episodes from its first up to (and including) the focused
+' one, so a season can be caught up or reverted without touching any other
+' season's marks.
+function ShowWatchDialog() as boolean
+    if m.meta = invalid or m.orderedVideoIds = invalid or m.orderedVideoIds.Count() = 0 then return false
+    if m.stores = invalid or m.stores.library = invalid or m.stores.episodes = invalid or m.stores.time = invalid or m.stores.auth = invalid then return false
+    data = m.epList.rowItemFocused
+    if data = invalid or data.Count() < 2 then return false
+    row = data[0]
+    entry = EntryAt(data[0], data[1])
+    if entry = invalid or entry.season = 0 or entry.ep = invalid or entry.ep.episode = invalid then return false
+
+    videoId = m.stores.episodes.ResolveVideoId(m.meta.id, entry.season, entry.ep.episode)
+    seasonIds = SeasonVideoIds(row)
+    seasonIndex = IndexInIds(seasonIds, videoId)
+    if seasonIndex < 0 then return false
+    mark = m.stores.library.EpisodeMark(m.meta.id, entry.season, entry.ep, m.orderedVideoIds, m.stores.time.NowIso())
+
+    m.pendingWatchAction = {
+        metaId: m.meta.id
+        videoId: videoId
+        seasonIds: seasonIds
+        seasonIndex: seasonIndex
+        watched: mark.watched
+    }
+
+    stremio = m.stores.auth.GetSession() = "stremio"
+    syncNote = "Synced to your Stremio account."
+    if not stremio then syncNote = "Saved on this device only."
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    if mark.watched
+        dialog.title = "Mark as not watched?"
+        dialog.message = [syncNote]
+        dialog.buttons = ["Mark as not watched", "Mark rest of season as unwatched", "Cancel"]
+    else
+        dialog.title = EpisodeLabel(entry.season, entry.ep) + " — mark watched?"
+        dialog.message = [syncNote]
+        dialog.buttons = ["Mark watched", "Mark rest of season as watched", "Cancel"]
+    end if
+    dialog.observeField("buttonSelected", "onWatchChoice")
+    m.top.getScene().dialog = dialog
+    return true
+end function
+
+' A dialog button landed. Reset the Scene's dialog slot, apply the chosen edit
+' to the store (which publishes the account push and repaints the badges), then
+' hand focus back to the list. An unwatched dialog's index = 0 is "mark this
+' episode watched", index = 1 is "mark rest of this season watched"; a watched
+' dialog's index = 0 is "mark as not watched", index = 1 is "mark rest of this
+' season unwatched". Both rest-of-season actions revert their own counterpart.
+sub onWatchChoice()
+    dialog = m.top.getScene().dialog
+    if dialog <> invalid
+        index = dialog.buttonSelected
+        if index = invalid then index = -1
+        m.top.getScene().dialog = invalid
+        action = m.pendingWatchAction
+        m.pendingWatchAction = invalid
+        if action <> invalid
+            if action.watched
+                if index = 0
+                    ApplyWatchChange("unwatch", action)
+                else if index = 1
+                    ApplyWatchChange("restUnwatched", action)
+                end if
+            else
+                if index = 0
+                    ApplyWatchChange("watch", action)
+                else if index = 1
+                    ApplyWatchChange("restWatched", action)
+                end if
+            end if
+        end if
+    end if
+    if m.epList <> invalid then m.epList.SetFocus(true)
+end sub
+
+' Apply a watched edit: mutate the store's local display layer, publish the
+' change so MainScene can push it to the account, then repaint the tiles in
+' place (which re-runs the series-complete check for the grid "done" badge).
+' "restWatched"/"restUnwatched" operate on the focused season's video id list,
+' from its first episode through the focused one.
+sub ApplyWatchChange(kind as string, action as object)
+    if m.stores = invalid or m.stores.library = invalid then return
+    library = m.stores.library
+    if kind = "watch"
+        library.MarkEpisodeWatched(action.metaId, action.videoId)
+    else if kind = "restWatched"
+        library.MarkUpToWatched(action.metaId, action.seasonIds, action.seasonIndex)
+    else if kind = "restUnwatched"
+        library.MarkUpToUnwatched(action.metaId, action.seasonIds, action.seasonIndex)
+    else
+        library.MarkEpisodeUnwatched(action.metaId, action.videoId)
+    end if
+    m.top.watchedChange = {
+        metaId: action.metaId
+        videoId: action.videoId
+        orderedVideoIds: m.orderedVideoIds
+    }
+    RefreshWatchedMarks()
+end sub
+
+' The watchable video ids of one season row, in display order — the slice of the
+' series' ordered list that row owns, so a season-scoped mark lands exactly on
+' that season's non-special episodes.
+function SeasonVideoIds(row as integer) as object
+    ids = []
+    if row < 0 or row >= m.seasons.Count() then return ids
+    if m.stores = invalid or m.stores.episodes = invalid then return ids
+    episodes = m.seasonEpisodes[row]
+    for each ep in episodes
+        if ep <> invalid and ep.episode <> invalid
+            ids.Push(m.stores.episodes.ResolveVideoId(m.meta.id, m.seasons[row], ep.episode))
+        end if
+    end for
+    return ids
+end function
+
+' The position of a video id in a list (-1 when absent).
+function IndexInIds(ids as object, videoId as string) as integer
+    if ids = invalid or videoId = "" then return -1
+    for i = 0 to ids.Count() - 1
+        if ids[i] = videoId then return i
+    end for
+    return -1
+end function
 
 function EntryAt(row as integer, index as integer) as object
     if m.seasons.Count() = 0 then return invalid
