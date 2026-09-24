@@ -96,6 +96,14 @@ sub init()
         time: TimeUtil()
         watch: WatchStateBuffer()
     }
+
+    ' The session-aware stores. Long-lived — they are never reconstructed, only
+    ' re-targeted by SwitchSession — so these references stay valid for the
+    ' whole Scene. ReconcileSession() (below) is the one place a session change
+    ' reaches them; a new session-aware store joins this single list and every
+    ' auth flow reconciles it automatically.
+    m.sessionAware = [m.stores.addons, m.stores.library]
+
     m.homeScreen.callFunc("SetStores", m.stores)
     m.authScreen.callFunc("SetStores", m.stores)
     m.linkStremioScreen.callFunc("SetStores", m.stores)
@@ -399,14 +407,25 @@ function EffectiveSessionType() as string
     return "guest"
 end function
 
+' The one place a session change reaches the session-aware stores: the type is
+' derived from the auth authority (never a call-site literal), so it always
+' matches the session the store/service were just pivoted to, and every session
+' gets the same switch. Guest and stremio stay under separate registry keys
+' with a clear-and-reload swap, so the two sessions never mix.
+sub ReconcileSession()
+    sessionType = EffectiveSessionType()
+    for each store in m.sessionAware
+        store.SwitchSession(sessionType)
+    end for
+end sub
+
 ' The AuthScreen published its first-run choice.
 sub onAuthAction()
     request = m.authScreen.pushRequest
     if request = invalid then return
     if request.action = "continueGuest"
         if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginGuest()
-        if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
-        if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
+        ReconcileSession()
         if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
             m.stack.pop()
         end if
@@ -458,8 +477,7 @@ sub onLinkCodeAction()
     end if
     if request.action = "completeLogin"
         if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginStremio(request.authKey, request.user)
-        if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("stremio")
-        if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("stremio")
+        ReconcileSession()
         StartAddonSync()
         StartLibrarySync()
         if m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
@@ -553,8 +571,7 @@ sub DoLogout()
     end if
 
     if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.Logout()
-    if m.stores <> invalid and m.stores.addons <> invalid then m.stores.addons.SwitchSession("guest")
-    if m.stores <> invalid and m.stores.library <> invalid then m.stores.library.SwitchSession("guest")
+    ReconcileSession()
 
     ' Pop all the way down to Home — every screen gets its normal OnExit/BlurFocus
     ' teardown, so transient tasks cancel and no stale focus survives.

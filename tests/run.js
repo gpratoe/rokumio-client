@@ -234,6 +234,33 @@ function checkMainSceneContract() {
     return ok;
 }
 
+// Auth changes pivot the session-aware stores through a single ReconcileSession()
+// (the type is derived from the auth authority, never a call-site literal). A
+// stray store.SwitchSession(...) anywhere else means a flow — or a future 4th
+// session-aware store — repointed stores by hand and the guest/stremio
+// separation can silently drift. Pin it: SwitchSession may only be called
+// inside ReconcileSession.
+function checkSessionAuthorityContract() {
+    const fs = require('fs');
+    const brs = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8');
+    const calls = [...brs.matchAll(/\.SwitchSession\s*\(/g)].map(match => match.index);
+    if (calls.length === 0) {
+        console.error('MainScene.brs no longer calls SwitchSession anywhere — session-aware stores never pivot');
+        return false;
+    }
+    const subStart = brs.indexOf('sub ReconcileSession()');
+    const nextSub = brs.indexOf('\nsub ', subStart + 1);
+    const body = nextSub === -1 ? brs.slice(subStart) : brs.slice(subStart, nextSub);
+    let ok = true;
+    for (const index of calls) {
+        if (index < subStart || index > nextSub) {
+            console.error(`MainScene.brs calls SwitchSession at byte ${index}, outside sub ReconcileSession() — every pivot must go through the authority`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 // FinishImport calls m.homeScreen.callFunc('RebuildRows') after a deep-link
 // import lands new add-ons. Same callFunc interface-declaration trap as
 // MainScene above — pin it or a missing declaration silently no-ops on device.
@@ -406,7 +433,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract()) {
         process.exit(1);
     }
 
