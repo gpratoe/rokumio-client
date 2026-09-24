@@ -18,6 +18,8 @@
     <script type="text/brightscript" uri="pkg:/source/stores/DeepLinkStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/EpisodesStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/WatchedCodec.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/TimeUtil.bs" />
+    <script type="text/brightscript" uri="pkg:/source/stores/WatchStateBuffer.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/LibraryStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/PlaybackStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/SubtitlesStore.bs" />

@@ -93,6 +93,8 @@ sub init()
         episodes: EpisodesStore(http)
         library: LibraryStore(CreateObject("roRegistrySection", "library"), sessionType)
         playback: PlaybackStore(http)
+        time: TimeUtil()
+        watch: WatchStateBuffer()
     }
     m.homeScreen.callFunc("SetStores", m.stores)
     m.authScreen.callFunc("SetStores", m.stores)
@@ -205,7 +207,8 @@ sub onPlayerClose()
     end if
     ' Drop the node reference so SceneGraph can destroy the whole component (and
     ' release the platform media player) — the last watch-state packet is safe
-    ' because the player also records it in the library store, which lives on.
+    ' because the player also records it in the watch-state buffer, which lives
+    ' on past the player node.
     m.activePlayer = invalid
 end sub
 
@@ -213,13 +216,13 @@ end sub
 ' watchStateUpdate. MainScene owns the write-back pipeline: gate on a stremio
 ' session (guest never touches the API), drop a repeat of the last accepted
 ' update (same video, same position — nothing new), and coalesce the rest so at
-' most one WatchStatePushTask runs at a time. The packet is read from the
-' library store, not the player node, so the async callback can land even after
-' onPlayerClose released the component.
+' most one WatchStatePushTask runs at a time. The packet is read from the shared
+' watch-state buffer, not the player node, so the async callback can land even
+' after onPlayerClose released the component.
 sub onWatchStateUpdate()
     if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
     if m.stores.auth.GetSession() <> "stremio" then return
-    packet = m.stores.library.LatestWatchStatePacket()
+    packet = m.stores.watch.Latest()
     if packet = invalid then return
     videoId = packet.videoId
     if videoId = invalid or videoId = "" then return

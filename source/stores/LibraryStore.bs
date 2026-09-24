@@ -85,6 +85,7 @@ class LibraryStore
         ' carries WatchedCodec, and the codec's methods only call intrinsics, so
         ' the stored instance is callable from any component.
         m.codec = WatchedCodec()
+        m.time = TimeUtil()
         m.Load()
     end sub
 
@@ -683,7 +684,7 @@ class LibraryStore
         if packet.name <> invalid then name = packet.name
         poster = ""
         if packet.poster <> invalid then poster = packet.poster
-        if now = "" then now = m.NowIso()
+        if now = "" then now = m.time.NowIso()
 
         original = invalid
         for each item in m.stremioLibrary
@@ -744,7 +745,7 @@ class LibraryStore
         if metaType = invalid or metaType = "" then metaType = "movie"
         if name = invalid then name = ""
         if poster = invalid then poster = ""
-        if now = "" then now = m.NowIso()
+        if now = "" then now = m.time.NowIso()
 
         original = invalid
         for each item in m.stremioLibrary
@@ -770,83 +771,6 @@ class LibraryStore
         clone.temp = false
         clone._mtime = now
         return clone
-    end function
-
-    ' ISO-8601 UTC timestamp for _mtime/lastWatched, via roDateTime.ToISOString
-    ' (no manual month/day assembly, so no 0-indexed month gotcha). Returns ""
-    ' when the platform cannot produce one.
-    function NowIso() as string
-        try
-            dt = CreateObject("roDateTime")
-            if dt = invalid then return ""
-            iso = dt.ToISOString()
-            if iso = invalid then return ""
-            return iso
-        catch e
-            return ""
-        end try
-    end function
-
-    ' Whether an episode has aired: its release date (released, falling back to
-    ' firstAired) must exist and not be after today. Dates compare on their
-    ' leading YYYY-MM-DD (both UTC), so no platform date arithmetic is needed
-    ' and the interpreter cannot diverge from a device. Missing/malformed dates
-    ' or an unavailable clock (nowIso = "", or no roDateTime) are treated as
-    ' aired — the goal is never to hide a claimable episode, only to block ones
-    ' that demonstrably have not aired. That matters because an account bitfield
-    ' for a series marked fully watched runs across the whole known episode
-    ' list, including not-yet-aired placeholders; literally replaying those bits
-    ' would paint a check on episodes that cannot have been watched.
-    function EpisodeAired(ep as object, nowIso = invalid as dynamic) as boolean
-        if ep = invalid then return true
-        dateStr = ""
-        if ep.released <> invalid and ep.released <> "" then
-            dateStr = ep.released
-        else if ep.firstAired <> invalid and ep.firstAired <> "" then
-            dateStr = ep.firstAired
-        end if
-        if dateStr = "" then return true
-        if nowIso = invalid or nowIso = "" then nowIso = m.NowIso()
-        if nowIso = "" then return true
-        day = dateStr.Mid(0, 10)
-        if not m.IsCalendarDate(day) then return true
-        if day > nowIso.Mid(0, 10) then return false
-        return true
-    end function
-
-    ' YYYY-MM-DD shape check (the first ten characters of a date string), so a
-    ' clearly non-date value can't accidentally compare greater than today.
-    function IsCalendarDate(value as string) as boolean
-        if value = invalid or value.Len() < 10 then return false
-        digits = "0123456789"
-        for i = 0 to 9
-            c = value.Mid(i, 1)
-            if i = 4 or i = 7
-                if c <> "-" then return false
-            else if digits.InStr(c) < 0
-                return false
-            end if
-        end for
-        return true
-    end function
-
-    ' The player publishes each position update as a watch-state packet here
-    ' (memory-only) as well as through its own field, so MainScene can still read
-    ' the last packet after the player node is torn down — its async field
-    ' observer races the pop that releases the component (and the video node it
-    ' holds). Reading from the store has no node-lifetime dependency.
-    '
-    ' Note: the getter is LatestWatchStatePacket, NOT LatestWatchState —
-    ' BrightScript member names are case-insensitive, so a method named
-    ' LatestWatchState would collide with the m.latestWatchState field it reads
-    ' (a runtime crash, same class of bug as the StremioLibrary() rename).
-    sub RecordWatchState(packet as dynamic)
-        if packet = invalid then return
-        m.latestWatchState = packet
-    end sub
-
-    function LatestWatchStatePacket() as dynamic
-        return m.latestWatchState
     end function
 
     ' Guest/stremio sessions persist under different keys so one session can

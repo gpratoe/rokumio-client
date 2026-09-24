@@ -663,7 +663,8 @@ sub PublishWatchState()
         duration: Int(duration)
     }
     ' Record before publishing: MainScene's observer can fire synchronously on
-    ' the field write, so the store must already hold this packet when it reads.
-    m.stores.library.RecordWatchState(packet)
+    ' the field write, so the shared buffer must already hold this packet when
+    ' it reads.
+    m.stores.watch.Record(packet)
     m.top.watchStateUpdate = packet
 end sub

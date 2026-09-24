@@ -125,7 +125,7 @@ sub BuildList(meta as object)
     anyRegular = false
     allDone = true
     nowIso = invalid
-    if m.stores <> invalid and m.stores.library <> invalid then nowIso = m.stores.library.NowIso()
+    if m.stores <> invalid and m.stores.time <> invalid then nowIso = m.stores.time.NowIso()
     for s = 0 to m.seasons.Count() - 1
         season = m.seasons[s]
         episodes = m.stores.episodes.EpisodesForSeason(meta, season)
@@ -164,8 +164,8 @@ end sub
 ' watched. One source for the badge rule shared by the build and the re-paint.
 function EpisodeMark(season as integer, ep as object, orderedEpisodes as object, nowIso as dynamic) as object
     mark = { aired: false, watched: false }
-    if m.stores = invalid or m.stores.library = invalid then return mark
-    mark.aired = m.stores.library.EpisodeAired(ep, nowIso)
+    if m.stores = invalid or m.stores.time = invalid then return mark
+    mark.aired = m.stores.time.EpisodeAired(ep, nowIso)
     if mark.aired then mark.watched = Watched(season, ep, orderedEpisodes)
     return mark
 end function
@@ -192,7 +192,7 @@ sub RefreshWatchedMarks() as void
     orderedEpisodes = OrderedVideoIds(m.seriesMeta)
     anyRegular = false
     allDone = true
-    nowIso = m.stores.library.NowIso()
+    nowIso = m.stores.time.NowIso()
     for s = 0 to m.seasons.Count() - 1
         season = m.seasons[s]
         row = m.epList.content.GetChild(s)

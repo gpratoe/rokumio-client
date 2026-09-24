@@ -43,6 +43,8 @@ async function writeCombinedScript() {
         'tests/subtitlesstore.test.brs',
         'tests/watchedcodec.fixtures.brs',
         'tests/watchedcodec.test.brs',
+        'tests/timeutil.test.brs',
+        'tests/watchstatebuffer.test.brs',
         'tests/_run.brs'
     ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });
@@ -59,6 +61,8 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'CatalogStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'DeepLinkStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'EpisodesStore.brs'),
+    path.join(stagingDir, 'source', 'stores', 'TimeUtil.brs'),
+    path.join(stagingDir, 'source', 'stores', 'WatchStateBuffer.brs'),
     path.join(stagingDir, 'source', 'stores', 'LibraryStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'StremioApiStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'PlaybackStore.brs'),

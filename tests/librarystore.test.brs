@@ -394,25 +394,6 @@ sub Test_Library_SeriesStatusLocal()
     Harness_Equal(done.SeriesStatus("ttQW"), "done", "series-done is done and beats progress")
 end sub
 
-sub Test_Library_EpisodeAired()
-    Harness_Suite("EpisodeAired gates not-yet-aired episodes")
-    store = LibraryStore(MockRegistry())
-    now = "2026-09-16T00:00:00.000Z"
-    past = { released: "2026-08-05T08:00:00.000Z" }
-    today = { released: "2026-09-16T08:00:00.000Z" }
-    future = { released: "2026-09-30T08:00:00.000Z", name: "TBA " }
-    Harness_Ok(store.EpisodeAired(past, now), "past episode aired")
-    Harness_Ok(store.EpisodeAired(today, now), "today's episode aired")
-    Harness_Ok(not store.EpisodeAired(future, now), "future episode not aired")
-    Harness_Ok(not store.EpisodeAired({ firstAired: "2026-10-07T08:00:00.000Z" }, now), "firstAired fallback respected")
-    Harness_Ok(store.EpisodeAired({}, now), "no date means aired")
-    Harness_Ok(store.EpisodeAired({ released: "2026-08-05" }, now), "bare date aired")
-    Harness_Ok(store.EpisodeAired({ released: "rubbish" }, now), "malformed date means aired")
-    Harness_Ok(store.EpisodeAired(invalid, now), "invalid episode means aired")
-    Harness_Ok(store.EpisodeAired({ released: "1960-01-01T00:00:00.000Z" }, ""), "past episode aired with no clock")
-    Harness_Ok(not store.EpisodeAired({ released: "2100-01-01T00:00:00.000Z" }, invalid), "future episode still unaired with invalid clock")
-end sub
-
 sub Test_Library_ProgressFor()
     Harness_Suite("ProgressFor returns the raw resume position for a meta")
     store = LibraryStore(MockRegistry())
