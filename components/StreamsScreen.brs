@@ -451,26 +451,76 @@ function StreamLabel(stream as object) as string
     return FlattenNewlines(label).Trim()
 end function
 
-' The card's lines below the name, straight from the stream title split at its
-' embedded line feeds — the release, then the file path, then
-' "👤 412 💾 54.2 GB ⚙️ RARBG", then a languages line when one is present. Direct URLs and add-ons with no title get a "source · quality"
-' line so the card is never empty.
+' The card's lines below the name. Sources merge in order, each split at its
+' embedded line feeds: the title (one add-on idiom packs the release, then the
+' file path, then the "👤 412 💾 54.2 GB" stats line into it), then the
+' description (the official stream spec — other add-ons keep filename/size/
+' quality there instead of a title), then behaviorHints.filename, and finally a
+' human size from behaviorHints.videoSize when nothing else produced a line.
+' Exact duplicates are skipped so an add-on setting both title and description
+' never double-prints a file name. Direct URLs and add-ons with no text at all
+' keep the "source · quality" line so the card is never empty.
 function StreamTitleLines(stream as object) as object
     lines = []
-    if stream <> invalid and stream.title <> invalid and stream.title.Trim() <> ""
-        pieces = stream.title.Trim().Split(chr(10))
-        if pieces <> invalid and pieces.Count() > 0
-            for each piece in pieces
-                line = piece.Trim()
-                if line <> "" then lines.Push(line)
-            end for
-        end if
+    if stream = invalid then return lines
+    AddStreamLines(lines, stream.title)
+    AddStreamLines(lines, stream.description)
+    if stream.behaviorHints <> invalid
+        AddStreamLines(lines, stream.behaviorHints.filename)
     end if
-    if lines.Count() = 0 and stream <> invalid
+    if lines.Count() = 0 and stream.behaviorHints <> invalid
+        size = HumanSize(stream.behaviorHints.videoSize)
+        if size <> "" then lines.Push(size)
+    end if
+    if lines.Count() = 0
         if stream.source <> invalid and stream.source <> "" then lines.Push(stream.source)
         if stream.quality <> invalid and stream.quality <> "" then lines.Push(stream.quality)
     end if
     return lines
+end function
+
+' Split one candidate stream text at its line feeds and append the non-empty
+' pieces, skipping exact duplicates already collected.
+sub AddStreamLines(lines as object, text as dynamic)
+    if text = invalid then return
+    if Type(text) <> "roString" then return
+    if text.Trim() = "" then return
+    pieces = text.Trim().Split(chr(10))
+    if pieces = invalid or pieces.Count() = 0 then return
+    for each piece in pieces
+        line = piece.Trim()
+        if line = "" then continue for
+        if not ContainsLine(lines, line) then lines.Push(line)
+    end for
+end sub
+
+' True when lines already holds an exact match for line.
+function ContainsLine(lines as object, line as string) as boolean
+    for each existing in lines
+        if existing = line then return true
+    end for
+    return false
+end function
+
+' Bytes to a readable size. 1024-based GB/TB, consistent with the "💾 n GB"
+' sizes stream text commonly carries; two decimals below 10 GB, one at or above.
+function HumanSize(bytes as dynamic) as string
+    if bytes = invalid then return ""
+    value = 0.0
+    if Type(bytes) = "roString"
+        value = bytes.ToFloat()
+    else
+        value = CDbl(bytes)
+    end if
+    if value <= 0 then return ""
+    gb = value / 1073741824.0
+    if gb >= 1024
+        return Str(Int(gb / 1024.0 * 10 + 0.5) / 10.0).Trim() + " TB"
+    end if
+    if gb < 10
+        return Str(Int(gb * 100 + 0.5) / 100.0).Trim() + " GB"
+    end if
+    return Str(Int(gb * 10 + 0.5) / 10.0).Trim() + " GB"
 end function
 
 ' Stream names/titles carry embedded line feeds; the card labels are
