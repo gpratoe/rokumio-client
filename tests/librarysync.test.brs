@@ -282,7 +282,9 @@ end sub
 sub Test_LibrarySync_EpisodeWatchedFromBitfield()
     Harness_Suite("EpisodeWatched decodes the account watched bitfield against the episode list")
     items = []
-    items.Push(LibraryItemFixture("tt3330003", "series", "Sparse", "2024-06-01T00:00:00Z", { timesWatched: 0, watched: "tt3330003:5:9:64:eJzrYGBgYGBkaAAABMsBCg==" }))
+    ' Sparse coherent field: bits 3 and 7 set, authored over the same 12-id list
+    ' the decode runs against, anchored on the last watched id (index 7).
+    items.Push(LibraryItemFixture("tt3330003", "series", "Sparse", "2024-06-01T00:00:00Z", { timesWatched: 0, watched: "tt3330003:1:8:8:eJzrYAAAARIAiQ==" }))
     store = LibraryStore(MockRegistry(), "stremio")
     store.SyncFromStremio(items)
 

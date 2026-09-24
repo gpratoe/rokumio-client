@@ -510,8 +510,17 @@ class WatchedCodec
     ' Decode a state.watched string into a map of { episodeVideoId: true } for
     ' watched episodes, where orderedEpisodeIds is the series' ordered video id
     ' list (sorted season → episode → release). Malformed, empty or unknown
-    ' inputs decode to an empty map, never a crash. The exposed bit count is
-    ' capped by lastLength, by the decoded data length and by the episode list.
+    ' inputs decode to an empty map, never a crash.
+    '
+    ' The bits were authored against whatever list the writer held at push time
+    ' — which can differ from ours (season-0 specials prepended by the writer,
+    ' episodes that aired since, …). The anchor re-aligns: reading a field
+    ' positionally against a shifted list paints the marks on the wrong episodes
+    ' (the "everything shifted by N" symptom). So the bit position is rebased by
+    ' `lastLength − 1 − index(anchor)`, stremio-watched-bitfield's resize rule:
+    ' bit i of the payload maps to list[i + offset] (out-of-range reads as
+    ' unwatched). A field whose anchor is not in our list cannot be realigned —
+    ' stremio-core blanks it, and so do we, rather than trust stray positions.
     function WatchedDecode(bitfield, orderedEpisodeIds as object) as object
         watched = {}
         if bitfield = invalid or bitfield = "" then return watched
@@ -544,16 +553,18 @@ class WatchedCodec
         inflated = m.Inflate(decoded)
         if inflated = invalid or inflated.Count() = 0 then return watched
 
-        expose = lastLength
-        if orderedEpisodeIds.Count() < expose then expose = orderedEpisodeIds.Count()
+        anchorIndex = m.IndexInIds(orderedEpisodeIds, videoIdPrefix)
+        if anchorIndex < 0 then return watched
+        offset = lastLength - 1 - anchorIndex
         bitLimit = inflated.Count() * 8
-        if expose > bitLimit then expose = bitLimit
 
-        for bitIndex = 0 to expose - 1
+        for i = 0 to orderedEpisodeIds.Count() - 1
+            bitIndex = i + offset
+            if bitIndex < 0 or bitIndex >= bitLimit then continue for
             byteIndex = bitIndex \ 8
             bit = (inflated[byteIndex] \ m.Power2(bitIndex mod 8)) mod 2
             if bit = 1
-                id = orderedEpisodeIds[bitIndex]
+                id = orderedEpisodeIds[i]
                 if id <> invalid and id <> "" then watched[id] = true
             end if
         end for

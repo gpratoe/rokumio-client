@@ -109,15 +109,15 @@ sub Test_WatchedCodec_BlockBoundaries()
         Harness_Ok(watched2.DoesExist(boundary.ids[index]), "boundary index " + index.ToStr() + " watched")
     end for
 
-    watched3 = codec.WatchedDecode("tt9990009:2:3:24:eJwBAwD8/wFAAgAAAAA=", boundary.ids)
+    absent = invalid
+    for each fixture in fixtures
+        if fixture.note = "anchor absent from decode list" then absent = fixture
+    end for
+    watched3 = codec.WatchedDecode(absent.bitfield, absent.ids)
 
-    ' The codec is positional: a bitboard decodes against the caller's orderered
-    ' episode list, so the same payload re-checked against a foreign series'
-    ' (longer) list still maps bits to whatever ids sit at those positions.
-    Harness_Equal(watched3.Count(), 3, "stored payload against a longer foreign list maps 3 bits")
-    Harness_Ok(watched3.DoesExist(boundary.ids[0]), "foreign list position 0 exposed")
-    Harness_Ok(watched3.DoesExist(boundary.ids[14]), "foreign list position 14 exposed")
-    Harness_Ok(watched3.DoesExist(boundary.ids[17]), "foreign list position 17 exposed")
+    ' A field whose anchor is not in the decode list cannot be realigned; the
+    ' codec blanks it (stremio-core's rule) instead of trusting stray bits.
+    Harness_Equal(watched3.Count(), 0, "foreign field with unknown anchor decodes to nothing")
 end sub
 
 sub Test_WatchedCodec_StoredBlock()
@@ -187,10 +187,43 @@ sub Test_WatchedCodec_ClampsToEpisodeList()
     end for
 
     watched2 = codec.WatchedDecode(truncated.bitfield, truncated.ids)
-    Harness_Equal(watched2.Count(), truncated.expected.Count(), "truncated: only decodable bits exposed")
+    Harness_Equal(watched2.Count(), truncated.expected.Count(), "truncated: overstated length shuts the decode window")
     for each index in truncated.expected
         Harness_Ok(watched2.DoesExist(truncated.ids[index]), "truncated id " + index.ToStr() + " watched")
     end for
+end sub
+
+sub Test_WatchedCodec_DecodeRebasesAroundTheAnchor()
+    Harness_Suite("WatchedDecode realigns bits authored against a shifted episode list")
+    codec = WatchedCodec()
+    fixtures = WatchedCodecFixtures()
+    prepended = invalid
+    extra = invalid
+    for each fixture in fixtures
+        if fixture.note = "prepended specials rebase (writer list has season 0)" then prepended = fixture
+        if fixture.note = "extra specials on our side (offset < 0)" then extra = fixture
+    end for
+    Harness_Ok(prepended <> invalid and extra <> invalid, "rebase fixtures present")
+
+    ' The writer's list had three season-0 specials first, so his "episode 1"
+    ' is our episode 4. A positional read would paint the whole set 3 early —
+    ' the reported "shifted by 3" bug. Rebasing on the anchor must recover the
+    ' exact same real episodes, untouched.
+    watched = codec.WatchedDecode(prepended.bitfield, prepended.ids)
+    Harness_Equal(watched.Count(), prepended.expected.Count(), "prepended field decodes every one of its 24 episodes")
+    Harness_Ok(watched["tt1GOT00:1:1"], "season 1 episode 1 survives the rebase")
+    Harness_Ok(watched["tt1GOT00:2:3"], "season 2 episode 3 (the anchor) survives the rebase")
+    Harness_Equal(watched["tt1GOT00:0:1"], invalid, "no stray watch lands outside the decode id list")
+
+    ' The mirror: our list has the specials and the writer's did not. The marks
+    ' must fall on the real episodes, leaving the specials unwatched.
+    watched2 = codec.WatchedDecode(extra.bitfield, extra.ids)
+    Harness_Equal(watched2.Count(), extra.expected.Count(), "extra-specials field decodes all real episodes")
+    Harness_Ok(watched2["tt2DNS11:1:1"], "season 1 episode 1 watched past the specials")
+    Harness_Ok(watched2["tt2DNS11:1:21"], "season 1 episode 21 watched")
+    Harness_Ok(watched2["tt2DNS11:2:3"], "season 2 episode 3 watched")
+    Harness_Ok(watched2["tt2DNS11:0:1"] = invalid, "decode-list special stays unwatched")
+    Harness_Ok(watched2["tt2DNS11:0:2"] = invalid, "second special stays unwatched")
 end sub
 sub Test_WatchedCodec_EncodeRoundTrips()
     Harness_Suite("WatchedCodec encodes a set to the account silhouette and back")
