@@ -36,9 +36,9 @@ class StremioApiStore
         items = invalid
         if res.ok and res.json <> invalid then items = res.json.result
         if items = invalid or Type(items) <> "roArray"
-            return { ok: false, items: [], error: m.EnvelopeError(res, "Could not sync library") }
+            return { ok: false, items: [], error: m.EnvelopeError(res, "Could not sync library"), revokedSession: m.IsSessionRevoked(res) }
         end if
-        return { ok: true, items: items, error: "" }
+        return { ok: true, items: items, error: "", revokedSession: false }
     end function
 
     ' Write one full library item back (watch-state or add/remove change; the
@@ -58,7 +58,7 @@ class StremioApiStore
         result = invalid
         if res.ok and res.json <> invalid then result = res.json.result
         if result = invalid or result.addons = invalid or Type(result.addons) <> "roArray"
-            return { ok: false, descriptors: [], error: m.EnvelopeError(res, "Could not sync addons") }
+            return { ok: false, descriptors: [], error: m.EnvelopeError(res, "Could not sync addons"), revokedSession: m.IsSessionRevoked(res) }
         end if
         descriptors = []
         for each addon in result.addons
@@ -67,7 +67,27 @@ class StremioApiStore
             if addon.manifest <> invalid then packet.manifest = addon.manifest
             descriptors.Push(packet)
         end for
-        return { ok: true, descriptors: descriptors, error: "" }
+        return { ok: true, descriptors: descriptors, error: "", revokedSession: false }
+    end function
+
+    ' Whether an error envelope means the authKey no longer maps to a live
+    ' session — deleted from the account's session list, or expired. This is the
+    ' signal MainScene uses to bounce a dead account session back to the guest
+    ' gate. Mirrors EnvelopeError's guard (a transport failure never yields an
+    ' envelope anyway), and the message match is conservative: "session" must
+    ' pair with one of the revoke-style phrases, so generic server failures can
+    ' never trip a logout. Matches case-insensitively.
+    function IsSessionRevoked(res as object) as boolean
+        if res = invalid or not res.ok or res.json = invalid or res.json.error = invalid or res.json.error.message = invalid then return false
+        message = res.json.error.message
+        if Type(message) <> "roString" and Type(message) <> "String" then return false
+        text = LCase(message)
+        if Instr(1, text, "session") = 0 then return false
+        revokePhrases = ["does not exist", "not found", "invalid", "expired", "revoked", "logged out"]
+        for each phrase in revokePhrases
+            if Instr(1, text, phrase) > 0 then return true
+        end for
+        return false
     end function
 
     ' Best-effort server-side logout. A blank authKey short-circuits to success —

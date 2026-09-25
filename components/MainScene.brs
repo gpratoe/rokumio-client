@@ -68,6 +68,10 @@ sub init()
     m.loginFromSettings = false
     m.logoutTask = invalid
     m.pendingLogout = false
+    ' A revoked-account bounce fires at most once per login: both launch-time
+    ' pulls (library + addon) fail together on a dead authKey, and only the
+    ' first one tears the session down.
+    m.revokedSessionHandled = false
 
     ' Bottom-of-stack Back opens the native exit dialog through the Scene's dialog
     ' field (a StandardDialog) rather than using the ScreenStack.
@@ -520,6 +524,7 @@ sub onLinkCodeAction()
     if request.action = "completeLogin"
         if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginStremio(request.authKey, request.user)
         ReconcileSession()
+        m.revokedSessionHandled = false
         StartAddonSync()
         StartLibrarySync()
         if m.stack.top() <> invalid and m.stack.top().id = "linkStremioScreen"
@@ -599,10 +604,9 @@ sub onLogoutDialogClosed()
 end sub
 
 ' The actual logout, on confirm: flush the account key at the API (best-effort,
-' never gating), clear the local session, repoint the session-aware stores at the
-' guest data, then walk the stack back to Home and park the auth gate on top so
-' the user can pick their next session. The server call is fire-and-forget — the
-' user is logged out here regardless of its outcome.
+' never gating), then the same teardown the revoked-session bounce runs. The
+' server call is fire-and-forget — the user is logged out here regardless of its
+' outcome.
 sub DoLogout()
     if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetAuthKey() <> ""
         task = AsyncTask_Launch(m.top, "LogoutTask", "onLogoutResult", {
@@ -611,6 +615,15 @@ sub DoLogout()
         m.logoutTask = task
     end if
 
+    ResetToAuthGate()
+end sub
+
+' Clear the local session, repoint the session-aware stores at the guest data,
+' then walk the stack back to Home and park the auth gate on top so the user can
+' pick their next session. Shared by the manual logout and the revoked-session
+' bounce; the manual logout additionally flushes the authKey at the API first
+' (see DoLogout).
+sub ResetToAuthGate()
     if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.Logout()
     ReconcileSession()
 
@@ -621,6 +634,46 @@ sub DoLogout()
     end while
     if m.homeScreen <> invalid then m.homeScreen.callFunc("RebuildRows")
     m.stack.push("authScreen")
+end sub
+
+' A launch-time pull reported that the account session no longer exists (it was
+' deleted from the account's session list, or expired). The local authKey is
+' dead, so there is no server logout to flush — drop to the guest gate exactly
+' like the manual logout, and explain why. Guarded so the racing library/addon
+' pulls can only bounce once.
+sub HandleRevokedSession()
+    if m.revokedSessionHandled then return
+    m.revokedSessionHandled = true
+    ResetToAuthGate()
+    ShowSessionRevokedDialog()
+end sub
+
+' Present the revoked-session dialog over the auth gate: one OK button down to
+' choosing the next session, mirroring the deep-link import dialog's wiring.
+sub ShowSessionRevokedDialog()
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.id = "sessionRevokedDialog"
+    dialog.title = "Account session ended"
+    dialog.message = ["Your Stremio account session was signed out from another device, you'll need to log back in."]
+    dialog.buttons = ["OK"]
+    dialog.observeField("buttonSelected", "onSessionRevokedButtonSelected")
+    dialog.observeField("wasClosed", "onSessionRevokedDialogClosed")
+    m.top.dialog = dialog
+end sub
+
+sub onSessionRevokedButtonSelected()
+    if m.top.dialog <> invalid and m.top.dialog.id = "sessionRevokedDialog"
+        m.top.dialog.close = true
+    end if
+end sub
+
+sub onSessionRevokedDialogClosed()
+    if m.top.dialog <> invalid and m.top.dialog.id = "sessionRevokedDialog"
+        m.top.dialog = invalid
+    end if
+    if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
+        m.authScreen.SetFocus(true)
+    end if
 end sub
 
 ' The server logout settled. Reap the worker; the local session is already
@@ -655,6 +708,11 @@ sub onAddonSyncResult()
     if task = invalid then return
     result = task.result
     AsyncTask_Reap(task, m.top, false)
+
+    if result <> invalid and result.revokedSession
+        HandleRevokedSession()
+        return
+    end if
 
     added = 0
     skipped = 0
@@ -700,6 +758,14 @@ sub onLibrarySyncResult()
     if task = invalid then return
     result = task.result
     AsyncTask_Reap(task, m.top, false)
+
+    ' A dead account session (revoked/expired server-side) is authoritative:
+    ' drop to the guest gate instead of silently limping on a key that can no
+    ' longer sync.
+    if result <> invalid and result.revokedSession
+        HandleRevokedSession()
+        return
+    end if
 
     if result = invalid or not result.ok or result.items = invalid
         return

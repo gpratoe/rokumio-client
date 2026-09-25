@@ -242,3 +242,85 @@ sub Test_StremioApiStore_LogoutBlankAuthKeyShortCircuits()
     Harness_Equal(res.error, "", "no error")
     Harness_Equal(http.log.Count(), 0, "no request attempted")
 end sub
+
+sub Test_StremioApiStore_IsSessionRevokedOnSessionMissing()
+    Harness_Suite("IsSessionRevoked flags the Session does not exist envelope")
+    store = StremioApiStore(ScriptedTransport([]), "sk_test_key")
+    res = { ok: true, json: { error: { code: 1, message: "Session does not exist" } } }
+    Harness_Ok(store.IsSessionRevoked(res), "session-deleted error detected")
+end sub
+
+sub Test_StremioApiStore_IsSessionRevokedVariants()
+    Harness_Suite("IsSessionRevoked flags revoke-style wording regardless of case")
+    store = StremioApiStore(ScriptedTransport([]), "sk_test_key")
+    cases = [
+        { message: "session has expired", got: false }
+        { message: "Logged out: this session is no longer active", got: false }
+        { message: "SESSION REVOKED from the account", got: false }
+        { message: "session not found", got: false }
+    ]
+    for i = 0 to cases.Count() - 1
+        res = { ok: true, json: { error: { code: 1, message: cases[i].message } } }
+        cases[i].got = store.IsSessionRevoked(res)
+    end for
+    Harness_Equal(cases[0].got, true, "expired detected")
+    Harness_Equal(cases[1].got, true, "logged out detected")
+    Harness_Equal(cases[2].got, true, "upper-case revoked detected")
+    Harness_Equal(cases[3].got, true, "not found detected")
+end sub
+
+sub Test_StremioApiStore_IsSessionRevokedGenericErrorFalse()
+    Harness_Suite("IsSessionRevoked leaves generic server errors alone")
+    store = StremioApiStore(ScriptedTransport([]), "sk_test_key")
+    generic = { ok: true, json: { error: { code: 1, message: "Internal server error" } } }
+    Harness_Equal(store.IsSessionRevoked(generic), false, "generic error not a revocation")
+    invalidAuth = { ok: true, json: { error: { code: 1, message: "Invalid authKey" } } }
+    Harness_Equal(store.IsSessionRevoked(invalidAuth), false, "unrelated auth wording ignored")
+end sub
+
+sub Test_StremioApiStore_IsSessionRevokedFailuresFalse()
+    Harness_Suite("IsSessionRevoked is never true for non-error responses")
+    store = StremioApiStore(ScriptedTransport([]), "sk_test_key")
+    success = { ok: true, json: { result: { success: true } } }
+    Harness_Equal(store.IsSessionRevoked(success), false, "success envelope ignored")
+    network = { ok: false, status: 0, json: invalid, error: "connection refused" }
+    Harness_Equal(store.IsSessionRevoked(network), false, "transport failure ignored")
+    blank = { ok: true, json: { result: {} } }
+    Harness_Equal(store.IsSessionRevoked(blank), false, "no error envelope ignored")
+end sub
+
+sub Test_StremioApiStore_LibraryGetTagsRevokedSession()
+    Harness_Suite("LibraryGet flags a revoked-session error envelope for the caller")
+    script = [
+        { method: "POST", url: "https://api.strem.io/api/datastoreGet", ok: true, status: 200, json: { error: { code: 1, message: "Session does not exist" } } }
+    ]
+    http = ScriptedTransport(script)
+    store = StremioApiStore(http, "sk_test_key")
+    res = store.LibraryGet()
+    Harness_Ok(not res.ok, "request reports failure")
+    Harness_Equal(res.revokedSession, true, "revoked-session flag set")
+end sub
+
+sub Test_StremioApiStore_LibraryGetSuccessNotTagged()
+    Harness_Suite("LibraryGet makes the revoked-session flag explicit on success")
+    script = [
+        { method: "POST", url: "https://api.strem.io/api/datastoreGet", ok: true, status: 200, json: { result: [] } }
+    ]
+    http = ScriptedTransport(script)
+    store = StremioApiStore(http, "sk_test_key")
+    res = store.LibraryGet()
+    Harness_Ok(res.ok, "request succeeds")
+    Harness_Equal(res.revokedSession, false, "not a revoked session")
+end sub
+
+sub Test_StremioApiStore_AddonGetTagsRevokedSession()
+    Harness_Suite("AddonCollectionGet flags a revoked-session error envelope for the caller")
+    script = [
+        { method: "POST", url: "https://api.strem.io/api/addonCollectionGet", ok: true, status: 200, json: { error: { code: 1, message: "Session does not exist" } } }
+    ]
+    http = ScriptedTransport(script)
+    store = StremioApiStore(http, "sk_test_key")
+    res = store.AddonCollectionGet()
+    Harness_Ok(not res.ok, "request reports failure")
+    Harness_Equal(res.revokedSession, true, "revoked-session flag set")
+end sub
