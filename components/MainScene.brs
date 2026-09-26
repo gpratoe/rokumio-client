@@ -871,7 +871,7 @@ end sub
 sub StartAddonSync()
     fields = {}
     if m.storeHost <> invalid then fields.authKey = m.storeHost.callFunc("AuthGetAuthKey")
-    task = AsyncTask_Launch(m.top, "AddonSyncTask", "onAddonSyncResult", fields, "addonSyncTask")
+    task = AsyncTask_Launch(m.top, "AddonSyncTask", "onAddonSyncResult", fields, "addonSyncTask", "onAddonSyncFinished")
     m.addonSyncTask = task
 end sub
 
@@ -880,29 +880,39 @@ end sub
 ' new catalog set. Partial failures are non-fatal — whatever synced registers
 ' and the session proceeds.
 '
-' What is NOT non-fatal is a sync that reported nothing, which is what this
-' sub used to do: a transport timeout, an HTTP error and an empty account all
-' fell off the end identically, the caller counted zero adds, RebuildRows was
-' skipped, and Home went on rendering the pre-login rows as though nothing had
-' happened. The app looked healthy and was not. Every outcome now names itself
-' in the fault strip, carrying the transport's own error text where there is
-' one, so the next occurrence is a diagnosis instead of an inference.
+' Every outcome names itself in the fault strip, carrying the transport's own
+' error text where there is one, so the next occurrence is a diagnosis instead of
+' an inference.
+'
+' An empty result is NOT one of those outcomes, and treating it as one is what
+' broke first login. `result` is alwaysNotify with no value, so it can notify
+' before the worker has written anything, and the handler cannot tell "not yet"
+' from "the worker produced nothing" by looking at result alone. This sub used to
+' call AsyncTask_Reap on an empty result — which unobserves the field and removes
+' the node — and CleanupStremioPairTask's own header records that removing a
+' running Task does NOT kill its worker thread. So the real result landed on a
+' node nobody was watching, the account's add-ons were silently dropped, `added`
+' stayed 0, RebuildRows never ran, and Home went on rendering the pre-login rows
+' as though nothing had happened. The app looked healthy and was not.
+'
+' So an empty result is declined here and the node is left alone. The authority
+' on whether the worker really finished without one is onAddonSyncFinished, which
+' can only fire once the task's sentinel says the worker is done.
 sub onAddonSyncResult()
     task = m.addonSyncTask
-    m.addonSyncTask = invalid
     if task = invalid then return
     result = task.result
+    if result = invalid then return
+
+    m.addonSyncTask = invalid
     AsyncTask_Reap(task, m.top, false)
 
     ClearAddonSyncFaults()
 
-    if result <> invalid and result.revokedSession
+    ' Compared, not truthiness-tested: a result packet without the key reads
+    ' back invalid, and `if invalid` is a hard &h18 crash on device.
+    if result.revokedSession = true
         HandleRevokedSession()
-        return
-    end if
-
-    if result = invalid
-        AddAddonSyncFault("addon sync: the task reported no result at all")
         return
     end if
 
@@ -930,9 +940,14 @@ sub onAddonSyncResult()
             end if
         end for
     end if
-    if added > 0 and m.homeScreen <> invalid
-        m.homeScreen.callFunc("RebuildRows")
-    end if
+    ' Unconditional, and the condition is deliberately NOT "did this sync install
+    ' anything new". A re-sync of an unchanged account installs nothing, so that
+    ' predicate was false on every run after the first and Home kept the catalog
+    ' set it walked at launch — which, in a stremio session, is usually just the
+    ' built-in seeds. Home compares the add-on set itself and rebuilds only if it
+    ' moved, so the common case costs one in-memory set comparison and no catalog
+    ' walk. See HomeScreen.EnsureCurrentRows.
+    if m.homeScreen <> invalid then m.homeScreen.callFunc("EnsureCurrentRows")
     if failed > 0
         AddAddonSyncFault("addon sync: " + failed.ToStr() + " of " + result.descriptors.Count().ToStr() + " add-ons were rejected")
     end if
@@ -942,6 +957,54 @@ sub onAddonSyncResult()
     if m.storeHost <> invalid and m.storeHost.callFunc("AddonsGetAll").Count() = 0
         AddAddonSyncFault("addon sync: the account reported no add-ons")
     end if
+end sub
+
+' The worker's sentinel fired. The VALUE of the sentinel decides what that means,
+' and that distinction is the entire reason this sub exists.
+'
+' An alwaysNotify field notifies once at ObserveField time, carrying whatever the
+' field holds then — and field notifications are dispatched on the event loop, not
+' at the moment the observer is attached. So the first "finished" notification is
+' queued while AsyncTask_Launch is still on the stack (the slot is not even filled
+' yet, so that first one is harmless) and is DELIVERED afterwards, by which time
+' the worker is running. An alwaysNotify "result" field behaves the same way; the
+' difference is only that this handler and onAddonSyncResult disagree about how to
+' read it.
+'
+' Concretely, what this sub was doing wrong: it treated the arrival of a
+' "finished" notification as proof the worker was done, reaped the node and
+' reported a fault — while the worker was still blocked inside its HTTP call, on
+' its very first run, every single time. On device that read as
+'   addon sync: the worker finished with no result (stage: request-started)
+' with a stage taken from a task still in flight. Gating on the sentinel's value
+' instead of its arrival is the fix: the real notification carries true, the
+' spurious one carries false, and only the former may conclude anything.
+'
+' Once the value IS true, the worker has run sync() to completion, so an absent
+' result is a real fault and this is the only place that reports it. The stage it
+' stopped at is the diagnosis: "request-started" means the worker is genuinely
+' still in the request or was killed mid-request; "entered-sync" or "init" means
+' sync() effectively did not run; "threw" means the catch path ran but even its
+' error packet never landed. Written into the fault text rather than logged,
+' because print goes to the Dev Console, not to the telnet console a device owner
+' is actually reading.
+sub onAddonSyncFinished()
+    task = m.addonSyncTask
+    if task = invalid then return
+
+    ' The spurious alwaysNotify notification. The worker has not finished; its
+    ' real notification is still to come. Touch nothing — reaping here is what
+    ' destroyed the real result.
+    if task.finished <> true then return
+
+    m.addonSyncTask = invalid
+
+    stage = "unknown"
+    if task.stage <> invalid and task.stage <> "" then stage = task.stage
+    AsyncTask_Reap(task, m.top, false)
+
+    ClearAddonSyncFaults()
+    AddAddonSyncFault("addon sync: the worker finished with no result (stage: " + stage + ")")
 end sub
 
 ' Retract exactly the lines the last add-on sync published. Clearing by text
@@ -1162,12 +1225,14 @@ sub FinishImport()
 
     ShowImportDialog("Rokumio import", blocks, bullets)
 
-    ' New add-ons landed: Home's grid was built from the pre-import catalog set,
-    ' so drop its rows and re-walk them now. The fill happens off the UI thread
-    ' behind the summary dialog; nothing to block on here.
-    if m.import.added > 0
-        if m.homeScreen <> invalid then m.homeScreen.callFunc("RebuildRows")
-    end if
+    ' New add-ons may have landed: Home's grid was built from the pre-import
+    ' catalog set, so let it re-derive if its add-on set actually moved. Same
+    ' predicate as the add-on sync, for the same reason — "the import added
+    ' something" is not the question, "is Home's grid current" is, and an import
+    ' that only re-registers what is already there still leaves Home showing
+    ' whatever it walked before. The fill happens off the UI thread behind the
+    ' summary dialog; nothing to block on here.
+    if m.homeScreen <> invalid then m.homeScreen.callFunc("EnsureCurrentRows")
 
     m.import = invalid
 end sub

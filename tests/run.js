@@ -802,6 +802,362 @@ function checkStremioProvisioningContract() {
 // FinishImport calls m.homeScreen.callFunc('RebuildRows') after a deep-link
 // import lands new add-ons. Same callFunc interface-declaration trap as
 // MainScene above — pin it or a missing declaration silently no-ops on device.
+// The add-on sync worker is the one place in this app where a correct-looking
+// handler destroys its own answer, and it did so on every first login.
+//
+// Every Task in this app declares its result as an alwaysNotify field with no
+// value, and Roku delivers one notification for such a field at ObserveField time
+// carrying whatever the field holds then. The subtlety that cost two deploys to
+// pin down: that notification is NOT delivered at the attach. It is queued and
+// dispatched on the event loop, so it arrives after AsyncTask_Launch has returned
+// and after `control = "RUN"` has started the worker. The queued notification is
+// therefore indistinguishable, by arrival, from the real one.
+//
+// Both handlers got this wrong, in opposite directions:
+//
+//   onAddonSyncResult read an empty result as "the task produced nothing" and
+//   immediately AsyncTask_Reap — which unobserves the field and removes the node.
+//   This file's own headers record that removing a running Task node does NOT kill
+//   its worker thread, so the genuine result landed on a node nobody was watching.
+//   The account's add-ons were silently dropped, `added` stayed 0, RebuildRows
+//   never ran, and Home went on rendering its pre-login rows. On device that read
+//   as "the catalog never updates when I log in" — a plausible-looking UI bug with
+//   no cause anywhere in the UI. FIX: decline an empty result; let the sentinel
+//   decide.
+//
+//   onAddonSyncFinished then arrived as the reporting path and treated the mere
+//   ARRIVAL of a "finished" notification as proof the worker was done. It reaped
+//   the node and published
+//     addon sync: the worker finished with no result (stage: request-started)
+//   on the first run of every sync, while the worker was still blocked inside its
+//   HTTP call — stage read from a task in flight. FIX: test the sentinel's VALUE.
+//   `true` is the only thing that means the worker ran sync() to completion.
+//
+// The general rule, which both handlers now follow and which the checks below pin:
+// for an alwaysNotify field, the notification's arrival means nothing; only the
+// value it carries does.
+//
+// The brs interpreter cannot execute a Task worker thread, so no test in this repo
+// can observe any of this. It is the same blind spot as AA iteration order and the
+// &h18 truthiness crash: a green suite is not evidence. So the invariant is pinned
+// structurally here, and the worker narrates its own progress into a "stage" field
+// so that if it ever fails again the fault text names the hop instead of costing
+// another round of hypotheses.
+function checkAddonSyncTaskContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const taskXml = read('components/AddonSyncTask.xml');
+    const taskBrs = code(read('components/AddonSyncTask.brs'));
+    const main = code(read('components/MainScene.brs'));
+    const async = code(read('source/core/AsyncTask.bs'));
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    // Body of a sub/function by name, from its header to the matching end at the
+    // same indentation. Positions matter for the ordering checks below, so this
+    // returns the source slice rather than a boolean.
+    const body = (src, name) => {
+        const start = new RegExp(`^[ \\t]*(?:public\\s+|private\\s+|override\\s+)*(?:sub|function)\\s+${name}\\s*\\(`, 'm').exec(src);
+        if (!start) return null;
+        const rest = src.slice(start.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+(?:sub|function)\b/m);
+        return end === -1 ? rest : rest.slice(0, end + 1);
+    };
+
+    // 1. The sentinel and the narration have to exist as declared interface
+    //    fields. callFunc/ObserveField on an undeclared field is a no-op, and a
+    //    write to an undeclared dynamic field notifies nobody.
+    if (!/<field\s+id="finished"\s+type="boolean"[^>]*alwaysNotify="true"/.test(taskXml)) {
+        err('AddonSyncTask.xml does not declare <field id="finished" type="boolean" ... alwaysNotify="true" /> — without the sentinel the handler cannot tell "not written yet" from "never written", which is the whole bug');
+    }
+    if (!/<field\s+id="stage"\s+type="string"/.test(taskXml)) {
+        err('AddonSyncTask.xml does not declare a "stage" field — a failure names the hop only if the worker recorded how far it got');
+    }
+
+    // 2. The sentinel must be the last statement, and the result must be written
+    //    before it. Reversed, the done-callback can conclude "no result" about a
+    //    worker that is merely mid-write, which is the original bug wearing a fix.
+    const sync = body(taskBrs, 'sync');
+    if (!sync) {
+        err('AddonSyncTask.brs has no sync() — the worker body is gone');
+    } else {
+        const resultAt = sync.indexOf('m.top.result =');
+        const finishedAt = sync.indexOf('m.top.finished = true');
+        if (finishedAt === -1) {
+            err('AddonSyncTask.brs sync() never sets m.top.finished — the sentinel is what lets MainScene tell a finished worker from a pending one');
+        } else {
+            if (resultAt === -1) {
+                err('AddonSyncTask.brs sync() sets finished without ever writing m.top.result — the sentinel would report success on a worker that produced nothing');
+            } else if (resultAt > finishedAt) {
+                err('AddonSyncTask.brs sync() writes m.top.finished BEFORE m.top.result — the done-callback can then fire on a worker whose result has not landed yet, which re-creates the very race the sentinel exists to settle');
+            }
+            const tail = sync.slice(finishedAt).split('\n').map(l => l.trim()).filter(l => l !== '');
+            const last = tail[tail.length - 1];
+            if (last !== 'm.top.finished = true') {
+                err(`AddonSyncTask.brs sync() does not end on m.top.finished = true (last statement is "${last}") — the sentinel has to be the last thing the worker does, or it can assert completion while work remains`);
+            }
+        }
+        if (!/catch[\s\S]*?m\.top\.result\s*=/.test(sync)) {
+            err('AddonSyncTask.brs sync() no longer writes a result from its catch path — a thrown request would finish with the sentinel set and no result at all, which is unreportable');
+        }
+        // The stage ladder. A presence check is not enough — four of the five
+        // rungs can be deleted and `/m.top.stage =/` still matches. What carries
+        // the diagnosis is the rung AT THE REQUEST BOUNDARY: it is the one that
+        // separates "the worker never got as far as the network" from "the request
+        // went out", which is the first question anyone asks when a sync produces
+        // nothing. So that specific rung is what gets pinned: a stage write on the
+        // statement line immediately before the line that performs the request.
+        // (Compared by line, not by character offset — the offset of the call
+        // lands mid-line, so slicing "everything before it" ends on the tail of
+        // the request line itself and the previous-line lookup silently compares
+        // against `result = `.)
+        if (!/m\.top\.stage\s*=/.test(sync)) {
+            err('AddonSyncTask.brs sync() never writes m.top.stage — the fault strip can only name the failing hop if the worker records it');
+        }
+        const syncLines = sync.split('\n');
+        const reqLine = syncLines.findIndex(l => l.includes('store.AddonCollectionGet()'));
+        if (reqLine === -1) {
+            err('AddonSyncTask.brs sync() no longer calls store.AddonCollectionGet() — the worker is not doing the job it exists for');
+        } else {
+            let prev = reqLine - 1;
+            while (prev >= 0 && syncLines[prev].trim() === '') prev -= 1;
+            if (prev < 0 || !/m\.top\.stage\s*=/.test(syncLines[prev])) {
+                err('AddonSyncTask.brs sync() does not write m.top.stage immediately before the request call — that rung is what separates "the worker never reached the network" from "the request went out and never came back", and without it every sync failure reports one indistinguishable stage');
+            }
+        }
+    }
+
+    // 3. The defect itself: an empty result must be DECLINED, not reaped. This is
+    //    an ordering check, not a presence check — the reap has to come after the
+    //    bail, and there must be no reap before it.
+    const onResult = body(main, 'onAddonSyncResult');
+    if (!onResult) {
+        err('MainScene.brs has no onAddonSyncResult — the sync result has no entry point');
+    } else {
+        const bailAt = /if\s+result\s*=\s*invalid\s+then\s+return/.exec(onResult);
+        if (!bailAt) {
+            err('MainScene.brs onAddonSyncResult no longer declines an empty result — an alwaysNotify result that notifies before the worker wrote one is indistinguishable from a real failure, and reaping on it destroys the answer (THE original bug)');
+        }
+        const reapAt = onResult.indexOf('AsyncTask_Reap(');
+        if (reapAt === -1) {
+            err('MainScene.brs onAddonSyncResult never reaps the task — a finished task node would stay in the tree for the life of the scene');
+        } else if (bailAt && reapAt < bailAt.index) {
+            err('MainScene.brs onAddonSyncResult reaps BEFORE it declines an empty result — the node is unobserved and removed while the worker is still running, so the real result can never land (THE original bug)');
+        }
+        // Reporting must have MOVED, not been duplicated. The old shape reported
+        // the empty result from here; that text is the signature of the bug, so
+        // its absence from this sub is what pins the authority. A presence check
+        // alone would pass on a file that did both.
+        if (/reported no result at all/.test(onResult)) {
+            err('MainScene.brs onAddonSyncResult still reports the empty result itself — that report is premature by construction (it cannot know the worker is done) and it is the original bug; the done-callback owns this outcome');
+        }
+        if (!/if\s+result\.revokedSession\s*=\s*true/.test(onResult)) {
+            err('MainScene.brs onAddonSyncResult truthiness-tests result.revokedSession — a result packet without the key reads back invalid, and `if invalid` is a hard &h18 crash on device');
+        }
+    }
+
+    // 4. The done-callback is the only authority on "the worker finished with
+    //    nothing", and it has to name the stage. Critically it must establish
+    //    that from the sentinel's VALUE, before it reaps or clears anything.
+    const onFinished = body(main, 'onAddonSyncFinished');
+    if (!onFinished) {
+        err('MainScene.brs has no onAddonSyncFinished — with the empty-result path now declining, the worker-finished-with-no-result outcome has no reporter at all and would be silent');
+    } else {
+        // Arrival means nothing. `finished` notifies once at ObserveField time
+        // with value false, and that notification is dispatched on the event
+        // loop, so it lands while the worker is mid-request. Treating arrival as
+        // "done" reaps a live node and publishes a fault read off a task in
+        // flight — which is exactly what shipped and produced
+        //   (stage: request-started) on every first sync.
+        const finTest = /if\s+task\.finished\s*<>\s*true\s+then\s+return/.exec(onFinished);
+        if (!finTest) {
+            err('MainScene.brs onAddonSyncFinished does not test task.finished\'s VALUE before acting — an alwaysNotify sentinel also notifies at ObserveField time with value false, and that notification is dispatched on the event loop (i.e. while the worker is still running), so arrival is not proof of completion. Reaping on it destroys the in-flight task and reports a stage read from a task that has not finished.');
+        }
+        // Ordering: the value test must precede every destructive action.
+        const finAt = finTest ? finTest.index : -1;
+        for (const [needle, what] of [['AsyncTask_Reap(', 'reaps the task'], ['m.addonSyncTask = invalid', 'clears the task slot'], ['AddAddonSyncFault(', 'publishes a fault']]) {
+            const at = onFinished.indexOf(needle);
+            if (at !== -1 && finAt !== -1 && at < finAt) {
+                err(`MainScene.brs onAddonSyncFinished ${what} before testing task.finished — the spurious alwaysNotify notification would then reap a live worker and report a stage read from a task in flight`);
+            }
+        }
+        if (!/AddAddonSyncFault\(/.test(onFinished)) {
+            err('MainScene.brs onAddonSyncFinished does not report a fault — a worker that completes without a result would be indistinguishable from a healthy one');
+        }
+        if (!/task\.stage/.test(onFinished)) {
+            err('MainScene.brs onAddonSyncFinished does not read task.stage into the fault text — the whole point of the stage field is that the failure names its own hop');
+        }
+        if (!/m\.addonSyncTask\s*=\s*invalid/.test(onFinished)) {
+            err('MainScene.brs onAddonSyncFinished does not clear m.addonSyncTask — a stale node would be left in the tree and the next sync\'s result would be dropped as a duplicate');
+        }
+        if (!/AsyncTask_Reap\(/.test(onFinished)) {
+            err('MainScene.brs onAddonSyncFinished never reaps the task — the finished worker\'s node would stay in the tree for the life of the scene');
+        }
+    }
+
+    // 5. The wiring. Both observers must be attached before control = "RUN" —
+    //    that assignment is the only point at which the worker can start, so an
+    //    observer attached after it can miss its first notification entirely.
+    const start = body(main, 'StartAddonSync');
+    if (!start || !/AsyncTask_Launch\([\s\S]*?"onAddonSyncResult"[\s\S]*?"onAddonSyncFinished"\s*\)/.test(start)) {
+        err('MainScene.brs StartAddonSync does not pass "onAddonSyncFinished" as AsyncTask_Launch\'s done-callback — the sentinel would be set with nothing observing it');
+    }
+    const launch = body(async, 'AsyncTask_Launch');
+    if (!launch) {
+        err('source/core/AsyncTask.bs has no AsyncTask_Launch');
+    } else {
+        if (!/ObserveField\(\s*"finished"\s*,\s*doneCallback\s*\)/.test(launch)) {
+            err('AsyncTask_Launch does not observe the "finished" sentinel — the optional done-callback parameter exists but is never wired to anything');
+        }
+        const finAt = launch.indexOf('ObserveField("finished"');
+        const runAt = launch.indexOf('control = "RUN"');
+        if (finAt === -1 || runAt === -1 || finAt > runAt) {
+            err('AsyncTask_Launch attaches the "finished" observer AFTER control = "RUN" — the worker can start before its observer exists, so the only notification that reports a failure can be the one that gets missed');
+        }
+    }
+    const reap = body(async, 'AsyncTask_Reap');
+    if (!reap || !/UnobserveField\(\s*"finished"\s*\)/.test(reap)) {
+        err('AsyncTask_Reap does not unobserve "finished" — a done-callback left attached can fire against a node that has already been handed back or removed');
+    }
+    return ok;
+}
+
+// Home's catalog rows could be permanently stale, with nothing reporting it.
+//
+// The add-on sync gated its rebuild on `added > 0` — "at least one add-on was
+// newly installed". That predicate is false on every run after the first: the
+// account's add-ons are already in the registry, so none of them is "added". So
+// Home was told to re-derive only on the very first sync of a fresh install and
+// never again. Home kept whatever catalog set it walked at launch, which in a
+// stremio session is usually just the built-in seeds because a session swap
+// replaces what AddonsGetAll returns wholesale. Meanwhile the Add-ons screen,
+// which reads the registry live, listed the account's add-ons correctly.
+//
+// The result was two views of the same registry permanently disagreeing, with no
+// fault strip entry, because nothing had failed — the sync succeeded and simply
+// told nobody. Device evidence: the Add-ons screen listed the stremio add-ons
+// while Home showed only the built-ins, and leaving for Settings and back
+// changed nothing.
+//
+// The fix is a set comparison rather than a count: Home records which add-on set
+// its rows were derived from and re-derives when that set moves. This also
+// subsumes the two cases a count can never see — a session swap (the set changes
+// with nothing installed) and a walk that latched on an empty registry — which is
+// why the fix is one mechanism and not three call-site patches.
+//
+// The brs interpreter can drive HomeScreen's subs, but it cannot run a
+// HomeCatalogsTask worker, and the whole failure is about which predicate gates a
+// call site. So the invariant is pinned structurally.
+function checkHomeCatalogStalenessContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const home = code(read('components/HomeScreen.brs'));
+    const homeXml = read('components/HomeScreen.xml');
+    const main = code(read('components/MainScene.brs'));
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const body = (src, name) => {
+        const start = new RegExp(`^[ \\t]*(?:public\\s+|private\\s+|override\\s+)*(?:sub|function)\\s+${name}\\s*\\(`, 'm').exec(src);
+        if (!start) return null;
+        const rest = src.slice(start.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+(?:sub|function)\b/m);
+        return end === -1 ? rest : rest.slice(0, end + 1);
+    };
+
+    // 1. The predicate itself: freshness is the add-on SET, compared against
+    //    what Home last derived from. A count cannot be substituted here.
+    const sig = body(home, 'CatalogSignature');
+    if (!sig) {
+        err('HomeScreen.brs has no CatalogSignature() — nothing can tell that Home\'s rows were overtaken');
+    } else if (!/m\.stores\.addons\.callFunc\(\s*"AddonsGetAll"\s*\)/.test(sig)) {
+        err('HomeScreen.brs CatalogSignature() does not read the live add-on set — a signature derived from anything but the current registry cannot detect staleness');
+    } else if (!/\.Sort\(/.test(sig) || !/\.Join\(/.test(sig)) {
+        err('HomeScreen.brs CatalogSignature() does not sort and join — without that, two identical sets in a different order compare as different and every sync re-walks every catalog');
+    }
+
+    const ensure = body(home, 'EnsureCurrentRows');
+    if (!ensure) {
+        err('HomeScreen.brs has no EnsureCurrentRows() — the call sites have nothing to call, and a stale grid stays stale');
+    } else {
+        // Fresh must be a no-op, and the test must come BEFORE the rebuild.
+        const fresh = /if\s+m\.catalogSignature\s*=\s*CatalogSignature\(\)\s+then\s+return/.exec(ensure);
+        if (!fresh) {
+            err('HomeScreen.brs EnsureCurrentRows() does not short-circuit when the add-on set is unchanged — every launch would re-walk every catalog over the network');
+        }
+        if (!/RebuildRows\(\)/.test(ensure)) {
+            err('HomeScreen.brs EnsureCurrentRows() never re-derives the grid — it can detect staleness but does nothing about it');
+        }
+        const freshAt = fresh ? fresh.index : -1;
+        const rebuildAt = ensure.indexOf('RebuildRows()');
+        if (freshAt !== -1 && rebuildAt !== -1 && rebuildAt < freshAt) {
+            err('HomeScreen.brs EnsureCurrentRows() rebuilds BEFORE the freshness test — the grid is re-derived on every call regardless of whether anything changed');
+        }
+    }
+
+    // 2. The walk must record what it derived from, and must do so BEFORE the
+    //    empty-registry early return. A walk that latched on an empty registry
+    //    and left the signature at init-time "" is indistinguishable from a
+    //    correct empty grid, which is precisely the state that must stay
+    //    recognisable as stale once add-ons arrive.
+    const start = body(home, 'StartCatalogLoad');
+    if (!start) {
+        err('HomeScreen.brs has no StartCatalogLoad()');
+    } else {
+        const setAt = /m\.catalogSignature\s*=\s*CatalogSignature\(\)/.exec(start);
+        if (!setAt) {
+            err('HomeScreen.brs StartCatalogLoad() never records m.catalogSignature — Home would have no record of what its rows were derived from, so nothing can ever be stale');
+        }
+        const emptyGate = /if\s+addons\.Count\(\)\s*=\s*0\s+then/.exec(start);
+        if (emptyGate && setAt && setAt.index > emptyGate.index) {
+            err('HomeScreen.brs StartCatalogLoad() records m.catalogSignature AFTER the empty-registry early return — a walk that latched on an empty registry then keeps the init-time signature, making it indistinguishable from a correct empty grid and permanently unrecoverable');
+        }
+    }
+
+    // 3. Re-entry must repair it. StartCatalogLoad() is a no-op once the walk has
+    //    latched, so OnEnter needs its own check or leaving and returning cannot
+    //    fix a stale grid.
+    const onEnter = body(home, 'OnEnter');
+    if (!onEnter || !/EnsureCurrentRows\(\)/.test(onEnter)) {
+        err('HomeScreen.brs OnEnter() no longer calls EnsureCurrentRows() — StartCatalogLoad() is a no-op once latched, so without this a stale grid can only be repaired by a relaunch (which is what it looked like: Settings-and-back changed nothing)');
+    }
+
+    // 4. The call sites must be UNCONDITIONAL. This is the defect itself: a
+    //    rebuild gated on an install count is false on every re-sync.
+    const onSync = body(main, 'onAddonSyncResult');
+    if (!onSync) {
+        err('MainScene.brs has no onAddonSyncResult()');
+    } else {
+        if (!/callFunc\(\s*"EnsureCurrentRows"\s*\)/.test(onSync)) {
+            err('MainScene.brs onAddonSyncResult() no longer calls EnsureCurrentRows() — the sync is the authority on "the add-on set may have moved" and it now tells nobody');
+        }
+        if (/if\s+added\s*>/.test(onSync)) {
+            err('MainScene.brs onAddonSyncResult() re-gates the rebuild on `added > 0` — an unchanged account installs nothing, so this is false on every run after the first and Home is never told to re-derive. That is the original bug.');
+        }
+    }
+    const importSub = body(main, 'FinishImport');
+    if (importSub) {
+        if (!/callFunc\(\s*"EnsureCurrentRows"\s*\)/.test(importSub)) {
+            err('MainScene.brs FinishImport() no longer calls EnsureCurrentRows() — an import that re-registers add-ons Home already has still leaves Home showing its pre-import catalog set');
+        }
+        if (/if\s+m\.import\.added\s*>/.test(importSub)) {
+            err('MainScene.brs FinishImport() re-gates the rebuild on `m.import.added > 0` — same defect as the sync path: re-registering what is already installed adds nothing and leaves Home permanently stale');
+        }
+    }
+
+    // 5. Reachable through callFunc at all.
+    if (!/<function\s+name="EnsureCurrentRows"/.test(homeXml)) {
+        err('HomeScreen.xml does not declare EnsureCurrentRows in its <interface> — callFunc against an undeclared name is a silent no-op, so the call sites would do nothing at all');
+    }
+    const init = body(home, 'init');
+    if (!init || !/m\.catalogSignature\s*=\s*""/.test(init)) {
+        err('HomeScreen.brs init() does not seed m.catalogSignature — an uninitialised field reads invalid, and invalid would never equal a real signature, so the very first EnsureCurrentRows() would rebuild unconditionally');
+    }
+    return ok;
+}
+
 function checkHomeScreenContract() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'HomeScreen.xml'), 'utf8');
@@ -1442,7 +1798,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkHomeCatalogStalenessContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
         process.exit(1);
     }
 

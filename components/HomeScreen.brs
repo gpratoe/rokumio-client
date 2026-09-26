@@ -41,6 +41,7 @@ sub init()
     m.gridRows = []
     m.gridBuilt = false
     m.cwSignature = ""
+    m.catalogSignature = ""
     m.railBuilt = false
 end sub
 
@@ -49,6 +50,13 @@ end sub
 ' republishes the row set after every completed catalog, and onCatalogState
 ' slots each new row into the grid immediately. Only the plain addon descriptors
 ' cross the thread boundary. A no-op once started or finished.
+'
+' The walk records which add-on set it derived from (see CatalogSignature), which
+' is the only way anything downstream can later tell that Home's rows have been
+' overtaken. It records the set BEFORE branching on the empty case on purpose: a
+' walk that latched on an empty registry is exactly the state that must still be
+' recognised as stale once add-ons arrive, and a signature left at "" would make
+' that indistinguishable from a correct empty grid.
 sub StartCatalogLoad()
     if m.catalogRowsBuilt or m.catalogTask <> invalid then return
     if m.stores = invalid then
@@ -59,12 +67,53 @@ sub StartCatalogLoad()
     for each addon in m.stores.addons.callFunc("AddonsGetAll")
         addons.Push({ address: addon.address, catalogs: addon.catalogs, name: addon.name })
     end for
+    m.catalogSignature = CatalogSignature()
     if addons.Count() = 0 then
         m.catalogRowsBuilt = true
         return
     end if
     task = AsyncTask_Launch(m.top, "HomeCatalogsTask", "onCatalogState", { addons: addons }, invalid)
     m.catalogTask = task
+end sub
+
+' The add-on set Home's catalog rows were derived from, as a comparable string.
+' Mirrors ContinueWatchingSignature deliberately: derive from live store state,
+' sort so ordering cannot make two equal sets look different, join. No network
+' and no catalog walk — this is a set comparison, not a re-derivation, so it is
+' cheap enough to call on every entry and after every sync.
+function CatalogSignature() as string
+    if m.stores = invalid then return ""
+    addons = m.stores.addons.callFunc("AddonsGetAll")
+    if addons = invalid then return ""
+    parts = []
+    for each addon in addons
+        if addon.address <> invalid then parts.Push(addon.address)
+    end for
+    parts.Sort("i")
+    return parts.Join(";")
+end function
+
+' Re-derive the grid if the add-on set has moved under it. Cheap when fresh, and
+' it is the ONLY thing that can notice Home is stale.
+'
+' Why this exists. The add-on sync used to gate its rebuild on "at least one
+' add-on was newly installed". That predicate is false on every run after the
+' first: the account's add-ons are already in the registry, so none of them is
+' "added", so Home was never told to re-derive. Home kept the catalog set it
+' walked at launch — in a stremio session that is often just the built-in seeds,
+' because a session swap replaces what AddonsGetAll returns wholesale — while the
+' Add-ons screen, which reads the registry live, listed the account's add-ons
+' correctly. The two views disagreed permanently, Settings-and-back changed
+' nothing, and no fault ever appeared, because nothing had failed. The sync
+' succeeded and simply told nobody.
+'
+' Comparing the add-on SET rather than a count also covers the two cases no
+' count can see: a session swap (the set changes without anything being
+' installed) and a walk that latched on an empty registry.
+sub EnsureCurrentRows()
+    if m.stores = invalid then return
+    if m.catalogSignature = CatalogSignature() then return
+    RebuildRows()
 end sub
 
 ' Rows arrive as full result snapshots ({ rows, done }); apply only what is not
@@ -354,6 +403,11 @@ function OnEnter(params as object) as void
         RefreshContinueWatching()
     end if
     m.cwSignature = sig
+    ' After the Continue Watching reconciliation, and deliberately last: it is the
+    ' catalog set that a sync can invalidate while the grid is already "built", and
+    ' StartCatalogLoad above is a no-op once the walk has latched. Running it here
+    ' as well means leaving for another screen and coming back repairs a stale
+    ' grid, instead of the staleness being permanent until a relaunch.
     m.catalog.SetFocus(true)
 end function
 
