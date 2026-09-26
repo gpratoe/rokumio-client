@@ -28,8 +28,8 @@ sub init()
 end sub
 
 function OnEnter(params as object) as void
-    if m.stores <> invalid and m.stores.addons <> invalid
-        addon = m.stores.addons.Get("com.linvo.cinemeta")
+    if m.stores <> invalid
+        addon = m.stores.addons.callFunc("AddonsGet", "com.linvo.cinemeta")
         if addon <> invalid then m.cinemetaAddress = addon.address
     end if
 
@@ -178,7 +178,7 @@ sub RenderRows()
                 poster = meta.poster
                 if poster <> invalid and poster <> "" then entry.hdPosterUrl = poster
                 glyph = ""
-                if m.stores <> invalid and m.stores.library <> invalid then glyph = m.stores.library.WatchedGlyph(meta.id, meta.type)
+                if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
                 entry.watchedGlyph = glyph
             end for
         else

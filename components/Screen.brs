@@ -3,24 +3,32 @@
 ' The screen contract (documented in this header, previously source/core/Screen.bs)
 ' is now a real component, declared once and implemented here with defaults:
 '
-'   function SetStores()                - binds the store facade to the
-'                                           screen. The facade is READ here off
-'                                           the global AA, never handed in: a bsc
-'                                           class instance is an roAssociativeArray
-'                                           whose members are function references,
-'                                           and Roku copies (dropping every
-'                                           function member) any associative array
-'                                           that crosses a component boundary.
-'                                           MainScene used to pass m.stores in as
-'                                           a callFunc argument and every screen
-'                                           received a data-only copy, so
-'                                           m.stores.addons.GetAll() died on
-'                                           device with &hf4 "Member function not
-'                                           found in BrightScript Component or
-'                                           interface". The global AA is not a
-'                                           component, so the read is by
-'                                           reference and every screen gets the
-'                                           live instances the Scene owns.
+'   function SetStores(storeHost as object, - binds the data layer to the screen.
+'                        scene as object)     Only a NODE crosses a component
+'                                           boundary by reference: as a callFunc
+'                                           argument, a callFunc return or a
+'                                           declared interface field, Roku copies
+'                                           an associative array and drops every
+'                                           function member, and a bsc class
+'                                           instance is exactly that. So a store
+'                                           instance can never be handed over, and
+'                                           each attempt at it died on device with
+'                                           &hf4 "Member function not found in
+'                                           BrightScript Component or interface".
+'                                           What arrives instead is the StoreHost
+'                                           NODE (one reference, the mechanism the
+'                                           pairing task already uses through its
+'                                           declared taskNode field), and what
+'                                           comes back over callFunc is plain data
+'                                           only: strings, numbers, booleans, arrays
+'                                           and assoc arrays of records. m.stores
+'                                           holds that one node under a per-store
+'                                           alias, so a call site reads
+'                                           m.stores.addons.callFunc("AddonsGetAll")
+'                                           and gets data, never a live object.
+'                                           A bind that comes up short reports the
+'                                           failing hop to the Scene, which paints
+'                                           it (see SetStores).
 '   function OnEnter(params as object)    - called when the screen is pushed or
 '                                           restored; params is invalid when it is
 '                                           only being uncovered by a pop.
@@ -42,11 +50,69 @@
 ' never overrides. This file touches nothing but m.stores and platform globals,
 ' so it resolves from any screen's scope with no cross-file dependencies.
 
-function SetStores() as void
-    ' GetGlobalAA() is a runtime function, not a component: CreateObject
-    ' ("roGlobal") is a BrightSign-ism that returns invalid on Roku.
-    storesAA = GetGlobalAA()
-    m.stores = storesAA.rokumioStores
+' The store hand-off is the one thing every screen depends on, and every way it
+' can fail looks the same from the outside: an empty grid and a "0 add-ons"
+' subtitle, with no crash and nothing in the log. That is exactly how two
+' shipping bugs hid here, so a bind that comes up short reports the failing hop
+' to the Scene, which owns the one painted strip that shows it. An empty reason
+' clears this screen's fault.
+'
+' BrightScript print cannot be that channel: Roku routes print to the Dev
+' Console, not to the device console this app is debugged from, so a print-based
+' diagnostic is invisible exactly where these bugs were found. Hence the strip.
+'
+' The reason strings name the hop, because the three causes need different
+' fixes: no host node reached this screen, the host did not answer, or the store
+' answered with nothing.
+function SetStores(storeHost as object, scene as object) as void
+    ' The data layer's owner arrives as a NODE, which is the one thing Roku passes
+    ' between components by reference. What comes back over callFunc is plain
+    ' data only. m.stores therefore holds one node under a per-store alias: the
+    ' alias names the store being asked, the node is the host that answers, and
+    ' no store instance is ever in flight to be copied into a data-only shape.
+    m.stores = invalid
+    if storeHost <> invalid then
+        m.stores = {
+            addons: storeHost
+            auth: storeHost
+            episodes: storeHost
+            library: storeHost
+            settings: storeHost
+            time: storeHost
+            watch: storeHost
+        }
+    end if
+
+    ' Every way this hand-off can fail looks identical from the outside — an
+    ' empty grid, a "0 add-ons" subtitle, no crash, nothing in the device log —
+    ' and that silence is what hid three shipping bugs. So the bind probes the
+    ' whole path end to end (node arrived, host answered, forwarder exists, store
+    ' returned data) and names the hop that came up short. A missing or
+    ' misspelled forwarder is the failure this design introduces, and it is the
+    ' one worth catching here rather than as an empty screen.
+    fault = ""
+    if m.stores = invalid then
+        fault = "store fault: no store host reached this screen"
+    else
+        installed = m.stores.addons.callFunc("AddonsGetAll")
+        if installed = invalid then
+            fault = "store fault: the store host did not answer AddonsGetAll"
+        else if installed.Count() = 0 then
+            ' A guest session's GetAll() always returns the two built-in seeds, so
+            ' an empty list means the store is live but empty — a data fault, not
+            ' a hand-off fault, and worth saying out loud rather than leaving a
+            ' bare "0 add-ons" the user cannot interpret.
+            fault = "store fault: the store is live but reports no add-ons"
+        end if
+    end if
+
+    ' Two nodes, both handed over by the Scene and both passed by reference: the
+    ' host to read data through, the Scene to report a failed bind to. The Scene
+    ' owns the fault strip because it owns the cross-cutting UI and the palette;
+    ' a screen painting its own would need a color literal it deliberately does
+    ' not depend on. Each is checked separately — a screen that got the host but
+    ' not the Scene can still read data, and should say so rather than go quiet.
+    if scene <> invalid then scene.callFunc("ReportStoreFault", fault, fault <> "")
 end function
 
 function OnEnter(params as object) as void

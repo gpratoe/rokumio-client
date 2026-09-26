@@ -51,12 +51,12 @@ end sub
 ' cross the thread boundary. A no-op once started or finished.
 sub StartCatalogLoad()
     if m.catalogRowsBuilt or m.catalogTask <> invalid then return
-    if m.stores = invalid or m.stores.addons = invalid then
+    if m.stores = invalid then
         m.catalogRowsBuilt = true
         return
     end if
     addons = []
-    for each addon in m.stores.addons.GetAll()
+    for each addon in m.stores.addons.callFunc("AddonsGetAll")
         addons.Push({ address: addon.address, catalogs: addon.catalogs, name: addon.name })
     end for
     if addons.Count() = 0 then
@@ -206,7 +206,7 @@ function MakeRowNode(row as object, counts = invalid as object) as object
     node.title = label
     for each meta in row.metas
         glyph = meta.watchedGlyph
-        if glyph = invalid and m.stores <> invalid and m.stores.library <> invalid then glyph = m.stores.library.WatchedGlyph(meta.id, meta.type)
+        if glyph = invalid and m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
         PaintTileFields(node.CreateChild("TileContent"), meta, glyph)
     end for
     return node
@@ -240,8 +240,8 @@ end sub
 ' the progress fraction (position/duration) and the coarse watched glyph, so a
 ' finished watch paints a bar/badge on the tile without reopening Details.
 function LibraryRow() as dynamic
-    if m.stores = invalid or m.stores.library = invalid then return invalid
-    entries = m.stores.library.ContinueWatching()
+    if m.stores = invalid then return invalid
+    entries = m.stores.library.callFunc("LibraryContinueWatching")
     if entries = invalid then return invalid
     if entries.Count() = 0 then return invalid
     metas = []
@@ -255,16 +255,16 @@ function LibraryRow() as dynamic
             season: entry.season
             episode: entry.episode
             position: entry.position
-            progress: m.stores.library.ProgressFraction(entry.metaId)
-            watchedGlyph: m.stores.library.WatchedGlyph(entry.metaId, entry.metaType)
+            progress: m.stores.library.callFunc("LibraryProgressFraction", entry.metaId)
+            watchedGlyph: m.stores.library.callFunc("LibraryWatchedGlyph", entry.metaId, entry.metaType)
         })
     end for
     return { source: "library", title: "Continue Watching", metaType: "", metas: metas }
 end function
 
 function ContinueWatchingSignature() as string
-    if m.stores = invalid or m.stores.library = invalid then return ""
-    entries = m.stores.library.ContinueWatching()
+    if m.stores = invalid then return ""
+    entries = m.stores.library.callFunc("LibraryContinueWatching")
     if entries = invalid or entries.Count() = 0 then return ""
     parts = []
     for each entry in entries
@@ -272,7 +272,7 @@ function ContinueWatchingSignature() as string
         if position = invalid then position = 0
         duration = entry.duration
         if duration = invalid then duration = 0
-        glyph = m.stores.library.WatchedGlyph(entry.metaId, entry.metaType)
+        glyph = m.stores.library.callFunc("LibraryWatchedGlyph", entry.metaId, entry.metaType)
         parts.Push(entry.metaId + "|" + entry.videoId + "|" + entry.season.toStr() + "|" + entry.episode.toStr() + "|" + position.toStr() + "|" + duration.toStr() + "|" + glyph)
     end for
     parts.Sort("i")
@@ -330,8 +330,8 @@ end sub
 ' Where the meta for a library-sourced tile comes from. The library records no
 ' addon origin, so the Cinemeta built-in (the meta authority) is the default.
 function MetaAddress() as string
-    if m.stores = invalid or m.stores.addons = invalid then return ""
-    addon = m.stores.addons.Get("com.linvo.cinemeta")
+    if m.stores = invalid then return ""
+    addon = m.stores.addons.callFunc("AddonsGet", "com.linvo.cinemeta")
     if addon = invalid then return ""
     return addon.address
 end function

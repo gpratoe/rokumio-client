@@ -4,10 +4,19 @@
         <field id="exitApp" type="boolean" alwaysNotify="true" value="false" />
         <function name="Start" />
         <function name="HandleDeepLink" />
+        <!-- A screen whose store bind came up short reports the failing hop
+             here (Screen.brs's SetStores) and the Scene paints it, so a broken
+             store layer can never be mistaken for an empty catalog. -->
+        <function name="ReportStoreFault" />
     </interface>
 
-    <!-- Core + stores are included once here; Roku loads them for the whole
-         subtree, so every screen component sees them. -->
+    <!-- Core + stores are declared here and inherited by the whole subtree, so
+         every screen and task component can construct the store classes it
+         needs. The SESSION-AWARE instances do not live here: they are built once
+         by StoreHost below and reached as a node, because a class instance
+         cannot survive a component boundary. What the subtree builds for itself
+         is stateless per-request wrappers (CatalogStore, PlaybackStore,
+         SubtitlesStore), which is why sharing them is not needed. -->
     <script type="text/brightscript" uri="pkg:/source/core/ScreenStack.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
     <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />

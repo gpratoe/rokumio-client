@@ -11,6 +11,10 @@
 '
 ' The native dialogs keep Roku's RSGPalette shape; AppPalette() builds that
 ' node from the same palette so the dialogs share the app's look.
+'
+' danger is the one color that is not part of the app's look: it marks a broken
+' invariant (see MainScene's ReportStoreFault) rather than styling content, and
+' it lives here anyway so nothing in the codebase has to hardcode a hex literal.
 function Theme() as object
     if m._theme = invalid
         m._theme = {
@@ -22,6 +26,7 @@ function Theme() as object
             textPrimary: "0xE9F2ECFF"
             textSecondary: "0x8FA399FF"
             textWhite: "0xFFFFFFFF"
+            danger: "0xC0392BFF"
             screenBg: "0x0A0F0CFF"
             tileFace: "0x0B110DFF"
             tileFaceFocus: "0x18231CFF"

@@ -37,8 +37,8 @@ sub init()
 end sub
 
 function OnEnter(params as object) as void
-    if m.stores <> invalid and m.stores.addons <> invalid
-        addon = m.stores.addons.Get("com.linvo.cinemeta")
+    if m.stores <> invalid
+        addon = m.stores.addons.callFunc("AddonsGet", "com.linvo.cinemeta")
         if addon <> invalid then m.cinemetaAddress = addon.address
     end if
 
@@ -180,10 +180,10 @@ end sub
 ' line and entry parks focus on the chips (the grid has nothing to focus; the
 ' hint explains why and how to fix it).
 sub BuildRows()
-    if m.stores = invalid or m.stores.library = invalid then
+    if m.stores = invalid then
         m.items = []
     else
-        m.items = m.stores.library.LibraryView(m.typeFilter, m.sort)
+        m.items = m.stores.library.callFunc("LibraryLibraryView", m.typeFilter, m.sort)
     end if
 
     content = CreateObject("roSGNode", "ContentNode")
@@ -221,11 +221,11 @@ end sub
 ' bar from ProgressFraction, and the coarse glyph by WatchedGlyph (eye for a
 ' finished movie/series, clock for an in-progress one).
 sub TileWatchFields(tile as object, metaId as dynamic, metaType as dynamic)
-    if m.stores = invalid or m.stores.library = invalid then return
-    fraction = m.stores.library.ProgressFraction(metaId)
+    if m.stores = invalid then return
+    fraction = m.stores.library.callFunc("LibraryProgressFraction", metaId)
     tile.progress = 0
     if fraction <> invalid then tile.progress = fraction
-    glyph = m.stores.library.WatchedGlyph(metaId, metaType)
+    glyph = m.stores.library.callFunc("LibraryWatchedGlyph", metaId, metaType)
     tile.watchedGlyph = glyph
 end sub
 
@@ -264,8 +264,8 @@ end sub
 ' origin, so the Cinemeta built-in (the meta authority) is the default,
 ' mirroring Home's MetaAddress.
 function CinemetaAddress() as string
-    if m.stores = invalid or m.stores.addons = invalid then return ""
-    addon = m.stores.addons.Get("com.linvo.cinemeta")
+    if m.stores = invalid then return ""
+    addon = m.stores.addons.callFunc("AddonsGet", "com.linvo.cinemeta")
     if addon = invalid then return ""
     return addon.address
 end function

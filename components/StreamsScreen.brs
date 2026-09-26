@@ -145,12 +145,12 @@ end sub
 ' cross into the tasks. Failure handling mirrors Home: on total failure the grid
 ' stays empty, and a hung add-on only delays its own provider, never the others.
 sub LoadStreams(params as object)
-    if m.stores = invalid or m.stores.addons = invalid then return
+    if m.stores = invalid then return
     if m.loadTasks <> invalid and m.loadTasks.Count() > 0 then return
 
     providers = []
-    for each addon in m.stores.addons.GetAll()
-        if m.stores.addons.HasResource(addon.resources, "stream")
+    for each addon in m.stores.addons.callFunc("AddonsGetAll")
+        if m.stores.addons.callFunc("AddonsHasResource", addon.resources, "stream")
             if addon.address <> invalid and addon.address <> ""
                 name = addon.name
                 if name = invalid or name = "" then name = addon.address
@@ -569,7 +569,7 @@ sub onStreamSelected()
     if m.streams = invalid or index < 0 or index >= m.streams.Count() then return
 
     serverAddress = ""
-    if m.stores <> invalid and m.stores.settings <> invalid then serverAddress = m.stores.settings.GetServerAddress()
+    if m.stores <> invalid then serverAddress = m.stores.settings.callFunc("SettingsGetServerAddress")
 
     m.top.pushRequest = {
         screen: "playerScreen"

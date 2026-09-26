@@ -157,12 +157,12 @@ end sub
 ' internet-bound OpenSubtitles built-in; OpenSubtitles is only used when
 ' nothing else advertises the resource.
 sub StartSubtitles(params as object)
-    if m.stores = invalid or m.stores.addons = invalid then return
+    if m.stores = invalid then return
     if m.subtitleTask <> invalid then return
     if params.metaType = invalid or params.videoId = invalid then return
     if params.metaType = "" or params.videoId = "" then return
 
-    address = FindSubtitlesAddress(m.stores.addons.GetAll())
+    address = FindSubtitlesAddress(m.stores.addons.callFunc("AddonsGetAll"))
     if address = "" then return
 
     task = AsyncTask_Launch(m.top, "SubtitleLoaderTask", "onSubtitleResult", {
@@ -179,7 +179,7 @@ function FindSubtitlesAddress(addons as object) as string
     builtin = ""
     for each addon in addons
         if addon <> invalid and addon.address <> invalid and addon.address <> ""
-            if addon.resources <> invalid and m.stores.addons.HasResource(addon.resources, "subtitles")
+            if addon.resources <> invalid and m.stores.addons.callFunc("AddonsHasResource", addon.resources, "subtitles")
                 if addon.builtin = true
                     if builtin = "" then builtin = addon.address
                 else
@@ -593,7 +593,7 @@ end sub
 sub SavePosition()
     if m.saved then return
     if m.playParams = invalid or m.playParams.videoId = invalid then return
-    if m.stores = invalid or m.stores.library = invalid then return
+    if m.stores = invalid then return
     ' Leaving while the stream is still buffering means nothing was actually
     ' watched — the video node cannot even report a position yet. Skip the write
     ' so an existing resume point is never clobbered with a bogus one.
@@ -614,10 +614,10 @@ sub SavePosition()
     poster = ""
     if params.poster <> invalid then poster = params.poster
 
-    m.stores.library.SetPosition(params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration))
+    m.stores.library.callFunc("LibrarySetPosition", params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration))
     mid = ""
     if params.metaId <> invalid then mid = params.metaId
-    m.stores.library.MarkWatchedIfFinished(mid, params.videoId, Int(position), Int(duration))
+    m.stores.library.callFunc("LibraryMarkWatchedIfFinished", mid, params.videoId, Int(position), Int(duration))
     m.saved = true
     PublishWatchState()
 end sub
@@ -630,7 +630,7 @@ end sub
 ' session, where MainScene drops it.
 sub PublishWatchState()
     if m.playParams = invalid or m.playParams.videoId = invalid then return
-    if m.stores = invalid or m.stores.library = invalid then return
+    if m.stores = invalid then return
     if m.video = invalid then return
     if not m.hasPlayed then return
 
@@ -659,6 +659,6 @@ sub PublishWatchState()
     ' Record before publishing: MainScene's observer can fire synchronously on
     ' the field write, so the shared buffer must already hold this packet when
     ' it reads.
-    m.stores.watch.Record(packet)
+    m.stores.watch.callFunc("WatchRecord", packet)
     m.top.watchStateUpdate = packet
 end sub

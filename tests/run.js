@@ -124,73 +124,273 @@ function checkScreenContract() {
 // with &hf4 "Member function not found in BrightScript Component or interface"
 // (this bit us on device at HomeScreen.brs `m.stores.addons.GetAll()`, and the
 // data-only copy still satisfied every `m.stores = invalid` guard, so nothing
-// upstream noticed). The facade is published on the global AA — fetched with
-// GetGlobalAA(), not a component, so the read is by reference — and read inside
-// the receiving screen. Note roGlobal is a BrightSign component that does not
-// exist on Roku: CreateObject("roGlobal") returns invalid, which the compiler
-// also rejects as BS1129, so it can never be the carrier. The interpreter
-// models one flat scope and cannot catch any of this, so pin it statically:
-// MainScene must publish before binding, SetStores must take no argument, and
-// no screen may be handed a store.
+// upstream noticed). Only nodes cross by reference, so the Scene keeps the
+// facade in an UNDECLARED field and hands each screen the SCENE NODE; the screen
+// reads storeFacade off that node. Passing the facade itself is the same
+// mistake, and so is declaring the field: a declared field marshals exactly like
+// a callFunc argument.
+// Two dead ends are pinned here so nobody walks them again. GetGlobalAA() is per
+// component on this device, not app-wide, so every screen read back its own
+// empty AA ("0 add-ons") while the Scene's own store kept working — the
+// deep-link import installs through it. And m.top.getScene() is invalid at
+// bind time: init() runs inside screen.CreateScene(), and roSGNode.GetScene()
+// returns invalid until screen.Show() has put the tree in a scene, so the
+// look-it-up-yourself variant bound invalid on every screen and hid behind the
+// guards again. CreateObject("roGlobal") is a BrightSign component that does
+// not exist on Roku: CreateObject returns invalid, which the compiler also
+// rejects as BS1129.
+// The interpreter models one flat scope and cannot catch any of this, so pin it
+// statically — and pin the reporting, too: every way the hand-off fails looks
+// the same from outside (empty grid, "0 add-ons", no crash, nothing in the log),
+// so SetStores has to name the failure on screen. `print` cannot do that job:
+// Roku routes BrightScript print to the Dev Console, not to the device console
+// the app is debugged from, which is how a broken build looked like a rendering
+// bug for two rounds.
 function checkStoreHandoffContract() {
     const fs = require('fs');
     let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
     // Scan code, not prose: the files document this exact contract in their
     // headers, and a raw-text scan matches the documentation describing the bug.
     const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
-    const mainScene = code(fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8'));
-    const publish = mainScene.indexOf('.rokumioStores = m.stores');
-    if (publish === -1) {
-        console.error('MainScene.brs never publishes the facade — screens read it off the global AA, so nothing would bind');
-        ok = false;
-    } else {
-        const firstBind = mainScene.search(/callFunc\("SetStores"/);
-        if (firstBind !== -1 && firstBind < publish) {
-            console.error('MainScene.brs binds a screen before publishing the facade on the global AA — that screen would read invalid');
-            ok = false;
+    const readBr = (n) => code(fs.readFileSync(path.join(projectRoot, 'components', n), 'utf8'));
+    const dir = path.join(projectRoot, 'components');
+    const mainScene = readBr('MainScene.brs');
+    const screenBrs = readBr('Screen.brs');
+    const hostBrs = readBr('StoreHost.brs');
+    const hostXml = fs.readFileSync(path.join(dir, 'StoreHost.xml'), 'utf8');
+    const sceneXml = fs.readFileSync(path.join(dir, 'MainScene.xml'), 'utf8');
+    const sceneScreenXml = fs.readFileSync(path.join(dir, 'Screen.xml'), 'utf8');
+    const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+    const bodyOf = (src, header) => {
+        const start = src.indexOf(header) + header.length;
+        return src.slice(start, src.indexOf('\nend ', start));
+    };
+
+    // --- the host exists, and exists before anything binds to it -------------
+    if (!/m\.storeHost\s*=\s*CreateObject\(\s*"roSGNode"\s*,\s*"StoreHost"\s*\)/.test(mainScene)) {
+        err('MainScene.brs never creates the StoreHost node — screens would have nothing to read data through');
+    }
+    if (!/m\.top\.AppendChild\(m\.storeHost\)/.test(mainScene)) {
+        err('MainScene.brs must attach the StoreHost to the Scene (m.top.AppendChild(m.storeHost)) — a node component nothing holds a reference to is not guaranteed to stay alive');
+    }
+    const create = mainScene.search(/m\.storeHost\s*=\s*CreateObject/);
+    const firstBind = mainScene.search(/callFunc\(\s*"SetStores"/);
+    if (create !== -1 && firstBind !== -1 && firstBind < create) {
+        err('MainScene.brs binds a screen before creating the StoreHost — that screen would read invalid');
+    }
+
+    // --- every bind hands over two nodes, and every screen gets one ---------
+    let binds = 0;
+    for (const m of mainScene.matchAll(/callFunc\(\s*"SetStores"\s*,\s*([^)]*)\)/g)) {
+        binds++;
+        const args = m[1].split(',').map(a => a.trim()).filter(a => a.length > 0);
+        if (args.length !== 2 || args[0] !== 'm.storeHost' || args[1] !== 'm.top') {
+            err(`MainScene.brs passes "${m[1].trim()}" through callFunc("SetStores", ...) — only a node crosses a component boundary by reference, so the bind must pass m.storeHost (the data layer) and m.top (the Scene, which owns the fault strip)`);
         }
     }
-    for (const match of mainScene.matchAll(/callFunc\("SetStores"\s*,\s*([^)]*)\)/g)) {
-        if (match[1].trim() !== 'invalid') {
-            console.error(`MainScene.brs passes "${match[1].trim()}" through callFunc("SetStores", ...) — a class instance cannot survive that hop; pass invalid and let SetStores read the global AA`);
-            ok = false;
+    // Screen.xml is the base every screen extends, not an instance of one.
+    const screens = fs.readdirSync(dir).filter(f => /Screen\.xml$/.test(f) && f !== 'Screen.xml');
+    if (binds < screens.length) {
+        err(`MainScene.brs makes ${binds} SetStores binds for ${screens.length} screen components — an unbound screen comes up with an empty grid and no way to tell why`);
+    }
+
+    // --- the host is a delegation layer, not a second MainScene -------------
+    const STORES = ['addons', 'auth', 'episodes', 'library', 'settings', 'time', 'watch'];
+    const defined = new Set([...hostBrs.matchAll(/^(?:function|sub)\s+(\w+)\s*\(/gm)].map(m => m[1]));
+    const declared = new Set([...hostXml.matchAll(/<function\s+name="([^"]+)"/g)].map(m => m[1]));
+    const own = new Set(['EffectiveSessionType', 'SwitchSession', 'LibrarySessionType']);
+    for (const m of hostBrs.matchAll(/^function\s+(\w+)\s*\([^)]*\)(?: as \w+)?\s*$/gm)) {
+        const name = m[1];
+        if (own.has(name)) continue;
+        const body = bodyOf(hostBrs, m[0]).split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        if (body.length !== 1) {
+            err(`StoreHost.brs ${name} has ${body.length} statements — the host forwards, it does not decide. Logic belongs in the store class, where the store tests can reach it`);
+            continue;
+        }
+        if (!/^(return )?m\.stores\.[a-z]+\.[A-Za-z_]+\(.*\)$/.test(body[0])) {
+            err(`StoreHost.brs ${name} must be exactly "return m.stores.<store>.<Method>(...)" (no return for a void store method) — anything else is logic in the hand-off layer (got: ${body[0]})`);
+            continue;
+        }
+        // The name says which store it answers for; the body has to agree, or a
+        // copy-paste between two same-shaped forwarders hands a screen the
+        // wrong store's data and nothing complains.
+        const store = STORES.find(s => name.startsWith(cap(s)));
+        if (!store) {
+            err(`StoreHost.brs ${name} has no store prefix — entry points are named <Store><Method> so the call site says which store it is asking`);
+        } else if (!new RegExp('^(return )?m\\.stores\\.' + store + '\\.[A-Za-z_]+\\(').test(body[0])) {
+            err(`StoreHost.brs ${name} forwards to a different store than its name claims — screens reach it as m.stores.${store} and would be handed another store's data`);
         }
     }
-    // A screen binding the facade from an undeclared m field is exactly what the
-    // global-AA read replaces; a redeclared interface field would marshal the
-    // value and strip the methods again, so m.stores must stay undeclared.
-    const screenXml = fs.readFileSync(path.join(projectRoot, 'components', 'Screen.xml'), 'utf8');
-    if (/<field\s+id="stores"/i.test(screenXml)) {
-        console.error('Screen.xml must not declare <field id="stores"> — assigning the facade to a node field copies it and drops its methods; keep m.stores undeclared');
-        ok = false;
+    for (const n of declared) {
+        if (!defined.has(n)) {
+            err(`StoreHost.xml declares <function name="${n}" /> but StoreHost.brs does not define it — callFunc against an undefined function is a silent no-op that returns invalid`);
+        }
     }
-    const screenBrs = code(fs.readFileSync(path.join(projectRoot, 'components', 'Screen.brs'), 'utf8'));
-    // Match the definition only: the header comment also spells
-    // `function SetStores()`, and a first-match regex would read that instead.
+    for (const n of defined) {
+        if (!declared.has(n) && n !== 'init') {
+            err(`StoreHost.brs defines ${n} but StoreHost.xml does not declare it — callFunc only runs for interface functions, so every caller would get invalid back with nothing on screen to say so`);
+        }
+    }
+    // Every script in a component shares one function namespace, and BrightScript
+    // identifiers are case-insensitive, so an entry point whose name matches a
+    // store's parameter makes the store's own signature ambiguous. bsc calls it
+    // BS1104 and reports it in the store file, four files from the cause — so
+    // the host's 48 new names have to be checked against the sources it pulls in.
+    const sourceDir = path.join(projectRoot, 'source');
+    const paramNames = new Set();
+    const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                walk(full);
+            } else if (entry.name.endsWith('.bs')) {
+                const src = fs.readFileSync(full, 'utf8');
+                // Indented, because every store method sits inside a class block.
+                for (const m of src.matchAll(/^[ \t]*(?:function|sub)\s+\w+\s*\(([^)]*)\)/gm)) {
+                    for (const arg of m[1].split(',')) {
+                        const name = arg.trim().split(/\s+as\s+/)[0].trim().toLowerCase();
+                        if (name) paramNames.add(name);
+                    }
+                }
+            }
+        }
+    };
+    walk(sourceDir);
+    for (const n of defined) {
+        if (paramNames.has(n.toLowerCase())) {
+            err(`StoreHost.brs defines ${n} and a store under source/ has a parameter by that name — one shared, case-insensitive function namespace, so the store's own signature becomes ambiguous (bsc: BS1104, reported in the store's file)`);
+        }
+    }
+
+    // --- every store call resolves, and no store instance is ever in flight --
+    for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.brs'))) {
+        if (name === 'StoreHost.brs') continue;
+        const src = readBr(name);
+        for (const m of src.matchAll(/\bm\.stores\.([a-z]+)\.callFunc\(\s*"([A-Za-z_]+)"/g)) {
+            const [, store, fn] = m;
+            if (!defined.has(fn) || !declared.has(fn)) {
+                err(`${name} calls callFunc("${fn}") but the StoreHost has no such entry point — the screen would read invalid and render nothing`);
+            }
+            if (!fn.startsWith(cap(store))) {
+                err(`${name} reaches m.stores.${store} for "${fn}" — the name's store prefix must match the alias, or a screen can quietly be handed another store's data`);
+            }
+        }
+        for (const m of src.matchAll(/\bm\.storeHost\.callFunc\(\s*"([A-Za-z_]+)"/g)) {
+            if (!defined.has(m[1]) || !declared.has(m[1])) {
+                err(`MainScene.brs calls callFunc("${m[1]}") but the StoreHost has no such entry point — the Scene would read invalid`);
+            }
+        }
+        for (const m of src.matchAll(/\bm\.stores\.[a-z]+\.(?!callFunc\b)([A-Za-z_]+)\s*\(/g)) {
+            err(`${name} calls m.stores.${m[1]} directly — a store class instance cannot be handed to another component (Roku copies the associative array and drops its function members); ask the host instead: m.stores.<store>.callFunc("<Store><Method>", ...)`);
+        }
+        if (/CreateObject\(\s*"roGlobal"/i.test(src) || /GetGlobalAA\(\)/.test(src)) {
+            err(`${name} reaches for a global singleton (roGlobal / GetGlobalAA) — neither is shared across components on this device; use the StoreHost node`);
+        }
+        if (/^\s*print\s/m.test(src)) {
+            err(`${name} uses print as a diagnostic — Roku routes BrightScript print to the Dev Console, not to the device console, so it is invisible where these bugs were debugged; make the failure visible in the UI instead`);
+        }
+    }
+    // The abandoned carrier, in any file. The host included: a StoreHost that
+    // published a facade would be the same split-brain one layer down.
+    for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.brs'))) {
+        if (/\bstoreFacade\b/.test(readBr(name))) {
+            err(`${name} still refers to storeFacade — the facade-on-the-Scene carrier is gone; the StoreHost node is the hand-off`);
+        }
+    }
+
+    // --- one instance per store, in one place --------------------------------
+    // The stores StoreHost owns. DeepLinkStore is deliberately absent: the Scene
+    // builds one per deep link and throws it away (DeepLinkStore().Parse(args)),
+    // so there is no state to diverge.
+    for (const cls of ['AuthStore', 'SettingsStore', 'AddonsStore', 'CatalogStore', 'EpisodesStore', 'LibraryStore', 'PlaybackStore', 'SubtitlesStore', 'WatchStateBuffer', 'TimeUtil']) {
+        if (new RegExp('=\\s*(m\\.stores\\.[a-z]+\\s*=\\s*)?' + cls + '\\s*\\(').test(mainScene)) {
+            err(`MainScene.brs constructs ${cls} — the data layer belongs to StoreHost. A second instance is a second copy of that store's in-memory state, which is how two screens end up disagreeing about the same session`);
+        }
+    }
+    for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.brs'))) {
+        if (name === 'StoreHost.brs' || name === 'MainScene.brs') continue;
+        for (const cls of ['LibraryStore', 'WatchStateBuffer']) {
+            if (new RegExp('=\\s*' + cls + '\\s*\\(').test(readBr(name))) {
+                err(`${name} constructs ${cls} — that store holds in-memory state, so a private instance is a second copy of it; only the stateless per-request wrappers may be built by a task or screen`);
+            }
+        }
+    }
+
+    // --- SetStores takes two nodes and probes the whole path -----------------
     const setStores = screenBrs.match(/^function\s+SetStores\s*\(([^)]*)\)/m);
     if (!setStores) {
-        console.error('Screen.brs no longer defines SetStores — every screen would come up with no stores');
-        ok = false;
-    } else if (setStores[1].trim() !== '') {
-        console.error(`Screen.brs SetStores must take no argument (found "${setStores[1].trim()}") — a passed-in facade arrives without its methods`);
-        ok = false;
+        err('Screen.brs no longer defines SetStores — every screen would come up with no stores');
+        return ok;
     }
-    if (!/GetGlobalAA\(\)/.test(screenBrs)) {
-        console.error('Screen.brs SetStores must read the facade off the global AA (GetGlobalAA()) so the class instances arrive by reference');
-        ok = false;
+    const args = setStores[1].split(',').map(a => a.trim()).filter(a => a.length > 0);
+    if (args.length !== 2) {
+        err(`Screen.brs SetStores must take exactly two nodes — the StoreHost to read through and the Scene to report to (found "${setStores[1].trim()}")`);
     }
-    // No other component may take a store through callFunc or an interface
-    // field either; the stores are reachable from the global AA and nowhere else.
-    for (const name of fs.readdirSync(path.join(projectRoot, 'components')).filter(f => f.endsWith('.brs'))) {
-        const src = code(fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8'));
-        for (const match of src.matchAll(/callFunc\([^,]+,\s*(m\.stores[^)]*)\)/g)) {
-            console.error(`${name} passes the store facade through callFunc (${match[1].trim()}) — that hop drops every method; bind with SetStores and read the global AA instead`);
-            ok = false;
+    const body = bodyOf(screenBrs, setStores[0]);
+    if (!/callFunc\(\s*"AddonsGetAll"/.test(body)) {
+        err('Screen.brs SetStores must probe the host (callFunc("AddonsGetAll")) — a bind that cannot say which hop failed is the silence that hid three shipping bugs');
+    }
+    if (!/callFunc\(\s*"ReportStoreFault"/.test(body)) {
+        err('Screen.brs SetStores must report a failed bind to the Scene (callFunc("ReportStoreFault", reason, active)) — otherwise a broken store layer is indistinguishable from an empty catalog');
+    }
+    if (/getScene\(\)/.test(screenBrs)) {
+        err('Screen.brs calls getScene() — roSGNode.GetScene() returns invalid until screen.Show() has put the tree in a scene, which is after init(); bind from the nodes MainScene passes instead');
+    }
+    // screenActive is the stack's, and the only field a screen may declare: a
+    // declared field copies its value, so a store handed over that way arrives
+    // without its methods. The hand-off is the node, in a callFunc argument.
+    for (const m of sceneScreenXml.matchAll(/<field\s+id="([^"]+)"/g)) {
+        if (m[1] !== 'screenActive') {
+            err(`Screen.xml declares <field id="${m[1]}"> — a declared field copies the value it is given, so anything live handed over that way arrives stripped; the store hand-off is the StoreHost node passed to SetStores`);
         }
-        if (/CreateObject\(\s*"roGlobal"/i.test(src)) {
-            console.error(`${name} uses CreateObject("roGlobal") — roGlobal is a BrightSign component, not a Roku one; CreateObject returns invalid. Use GetGlobalAA()`);
-            ok = false;
+    }
+
+    // --- a reported fault has to be painted ----------------------------------
+    if (!/<function\s+name="ReportStoreFault"\s*\/>/.test(sceneXml)) {
+        err('MainScene.xml must declare <function name="ReportStoreFault" /> — callFunc only runs for interface functions, so every screen\'s fault report would go nowhere');
+    }
+    const report = mainScene.match(/^sub\s+ReportStoreFault\s*\(/m);
+    if (!report) {
+        err('MainScene.brs no longer defines ReportStoreFault — every screen\'s fault report would hit a non-function');
+    } else if (!/^\s*RefreshStoreFaultStrip\(\)\s*$/m.test(mainScene.slice(report.index))) {
+        err('MainScene.brs ReportStoreFault must CALL RefreshStoreFaultStrip — a fault recorded but never shown is the bug, not the fix');
+    }
+    const paint = mainScene.match(/^sub\s+RefreshStoreFaultStrip\s*\(\)/m);
+    if (!paint) {
+        err('MainScene.brs no longer defines RefreshStoreFaultStrip — a reported fault would never reach the screen');
+        return ok;
+    }
+    const paintBody = bodyOf(mainScene, paint[0]);
+    const initHeader = mainScene.match(/^sub\s+init\s*\(\)\s*$/m);
+    const initBody = initHeader ? bodyOf(mainScene, initHeader[0]) : '';
+    for (const [field, node] of [['m.faultBar', 'Rectangle'], ['m.faultText', 'Label']]) {
+        if (!new RegExp(field + '\\s*=\\s*CreateObject\\(\\s*"roSGNode"\\s*,\\s*"' + node + '"').test(initBody)) {
+            err(`MainScene.brs init must create ${field} (${node}) — the strip is built once, up front`);
         }
+        if (!new RegExp('m\\.top\\.AppendChild\\(' + field + '\\)').test(initBody)) {
+            err(`MainScene.brs init must attach ${field} to the Scene — an unattached node renders nothing, which is the exact shape of the bug being fixed`);
+        }
+    }
+    // What the first version actually shipped was one line, and it is worth
+    // having on record because it is the shape that painted nothing:
+    //     strip.FindNode("storeFaultText").text = reasons.Join("     ")
+    // — a strip built lazily, a Label written through a FindNode after the
+    // append, and the line joined from an array. On device the bar painted and
+    // the label stayed blank. Which of the three was at fault was never
+    // isolated, so all three stay pinned out: the strip is created in init,
+    // written through the fields themselves, and the line is concatenated.
+    if (/CreateObject\(/.test(paintBody) || /AppendChild\(/.test(paintBody)) {
+        err('MainScene.brs RefreshStoreFaultStrip must only write to the strip nodes init() already built — creating or attaching a node at paint time is one of the three shapes that shipped as a blank label');
+    }
+    if (/FindNode\(/.test(paintBody)) {
+        err('MainScene.brs RefreshStoreFaultStrip must write to m.faultBar / m.faultText directly, not look them up by id — m.linkLabel.text = link in LinkStremioScreen is the shape known to render here');
+    }
+    if (!/m\.faultText\.text\s*=/.test(paintBody)) {
+        err('MainScene.brs RefreshStoreFaultStrip must set m.faultText.text — a bar with no text says nothing');
+    }
+    if (/\.Join\(/.test(paintBody)) {
+        err('MainScene.brs RefreshStoreFaultStrip must build the line by concatenation, not Join() over an array — the third of the three shapes that shipped as a blank label');
     }
     return ok;
 }
@@ -320,19 +520,42 @@ function checkMainSceneContract() {
 // inside ReconcileSession.
 function checkSessionAuthorityContract() {
     const fs = require('fs');
-    const brs = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8');
-    const calls = [...brs.matchAll(/\.SwitchSession\s*\(/g)].map(match => match.index);
+    const read = (f) => fs.readFileSync(path.join(projectRoot, 'components', f), 'utf8');
+    const brs = read('MainScene.brs');
+    const host = read('StoreHost.brs');
+    let ok = true;
+    // The Scene may only ask for a pivot from ReconcileSession(), the one
+    // authority — and it asks the HOST, which is where the session-aware
+    // instances now live.
+    const calls = [...brs.matchAll(/callFunc\(\s*"SwitchSession"/g)].map(match => match.index);
     if (calls.length === 0) {
-        console.error('MainScene.brs no longer calls SwitchSession anywhere — session-aware stores never pivot');
+        console.error('MainScene.brs no longer asks for a session pivot anywhere (callFunc("SwitchSession", type)) — the session-aware stores never move off the old session');
         return false;
     }
     const subStart = brs.indexOf('sub ReconcileSession()');
     const nextSub = brs.indexOf('\nsub ', subStart + 1);
     const body = nextSub === -1 ? brs.slice(subStart) : brs.slice(subStart, nextSub);
-    let ok = true;
     for (const index of calls) {
         if (index < subStart || index > nextSub) {
-            console.error(`MainScene.brs calls SwitchSession at byte ${index}, outside sub ReconcileSession() — every pivot must go through the authority`);
+            console.error(`MainScene.brs pivots the session at byte ${index}, outside sub ReconcileSession() — every pivot must go through the authority`);
+            ok = false;
+        }
+    }
+    // The host holds the instances, so the host does the fan-out, and it walks
+    // one list — a hardcoded pair would silently skip the next session-aware
+    // store that joins, which is the failure this rule exists to prevent.
+    if (!/\.SwitchSession\s*\(/.test(host)) {
+        console.error('StoreHost.brs no longer calls SwitchSession on its session-aware stores — nothing would pivot them');
+        ok = false;
+    } else if (!/sub\s+SwitchSession\s*\([^)]*\)\s*\n\s*for each store in m\.sessionAware\s*\n\s*store\.SwitchSession\(/.test(host)) {
+        console.error('StoreHost.brs SwitchSession must walk m.sessionAware — a hardcoded pair silently leaves the next session-aware store on the old session');
+        ok = false;
+    }
+    // A stray direct pivot anywhere else means some flow bypassed the authority.
+    for (const name of fs.readdirSync(path.join(projectRoot, 'components')).filter(f => f.endsWith('.brs'))) {
+        if (name === 'StoreHost.brs') continue;
+        if (/\.SwitchSession\s*\(/.test(read(name))) {
+            console.error(`${name} pivots a store's session directly — only StoreHost may, and only from its SwitchSession entry point, or guest and stremio drift apart`);
             ok = false;
         }
     }

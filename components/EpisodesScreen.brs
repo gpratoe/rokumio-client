@@ -128,25 +128,25 @@ end sub
 ' full ordered episode-id list is resolved first so the account bitfield decodes
 ' against the complete list (bit indexes are positions in that ordering).
 sub BuildList(meta as object)
-    allSeasons = m.stores.episodes.Seasons(meta)
+    allSeasons = m.stores.episodes.callFunc("EpisodesSeasons", meta)
     if allSeasons.Count() = 0
         m.epTitle.text = ""
         m.epDesc.text = "No episodes found for this series."
         return
     end if
 
-    m.seasons = m.stores.episodes.OrderedSeasons(allSeasons)
-    orderedEpisodes = m.stores.episodes.OrderedVideoIds(m.meta.id, meta)
+    m.seasons = m.stores.episodes.callFunc("EpisodesOrderedSeasons", allSeasons)
+    orderedEpisodes = m.stores.episodes.callFunc("EpisodesOrderedVideoIds", m.meta.id, meta)
     m.orderedVideoIds = orderedEpisodes
 
     content = CreateObject("roSGNode", "ContentNode")
     anyRegular = false
     allDone = true
     nowIso = invalid
-    if m.stores <> invalid and m.stores.time <> invalid then nowIso = m.stores.time.NowIso()
+    if m.stores <> invalid then nowIso = m.stores.time.callFunc("TimeNowIso")
     for s = 0 to m.seasons.Count() - 1
         season = m.seasons[s]
-        episodes = m.stores.episodes.EpisodesForSeason(meta, season)
+        episodes = m.stores.episodes.callFunc("EpisodesEpisodesForSeason", meta, season)
         m.seasonEpisodes.Push(episodes)
 
         row = content.CreateChild("ContentNode")
@@ -156,7 +156,7 @@ sub BuildList(meta as object)
             item.title = EpisodeLabel(season, ep)
             if ep.thumbnail <> invalid and ep.thumbnail <> "" then item.hdPosterUrl = ep.thumbnail
             if season <> 0
-                mark = m.stores.library.EpisodeMark(m.meta.id, season, ep, orderedEpisodes, nowIso)
+                mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, season, ep, orderedEpisodes, nowIso)
                 item.watched = mark.watched
                 if mark.aired
                     anyRegular = true
@@ -172,7 +172,7 @@ sub BuildList(meta as object)
     if m.top.screenActive then m.epList.SetFocus(true)
     UpdateHeader(m.epList.jumpToRowItem)
 
-    m.stores.library.MarkAllIfDone(m.meta.id, anyRegular, allDone)
+    m.stores.library.callFunc("LibraryMarkAllIfDone", m.meta.id, anyRegular, allDone)
 end sub
 
 ' Re-paint the episode watched badges in place after a return from a push
@@ -183,11 +183,11 @@ end sub
 sub RefreshWatchedMarks() as void
     if m.epList = invalid or m.epList.content = invalid then return
     if m.seasons.Count() = 0 or m.seasonEpisodes.Count() = 0 then return
-    if m.stores = invalid or m.stores.episodes = invalid or m.stores.library = invalid or m.seriesMeta = invalid then return
-    orderedEpisodes = m.stores.episodes.OrderedVideoIds(m.meta.id, m.seriesMeta)
+    if m.stores = invalid or m.seriesMeta = invalid then return
+    orderedEpisodes = m.stores.episodes.callFunc("EpisodesOrderedVideoIds", m.meta.id, m.seriesMeta)
     anyRegular = false
     allDone = true
-    nowIso = m.stores.time.NowIso()
+    nowIso = m.stores.time.callFunc("TimeNowIso")
     for s = 0 to m.seasons.Count() - 1
         season = m.seasons[s]
         row = m.epList.content.GetChild(s)
@@ -196,7 +196,7 @@ sub RefreshWatchedMarks() as void
             ep = episodes[e]
             item = row.GetChild(e)
             if season <> 0
-                mark = m.stores.library.EpisodeMark(m.meta.id, season, ep, orderedEpisodes, nowIso)
+                mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, season, ep, orderedEpisodes, nowIso)
                 item.watched = mark.watched
                 if mark.aired
                     anyRegular = true
@@ -205,7 +205,7 @@ sub RefreshWatchedMarks() as void
             end if
         end for
     end for
-    m.stores.library.MarkAllIfDone(m.meta.id, anyRegular, allDone)
+    m.stores.library.callFunc("LibraryMarkAllIfDone", m.meta.id, anyRegular, allDone)
 end sub
 
 function SeasonLabel(season as integer) as string
@@ -266,18 +266,18 @@ end sub
 ' season's marks.
 function ShowWatchDialog() as boolean
     if m.meta = invalid or m.orderedVideoIds = invalid or m.orderedVideoIds.Count() = 0 then return false
-    if m.stores = invalid or m.stores.library = invalid or m.stores.episodes = invalid or m.stores.time = invalid or m.stores.auth = invalid then return false
+    if m.stores = invalid then return false
     data = m.epList.rowItemFocused
     if data = invalid or data.Count() < 2 then return false
     row = data[0]
     entry = EntryAt(data[0], data[1])
     if entry = invalid or entry.season = 0 or entry.ep = invalid or entry.ep.episode = invalid then return false
 
-    videoId = m.stores.episodes.ResolveVideoId(m.meta.id, entry.season, entry.ep.episode)
+    videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, entry.season, entry.ep.episode)
     seasonIds = SeasonVideoIds(row)
     seasonIndex = IndexInIds(seasonIds, videoId)
     if seasonIndex < 0 then return false
-    mark = m.stores.library.EpisodeMark(m.meta.id, entry.season, entry.ep, m.orderedVideoIds, m.stores.time.NowIso())
+    mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, entry.season, entry.ep, m.orderedVideoIds, m.stores.time.callFunc("TimeNowIso"))
 
     m.pendingWatchAction = {
         metaId: m.meta.id
@@ -287,7 +287,7 @@ function ShowWatchDialog() as boolean
         watched: mark.watched
     }
 
-    stremio = m.stores.auth.GetSession() = "stremio"
+    stremio = m.stores.auth.callFunc("AuthGetSession") = "stremio"
     syncNote = "Synced to your Stremio account."
     if not stremio then syncNote = "Saved on this device only."
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
@@ -344,7 +344,7 @@ end sub
 ' "restWatched"/"restUnwatched" operate on the focused season's video id list,
 ' from its first episode through the focused one.
 sub ApplyWatchChange(kind as string, action as object)
-    if m.stores = invalid or m.stores.library = invalid then return
+    if m.stores = invalid then return
     library = m.stores.library
     if kind = "watch"
         library.MarkEpisodeWatched(action.metaId, action.videoId)
@@ -369,11 +369,11 @@ end sub
 function SeasonVideoIds(row as integer) as object
     ids = []
     if row < 0 or row >= m.seasons.Count() then return ids
-    if m.stores = invalid or m.stores.episodes = invalid then return ids
+    if m.stores = invalid then return ids
     episodes = m.seasonEpisodes[row]
     for each ep in episodes
         if ep <> invalid and ep.episode <> invalid
-            ids.Push(m.stores.episodes.ResolveVideoId(m.meta.id, m.seasons[row], ep.episode))
+            ids.Push(m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, m.seasons[row], ep.episode))
         end if
     end for
     return ids
@@ -417,7 +417,7 @@ end sub
 ' play path Details' resume chip uses.
 sub PushEpisode(season as integer, ep as object)
     if ep = invalid or ep.episode = invalid then return
-    videoId = m.stores.episodes.ResolveVideoId(m.meta.id, season, ep.episode)
+    videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, season, ep.episode)
     position = 0
     if m.resume <> invalid and m.resume.episode <> invalid and m.resume.episode = ep.episode and m.resume.season <> invalid and m.resume.season = season
         position = m.resume.position

@@ -59,8 +59,8 @@ sub BuildRows()
         title: "Add add-on"
         value: "Install by add-on URL"
     })
-    if m.stores <> invalid and m.stores.addons <> invalid
-        for each addon in m.stores.addons.GetAll()
+    if m.stores <> invalid
+        for each addon in m.stores.addons.callFunc("AddonsGetAll")
             value = addon.address
             if addon.builtin = true then value = "Built-in · " + value
             m.rows.Push({
@@ -131,7 +131,7 @@ end sub
 ' AddonsStore.Install against a registry-less store and returns the installed
 ' record (or a validation/fetch error); the real store adopts it on success.
 sub StartInstall(address as string)
-    if m.stores = invalid or m.stores.addons = invalid then return
+    if m.stores = invalid then return
     if m.installTask <> invalid then return
 
     m.status.text = "Installing…"
@@ -150,7 +150,7 @@ sub onInstallResult()
     AsyncTask_Reap(task, m.top, false)
 
     if result <> invalid and result.ok and result.record <> invalid
-        if m.stores <> invalid and m.stores.addons.Register(result.record)
+        if m.stores <> invalid and m.stores.addons.callFunc("AddonsRegister", result.record)
             m.status.text = "Installed " + result.id + "."
         else
             m.status.text = "Could not install: addon already installed"
@@ -191,7 +191,7 @@ sub onRemoveChoice()
         index = dialog.buttonSelected
         m.top.getScene().dialog = invalid
         if index = 0 and m.pendingRow <> invalid
-            removed = m.stores.addons.Uninstall(m.pendingRow.id, m.pendingRow.builtin)
+            removed = m.stores.addons.callFunc("AddonsUninstall", m.pendingRow.id, m.pendingRow.builtin)
             if removed
                 m.status.text = "Removed " + m.pendingRow.name + "."
             else

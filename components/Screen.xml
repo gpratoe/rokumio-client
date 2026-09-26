@@ -11,11 +11,16 @@
          a child never implements fall through to the defaults here. -->
     <interface>
         <!-- Screen contract: called by ScreenStack for show/hide/focus/back.
-             callFunc only runs for functions declared in the interface. Stores
-             are class instances and cannot cross components through an
-             argument, a return value or a field (Roku copies the associative
-             array and drops its function members), so they arrive by reading
-             the global AA inside SetStores.
+             callFunc only runs for functions declared in the interface.
+
+             SetStores takes two nodes from the Scene: the StoreHost, which owns
+             every store instance and answers with plain data over callFunc, and
+             the Scene itself, which owns the fault strip. Store CLASSES cannot
+             cross a component boundary at all — an instance is an
+             roAssociativeArray of function references, and Roku copies that array
+             as an argument, a return or a declared field, dropping every
+             function member — so the host node is the only thing handed over and
+             a node is the one thing Roku passes by reference.
 
              screenActive is owned by the stack: true while this screen is the
              interactive top. Async task result handlers must only grab focus

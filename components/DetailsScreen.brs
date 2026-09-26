@@ -57,8 +57,8 @@ function OnEnter(params as object) as void
     ' Resume hint: the Continue-Watching row passes its own; otherwise the local
     ' library stands in (catalog-opened shows still know where you stopped).
     m.resume = params.resume
-    if m.resume = invalid and m.stores <> invalid and m.stores.library <> invalid
-        m.resume = m.stores.library.ResumeFor(meta.id)
+    if m.resume = invalid and m.stores <> invalid
+        m.resume = m.stores.library.callFunc("LibraryResumeFor", meta.id)
     end if
 
     m.metaRefreshed = false
@@ -106,14 +106,14 @@ end sub
 ' metas with nothing fetchable, and metas without an add-on to ask skip the trip
 ' entirely.
 sub MaybeRefreshMeta()
-    if m.stores = invalid or m.stores.episodes = invalid then return
+    if m.stores = invalid then return
     if m.meta = invalid or m.meta.id = invalid or m.meta.type = invalid then return
     if m.addonAddress = invalid or m.addonAddress = "" then return
     if m.metaRefreshed then return
 
     CancelMetaLoad()
 
-    if not m.stores.episodes.NeedsMetaFetch(m.meta) then return
+    if not m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", m.meta) then return
 
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onMetaLoaded", {
         addonAddress: m.addonAddress
@@ -139,7 +139,7 @@ end sub
 ' win), remember we are done, and re-render the hero. A failed or mismatched
 ' fetch changes nothing — the screen keeps the catalog record it already shows.
 sub onMetaLoaded()
-    if m.stores = invalid or m.stores.episodes = invalid then return
+    if m.stores = invalid then return
     if m.loadTask = invalid then return
     task = m.loadTask
     m.loadTask = invalid
@@ -149,7 +149,7 @@ sub onMetaLoaded()
     if result = invalid or not result.ok or result.meta = invalid then return
     if result.meta.id <> invalid and m.meta <> invalid and result.meta.id <> m.meta.id then return
 
-    m.meta = m.stores.episodes.MergeMeta(m.meta, result.meta)
+    m.meta = m.stores.episodes.callFunc("EpisodesMergeMeta", m.meta, result.meta)
     m.metaRefreshed = true
     RenderHero(m.meta)
 end sub
@@ -241,7 +241,7 @@ end sub
 ' screen is the picker; this push carries the full context for it.
 sub ResumeEpisode()
     if m.resume = invalid or m.stores = invalid then return
-    videoId = m.stores.episodes.ResolveVideoId(m.meta.id, m.resume.season, m.resume.episode)
+    videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, m.resume.season, m.resume.episode)
     m.top.pushRequest = {
         screen: "streamsScreen"
         params: {
@@ -271,7 +271,7 @@ sub PlayMedia()
                 addonAddress: m.addonAddress
                 metaType: "series"
                 metaId: m.meta.id
-                videoId: m.stores.episodes.ResolveVideoId(m.meta.id, 1, 1)
+                videoId: m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, 1, 1)
                 season: 1
                 episode: 1
                 position: ResumePosition()
@@ -322,10 +322,10 @@ end function
 sub ToggleLibrary()
     if m.stores = invalid then return
     added = false
-    if m.stores.library.IsSaved(m.meta.id)
-        m.stores.library.RemoveSaved(m.meta.id)
+    if m.stores.library.callFunc("LibraryIsSaved", m.meta.id)
+        m.stores.library.callFunc("LibraryRemoveSaved", m.meta.id)
     else
-        m.stores.library.AddSaved(m.meta.id, m.meta.type, m.meta.name, m.meta.poster)
+        m.stores.library.callFunc("LibraryAddSaved", m.meta.id, m.meta.type, m.meta.name, m.meta.poster)
         added = true
     end if
     label = LibraryActionLabel()
@@ -343,7 +343,7 @@ sub ToggleLibrary()
     ' (MainScene re-gates on the session; the screen keeps the payload
     ' stremio-only). The change appears in the local LibraryStore immediately
     ' either way, so the Library screen reflects it before the account does.
-    if m.stores.library.sessionType = "stremio"
+    if m.stores.library.callFunc("LibrarySessionType") = "stremio"
         m.top.libraryChange = {
             metaId: m.meta.id
             metaType: m.meta.type
@@ -355,7 +355,7 @@ sub ToggleLibrary()
 end sub
 
 function LibraryActionLabel() as string
-    if m.stores <> invalid and m.stores.library.IsSaved(m.meta.id) then return "In library"
+    if m.stores <> invalid and m.stores.library.callFunc("LibraryIsSaved", m.meta.id) then return "In library"
     return "Add to library"
 end function
 

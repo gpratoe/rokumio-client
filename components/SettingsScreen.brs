@@ -47,7 +47,7 @@ end sub
 ' stremio user their email + logout. The rest follow in fixed order.
 sub BuildRows()
     m.rows = []
-    if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetSession() = "stremio"
+    if m.stores <> invalid and m.stores.auth.callFunc("AuthGetSession") = "stremio"
         m.rows.Push({
             action: "logout"
             title: "Log out"
@@ -91,22 +91,22 @@ end sub
 ' fall back to a neutral label when the fetch that fills it is still running or
 ' the profile is otherwise absent.
 function SessionValue() as string
-    if m.stores <> invalid and m.stores.auth <> invalid
-        user = m.stores.auth.GetUser()
+    if m.stores <> invalid
+        user = m.stores.auth.callFunc("AuthGetUser")
         if user <> invalid and user.email <> invalid and user.email <> "" then return user.email
     end if
     return "Signed in with Stremio"
 end function
 
 function ServerValue() as string
-    if m.stores = invalid or m.stores.settings = invalid then return "—"
-    address = m.stores.settings.GetServerAddress()
+    if m.stores = invalid then return "—"
+    address = m.stores.settings.callFunc("SettingsGetServerAddress")
     if address = "" then return "not set"
     return address
 end function
 
 function LanguageValue() as string
-    if m.stores <> invalid and m.stores.settings <> invalid then return m.stores.settings.GetLanguage()
+    if m.stores <> invalid then return m.stores.settings.callFunc("SettingsGetLanguage")
     return ""
 end function
 
@@ -147,7 +147,7 @@ sub EditServer()
     dialog.title = "Streaming server address"
     dialog.message = "e.g. http://192.168.1.5:4141 — leave empty and OK to clear"
     dialog.text = ""
-    if m.stores <> invalid and m.stores.settings <> invalid then dialog.text = m.stores.settings.GetServerAddress()
+    if m.stores <> invalid then dialog.text = m.stores.settings.callFunc("SettingsGetServerAddress")
     dialog.buttons = ["OK", "Cancel"]
     dialog.observeField("buttonSelected", "onServerChoice")
     m.top.getScene().dialog = dialog
@@ -161,10 +161,10 @@ sub onServerChoice()
         m.top.getScene().dialog = invalid
         if index = 0
             if chosen = invalid or chosen.Trim() = ""
-                m.stores.settings.ClearServerAddress()
+                m.stores.settings.callFunc("SettingsClearServerAddress")
                 m.status.text = "Server address cleared."
-            else if m.stores.settings.SetServerAddress(chosen)
-                m.stores.settings.Save()
+            else if m.stores.settings.callFunc("SettingsSetServerAddress", chosen)
+                m.stores.settings.callFunc("SettingsSave")
                 m.status.text = "Server address updated."
             else
                 m.status.text = "Invalid address — use http://host[:port]"
@@ -177,14 +177,14 @@ end sub
 
 ' Cycle the language row's options forward.
 sub CycleLanguage() as void
-    current = m.stores.settings.GetLanguage()
+    current = m.stores.settings.callFunc("SettingsGetLanguage")
     index = 0
     for i = 0 to m.languages.Count() - 1
         if m.languages[i] = current then index = i
     end for
     nextLanguage = m.languages[(index + 1) mod m.languages.Count()]
-    if m.stores.settings.SetLanguage(nextLanguage)
-        m.stores.settings.Save()
+    if m.stores.settings.callFunc("SettingsSetLanguage", nextLanguage)
+        m.stores.settings.callFunc("SettingsSave")
         BuildRows()
     end if
 end sub
@@ -195,8 +195,8 @@ end sub
 ' timeout, so it runs through HeartbeatTask — a dead address costs the worker
 ' thread, not a frozen Settings screen.
 sub TestServer() as void
-    if m.stores = invalid or m.stores.settings = invalid then return
-    address = m.stores.settings.GetServerAddress()
+    if m.stores = invalid then return
+    address = m.stores.settings.callFunc("SettingsGetServerAddress")
     if address = ""
         m.status.text = "Set a streaming server address first."
         return

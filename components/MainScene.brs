@@ -83,60 +83,127 @@ sub init()
     m.supportDialog = m.top.FindNode("supportDialog")
     m.supportDialog.ObserveFieldScoped("wasClosed", "onSupportDialogClosed")
 
-    ' Stores are constructed once at the Scene and handed to screens later by
-    ' reference. SettingsStore, AddonsStore and LibraryStore Load() their
-    ' persisted state on construction; the add-on/library stores are built for
-    ' the current session (guest or stremio) so every screen reads the right
-    ' session's data from the first frame.
-    http = Transport()
-    m.authStore = AuthStore(CreateObject("roRegistrySection", "auth"))
-    m.settingsStore = SettingsStore(CreateObject("roRegistrySection", "settings"))
-    sessionType = EffectiveSessionType()
-    m.stores = {
-        transport: http
-        settings: m.settingsStore
-        auth: m.authStore
-        addons: AddonsStore(http, CreateObject("roRegistrySection", "addons"), sessionType)
-        catalog: CatalogStore(http)
-        episodes: EpisodesStore(http)
-        library: LibraryStore(CreateObject("roRegistrySection", "library"), sessionType)
-        playback: PlaybackStore(http)
-        time: TimeUtil()
-        watch: WatchStateBuffer()
-    }
+    ' The whole data layer lives in ONE component — StoreHost — which builds
+    ' every store instance exactly once and never lets one leave. A bsc class
+    ' instance is an roAssociativeArray whose members are function references,
+    ' and Roku copies that array the moment it crosses a component boundary (as
+    ' a callFunc argument, a callFunc return or a declared interface field),
+    ' dropping every function member — so a screen handed a store held a
+    ' data-only copy and its first method call died with &hf4 "Member function
+    ' not found". Three architectures failed on that one fact before this one.
+    '
+    ' What crosses instead is the StoreHost NODE, which Roku passes by reference
+    ' — the same mechanism the pairing task already uses through the declared
+    ' taskNode field — and what comes back over callFunc is plain data only:
+    ' strings, numbers, booleans, arrays and assoc arrays of records. A screen
+    ' asks for a value and receives a value; no store instance is ever in
+    ' flight, so there is nothing left to strip.
+    '
+    ' This is the pattern the task components already follow (see
+    ' AddonsInstallTask.xml): include the store sources into the component that
+    ' needs them and call them there. Those can afford a private instance
+    ' because they are stateless per-request wrappers; the session-aware stores
+    ' cannot, which is why they are built once, here, and shared as a node.
+    '
+    ' Created before the binds below and never replaced: a session switch
+    ' re-targets the session-aware stores in place through SwitchSession.
+    m.storeHost = CreateObject("roSGNode", "StoreHost")
+    m.top.AppendChild(m.storeHost)
 
-    ' The session-aware stores. Long-lived — they are never reconstructed, only
-    ' re-targeted by SwitchSession — so these references stay valid for the
-    ' whole Scene. ReconcileSession() (below) is the one place a session change
-    ' reaches them; a new session-aware store joins this single list and every
-    ' auth flow reconciles it automatically.
-    m.sessionAware = [m.stores.addons, m.stores.library]
+    ' The store-fault strip: a red bar plus its label, both flat children of the
+    ' Scene, created once up front and updated in place. No nesting, no
+    ' FindNode after an append, no string join — every way the first version
+    ' could come up with a blank label while the bar itself still painted. A
+    ' screen that cannot reach the data layer reports the failing hop here (see
+    ' Screen.brs's SetStores) rather than leaving an empty grid and a
+    ' "0 add-ons" that reads like an empty catalog. 0 is impossible with a live
+    ' store: a guest session's GetAll() returns the two built-in seeds.
+    m.faultBar = CreateObject("roSGNode", "Rectangle")
+    m.faultBar.width = 1920
+    m.faultBar.height = 80
+    m.faultBar.translation = [0, 1000]
+    m.faultBar.color = Theme().danger
+    m.faultBar.visible = false
+    m.top.AppendChild(m.faultBar)
 
-    ' Published for the screens, which read it in Screen.brs's SetStores. A
-    ' class instance cannot cross a component boundary intact (Roku copies the
-    ' associative array and drops its function members), so the facade is not
-    ' passed as a callFunc argument; roGlobal is not a component, so publishing
-    ' it here hands every screen the same live instances. The facade is built
-    ' once and never replaced — a session switch mutates the session-aware
-    ' stores in place — so this one publish covers the app's whole life and must
-    ' happen before the first SetStores below. (The global AA is reached with
-    ' GetGlobalAA(), not CreateObject("roGlobal") — roGlobal is a BrightSign
-    ' component that does not exist on Roku, and CreateObject returns invalid
-    ' for an unknown class.)
-    storesAA = GetGlobalAA()
-    storesAA.rokumioStores = m.stores
+    m.faultText = CreateObject("roSGNode", "Label")
+    m.faultText.translation = [40, 1020]
+    m.faultText.width = 1840
+    m.faultText.height = 44
+    m.faultText.font = "font:MediumBoldSystemFont"
+    m.faultText.color = Theme().textWhite
+    m.faultText.visible = false
+    m.top.AppendChild(m.faultText)
 
-    m.homeScreen.callFunc("SetStores", invalid)
-    m.authScreen.callFunc("SetStores", invalid)
-    m.linkStremioScreen.callFunc("SetStores", invalid)
-    m.detailsScreen.callFunc("SetStores", invalid)
-    m.episodesScreen.callFunc("SetStores", invalid)
-    m.streamsScreen.callFunc("SetStores", invalid)
-    m.settingsScreen.callFunc("SetStores", invalid)
-    m.addonsScreen.callFunc("SetStores", invalid)
-    m.searchScreen.callFunc("SetStores", invalid)
-    m.discoverScreen.callFunc("SetStores", invalid)
-    m.libraryScreen.callFunc("SetStores", invalid)
+    m.homeScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.authScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.linkStremioScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.detailsScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.episodesScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.streamsScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.settingsScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.addonsScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.searchScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.discoverScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.libraryScreen.callFunc("SetStores", m.storeHost, m.top)
+end sub
+
+' A screen whose store bind came up short reports it here, and the Scene paints
+' it. Every way that hand-off can fail looks identical from the outside — an
+' empty grid, a "0 add-ons" subtitle, no crash, nothing in the device log — and
+' that silence is what hid two shipping bugs (the callFunc argument that arrived
+' without its methods, then getScene() returning invalid because init() runs
+' before Show()). The Scene owns the strip because it owns the cross-cutting UI
+' and has the palette; a screen that painted its own would need a color literal
+' it deliberately does not depend on.
+'
+' Faults are keyed by reason, not by screen: the four failures are exactly the
+' things worth reading, and a dozen screens hitting the same one should not
+' produce a dozen identical lines. active=false clears.
+sub ReportStoreFault(reason as string, active as boolean)
+    if reason = "" then return
+    if m.storeFaults = invalid then m.storeFaults = {}
+    if active then
+        m.storeFaults[reason] = true
+    else
+        m.storeFaults.Delete(reason)
+    end if
+    RefreshStoreFaultStrip()
+end sub
+
+' One bar and one label, both created in init() and updated in place, so this
+' only ever writes two fields on nodes the Scene already holds. Sorted so the
+' same set of faults always reads the same way — an unordered key walk would
+' shuffle the lines between binds.
+'
+' The first version shipped one line that did all three of the things this
+' avoids: strip.FindNode("storeFaultText").text = reasons.Join("     ") — a
+' strip built lazily, a Label written through a FindNode after the append, and
+' the line joined. On device the bar painted and the label stayed blank. Which
+' of the three was at fault was never isolated, so none of the three shapes
+' come back. m.linkLabel.text = link in LinkStremioScreen is the shape known to
+' work here, so this is that shape.
+sub RefreshStoreFaultStrip()
+    line = ""
+    if m.storeFaults <> invalid
+        reasons = []
+        for each key in m.storeFaults
+            reasons.Push(key)
+        end for
+        reasons.Sort()
+        for each reason in reasons
+            if line <> "" then line = line + "     "
+            line = line + reason
+        end for
+    end if
+    if line = "" then
+        m.faultBar.visible = false
+        m.faultText.visible = false
+        return
+    end if
+    m.faultText.text = line
+    m.faultText.visible = true
+    m.faultBar.visible = true
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -220,7 +287,7 @@ sub onStreamsAction()
     player = CreateObject("roSGNode", "PlayerScreen")
     player.id = "playerScreen"
     m.uiRoot.AppendChild(player)
-    player.callFunc("SetStores", invalid)
+    player.callFunc("SetStores", m.storeHost, m.top)
     player.ObserveField("closeRequest", "onPlayerClose")
     player.ObserveField("watchStateUpdate", "onWatchStateUpdate")
     m.activePlayer = player
@@ -250,9 +317,9 @@ end sub
 ' watch-state buffer, not the player node, so the async callback can land even
 ' after onPlayerClose released the component.
 sub onWatchStateUpdate()
-    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
-    if m.stores.auth.GetSession() <> "stremio" then return
-    packet = m.stores.watch.Latest()
+    if m.storeHost = invalid then return
+    if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
+    packet = m.storeHost.callFunc("WatchLatest")
     if packet = invalid then return
     videoId = packet.videoId
     if videoId = invalid or videoId = "" then return
@@ -272,14 +339,14 @@ end sub
 sub PumpWatchStatePush()
     if m.pushingWatchState then return
     if m.pendingWatchState = invalid then return
-    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.storeHost = invalid then return
     packet = m.pendingWatchState
-    item = m.stores.library.BuildWatchStateItem(packet)
+    item = m.storeHost.callFunc("LibraryBuildWatchStateItem", packet)
     if item = invalid then return
     m.pendingWatchState = invalid
 
     task = AsyncTask_Launch(m.top, "WatchStatePushTask", "onWatchStatePushResult", {
-        authKey: m.stores.auth.GetAuthKey()
+        authKey: m.storeHost.callFunc("AuthGetAuthKey")
         item: item
     }, "watchStatePushTask")
     m.watchStatePushTask = task
@@ -307,8 +374,8 @@ end sub
 ' most one LibraryWritePushTask runs at a time. The change is read from the
 ' screen's field; each toggle flips `added`, so no repeat suppression is needed.
 sub onLibraryChange()
-    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
-    if m.stores.auth.GetSession() <> "stremio" then return
+    if m.storeHost = invalid then return
+    if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
     change = m.detailsScreen.libraryChange
     if change = invalid then return
     m.pendingLibraryChange = change
@@ -323,14 +390,14 @@ end sub
 sub PumpLibraryWritePush()
     if m.pushingLibraryChange then return
     if m.pendingLibraryChange = invalid then return
-    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.storeHost = invalid then return
     change = m.pendingLibraryChange
-    item = m.stores.library.BuildLibraryChangeItem(change.metaId, change.metaType, change.name, change.poster, change.added)
+    item = m.storeHost.callFunc("LibraryBuildLibraryChangeItem", change.metaId, change.metaType, change.name, change.poster, change.added)
     if item = invalid then return
     m.pendingLibraryChange = invalid
 
     task = AsyncTask_Launch(m.top, "LibraryWritePushTask", "onLibraryWritePushResult", {
-        authKey: m.stores.auth.GetAuthKey()
+        authKey: m.storeHost.callFunc("AuthGetAuthKey")
         item: item
     }, "libraryWritePushTask")
     m.libraryWritePushTask = task
@@ -359,8 +426,8 @@ end sub
 ' push runs at a time. Each change carries the current ordered episode-id list
 ' so the store can re-author the full bitfield for the pushed item.
 sub onWatchedChange()
-    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
-    if m.stores.auth.GetSession() <> "stremio" then return
+    if m.storeHost = invalid then return
+    if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
     change = m.episodesScreen.watchedChange
     if change = invalid then return
     m.pendingWatchedChange = change
@@ -376,14 +443,14 @@ end sub
 sub PumpWatchedPush()
     if m.pushingWatchedChange then return
     if m.pendingWatchedChange = invalid then return
-    if m.stores = invalid or m.stores.auth = invalid or m.stores.library = invalid then return
+    if m.storeHost = invalid then return
     change = m.pendingWatchedChange
-    item = m.stores.library.BuildWatchedStateItem(change.metaId, change.videoId, change.orderedVideoIds)
+    item = m.storeHost.callFunc("LibraryBuildWatchedStateItem", change.metaId, change.videoId, change.orderedVideoIds)
     if item = invalid then return
     m.pendingWatchedChange = invalid
 
     task = AsyncTask_Launch(m.top, "WatchStatePushTask", "onWatchedPushResult", {
-        authKey: m.stores.auth.GetAuthKey()
+        authKey: m.storeHost.callFunc("AuthGetAuthKey")
         item: item
     }, "watchedPushTask")
     m.watchedPushTask = task
@@ -448,7 +515,7 @@ end sub
 ' "Continue as guest" simply pops it to reveal the guest home.
 sub Start()
     m.stack.push("homeScreen")
-    if not m.stores.auth.IsLoggedIn()
+    if not m.storeHost.callFunc("AuthIsLoggedIn")
         m.stack.push("authScreen")
     else if EffectiveSessionType() = "stremio"
         ' Relaunched stremio session: addons are already in the registry key
@@ -461,22 +528,23 @@ end sub
 
 ' The store session derives from the persisted auth session: guest when logged
 ' out or in a guest session, stremio for an account session. Never blank — the
-' session-aware stores always act on a concrete session's data.
+' session-aware stores always act on a concrete session's data. The host owns
+' the auth store, so it owns the answer; asking for it here keeps one derivation
+' instead of a second registry read in the Scene that could disagree.
 function EffectiveSessionType() as string
-    if m.authStore <> invalid and m.authStore.GetSession() = "stremio" then return "stremio"
+    if m.storeHost <> invalid and m.storeHost.callFunc("EffectiveSessionType") = "stremio" then return "stremio"
     return "guest"
 end function
 
 ' The one place a session change reaches the session-aware stores: the type is
 ' derived from the auth authority (never a call-site literal), so it always
 ' matches the session the store/service were just pivoted to, and every session
-' gets the same switch. Guest and stremio stay under separate registry keys
+' gets the same switch. The host holds that list, so login, logout and
+' guest-continuation cannot leave one of its stores on the old session by
+' forgetting a fan-out here. Guest and stremio stay under separate registry keys
 ' with a clear-and-reload swap, so the two sessions never mix.
 sub ReconcileSession()
-    sessionType = EffectiveSessionType()
-    for each store in m.sessionAware
-        store.SwitchSession(sessionType)
-    end for
+    if m.storeHost <> invalid then m.storeHost.callFunc("SwitchSession", EffectiveSessionType())
 end sub
 
 ' The AuthScreen published its first-run choice.
@@ -484,7 +552,7 @@ sub onAuthAction()
     request = m.authScreen.pushRequest
     if request = invalid then return
     if request.action = "continueGuest"
-        if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginGuest()
+        if m.storeHost <> invalid then m.storeHost.callFunc("AuthLoginGuest")
         ReconcileSession()
         if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
             m.stack.pop()
@@ -536,7 +604,7 @@ sub onLinkCodeAction()
         return
     end if
     if request.action = "completeLogin"
-        if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.LoginStremio(request.authKey, request.user)
+        if m.storeHost <> invalid then m.storeHost.callFunc("AuthLoginStremio", request.authKey, request.user)
         ReconcileSession()
         m.revokedSessionHandled = false
         StartAddonSync()
@@ -622,9 +690,9 @@ end sub
 ' server call is fire-and-forget — the user is logged out here regardless of its
 ' outcome.
 sub DoLogout()
-    if m.stores <> invalid and m.stores.auth <> invalid and m.stores.auth.GetAuthKey() <> ""
+    if m.storeHost <> invalid and m.storeHost.callFunc("AuthGetAuthKey") <> ""
         task = AsyncTask_Launch(m.top, "LogoutTask", "onLogoutResult", {
-            authKey: m.stores.auth.GetAuthKey()
+            authKey: m.storeHost.callFunc("AuthGetAuthKey")
         }, "logoutTask")
         m.logoutTask = task
     end if
@@ -638,7 +706,7 @@ end sub
 ' bounce; the manual logout additionally flushes the authKey at the API first
 ' (see DoLogout).
 sub ResetToAuthGate()
-    if m.stores <> invalid and m.stores.auth <> invalid then m.stores.auth.Logout()
+    if m.storeHost <> invalid then m.storeHost.callFunc("AuthLogout")
     ReconcileSession()
 
     ' Pop all the way down to Home — every screen gets its normal OnExit/BlurFocus
@@ -707,7 +775,7 @@ end sub
 ' already in the stremio_addons registry key from the login that synced them).
 sub StartAddonSync()
     fields = {}
-    if m.stores <> invalid and m.stores.auth <> invalid then fields.authKey = m.stores.auth.GetAuthKey()
+    if m.storeHost <> invalid then fields.authKey = m.storeHost.callFunc("AuthGetAuthKey")
     task = AsyncTask_Launch(m.top, "AddonSyncTask", "onAddonSyncResult", fields, "addonSyncTask")
     m.addonSyncTask = task
 end sub
@@ -733,8 +801,8 @@ sub onAddonSyncResult()
     failed = 0
     if result <> invalid and result.ok and result.descriptors <> invalid
         for each descriptor in result.descriptors
-            if m.stores <> invalid and m.stores.addons <> invalid
-                outcome = m.stores.addons.InstallFromDescriptor(descriptor.transportUrl, descriptor.manifest)
+            if m.storeHost <> invalid
+                outcome = m.storeHost.callFunc("AddonsInstallFromDescriptor", descriptor.transportUrl, descriptor.manifest)
                 if outcome.ok
                     added = added + 1
                 else if outcome.error = "addon already installed"
@@ -757,7 +825,7 @@ end sub
 ' passes it to LibraryStore.SyncFromStremio, the single mapping authority.
 sub StartLibrarySync()
     fields = {}
-    if m.stores <> invalid and m.stores.auth <> invalid then fields.authKey = m.stores.auth.GetAuthKey()
+    if m.storeHost <> invalid then fields.authKey = m.storeHost.callFunc("AuthGetAuthKey")
     task = AsyncTask_Launch(m.top, "LibrarySyncTask", "onLibrarySyncResult", fields, "librarySyncTask")
     m.librarySyncTask = task
 end sub
@@ -784,8 +852,8 @@ sub onLibrarySyncResult()
     if result = invalid or not result.ok or result.items = invalid
         return
     end if
-    if m.stores = invalid or m.stores.library = invalid then return
-    m.stores.library.SyncFromStremio(result.items)
+    if m.storeHost = invalid then return
+    m.storeHost.callFunc("LibrarySyncFromStremio", result.items)
     if m.homeScreen <> invalid then m.homeScreen.callFunc("RefreshContinueWatching")
     ' The relaunched-session case can land the sync while the Library screen is
     ' already up: poke its grid so the freshly synced saved set appears without
@@ -884,8 +952,8 @@ sub onImportTaskResult()
 
     if result <> invalid and result.ok and result.record <> invalid
         registered = false
-        if m.stores <> invalid and m.stores.addons <> invalid
-            registered = m.stores.addons.Register(result.record)
+        if m.storeHost <> invalid
+            registered = m.storeHost.callFunc("AddonsRegister", result.record)
         end if
         if registered
             m.import.added = m.import.added + 1
@@ -938,8 +1006,8 @@ sub FinishImport()
     end if
 
     if m.import.settings <> invalid and m.import.settings.serverAddress <> invalid
-        if m.stores <> invalid and m.stores.settings <> invalid
-            if m.stores.settings.SetServerAddress(m.import.settings.serverAddress)
+        if m.storeHost <> invalid
+            if m.storeHost.callFunc("SettingsSetServerAddress", m.import.settings.serverAddress)
                 blocks.Push("Server linked.")
             else
                 blocks.Push("Invalid server address was ignored.")
