@@ -53,8 +53,23 @@ class StremioApiStore
 
     ' Pull the account's addon collection. Returns { ok, descriptors, error },
     ' with one { transportUrl, manifest } packet per entry.
+    '
+    ' This is the one call in the client with an unbounded response: the API
+    ' answers with the WHOLE collection and every manifest embedded, and
+    ' update:true asks the server to refresh that collection before it replies.
+    ' It therefore rides the long-timeout path (see Transport.LONG_REQUEST_TIMEOUT_MS,
+    ' added for the streaming-server create call for exactly this reason — a
+    ' default-sized request aborts mid-response and the caller cannot tell an
+    ' abort from an empty account).
+    '
+    ' That distinction cost a device cycle to find. A collection pull that ran
+    ' out of time returned { ok: false } exactly like a real API refusal, the
+    ' caller counted zero adds, and MainScene skipped RebuildRows — so the
+    ' screen kept rendering the pre-login rows and the app looked healthy. The
+    ' library pull beside it is small and always fit, which is what made the
+    ' failure look like a Stremio-session problem rather than a timeout.
     function AddonCollectionGet() as object
-        res = m.Post("/api/addonCollectionGet", { type: "AddonCollectionGet", authKey: m.authKey, update: true })
+        res = m.PostLong("/api/addonCollectionGet", { type: "AddonCollectionGet", authKey: m.authKey, update: true })
         result = invalid
         if res.ok and res.json <> invalid then result = res.json.result
         if result = invalid or result.addons = invalid or Type(result.addons) <> "roArray"
@@ -107,6 +122,12 @@ class StremioApiStore
     ' so tests drive these calls through ScriptedTransport like every store.
     private function Post(endpoint as string, body as object) as object
         return m.http.Post(STREMIO_API_BASE + endpoint, body)
+    end function
+
+    ' The long-window twin of Post, for the calls whose response can be large or
+    ' whose server-side work runs long. Only AddonCollectionGet uses it today.
+    private function PostLong(endpoint as string, body as object) as object
+        return m.http.PostLong(STREMIO_API_BASE + endpoint, body)
     end function
 
     ' A datastorePut/logout response is a success when the envelope carries

@@ -97,11 +97,22 @@ function SetStores(storeHost as object, scene as object) as void
         installed = m.stores.addons.callFunc("AddonsGetAll")
         if installed = invalid then
             fault = "store fault: the store host did not answer AddonsGetAll"
-        else if installed.Count() = 0 then
+        else if installed.Count() = 0 and m.stores.auth.callFunc("AuthGetSession") <> "stremio" then
             ' A guest session's GetAll() always returns the two built-in seeds, so
-            ' an empty list means the store is live but empty — a data fault, not
-            ' a hand-off fault, and worth saying out loud rather than leaving a
+            ' an empty list means the store is live but empty — a data fault, not a
+            ' hand-off fault, and worth saying out loud rather than leaving a
             ' bare "0 add-ons" the user cannot interpret.
+            '
+            ' Deliberately NOT raised for a stremio session. AddonsStore hides the
+            ' built-in seeds there (only what the account syncs in counts), so an
+            ' empty list is the NORMAL state between launch and the collection
+            ' landing, and a screen can bind inside that window. Reporting it
+            ' anyway named the wrong subsystem: a stremio relaunch whose
+            ' collection sync had failed was reported as "the store is live but
+            ' reports no add-ons", which reads as a hand-off fault and sent the
+            ' investigation at StoreHost instead of at a request that never
+            ' arrived. The sync reports its own outcome now (MainScene.
+            ' onAddonSyncResult), so the two cannot be confused again.
             fault = "store fault: the store is live but reports no add-ons"
         end if
     end if

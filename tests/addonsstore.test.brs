@@ -407,3 +407,191 @@ sub Test_Addons_StremioInstalledPersists()
     guest = AddonsStore(ScriptedTransport([]), registry)
     Harness_Equal(guest.GetAll().Count(), 2, "guest session unaffected by the stremio install")
 end sub
+
+' ---------------------------------------------------------------------------
+' Display order.
+'
+' These assert the ORDER CONTRACT, not a platform behaviour. The bug they exist
+' for could not be asserted directly: m.installed is an roAssociativeArray,
+' whose key iteration is declaration order under the brs interpreter and the
+' runtime's own hash order on a Roku device. GetAll used to walk that map
+' directly, so Home's catalog rows came out in a different order on the device
+' than in the simulator, and any "first add-on advertising X" picker chose a
+' different provider on device than in the sim. The interpreter has only the one
+' ordering, so a test written against it would have passed against the broken
+' code forever.
+'
+' What CAN be pinned, and is pinned below, is that the order comes from the
+' explicit order list and never from the map's iteration. That is a property of
+' the source, it holds identically on both platforms, and the old code fails it.
+' ---------------------------------------------------------------------------
+
+function RecordFixture(id as string, name as string) as object
+    return {
+        id: id
+        name: name
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["catalog", "meta"]
+        address: "https://" + id + ".example.com"
+        builtin: false
+    }
+end function
+
+function IdsOf(list as object) as object
+    ids = []
+    for each record in list
+        ids.Push(record.id)
+    end for
+    return ids
+end function
+
+sub AssertOrder(list as object, expected as object, what as string) as void
+    got = IdsOf(list)
+    if got.Count() <> expected.Count() then
+        Harness_Ok(false, what + "  (got " + got.Count().ToStr() + " ids, expected " + expected.Count().ToStr() + ")")
+        return
+    end if
+    for i = 0 to got.Count() - 1
+        if got[i] <> expected[i] then
+            Harness_Ok(false, what + "  (position " + i.ToStr() + " was " + got[i] + ", expected " + expected[i] + ")")
+            return
+        end if
+    end for
+    Harness_Ok(true, what)
+end sub
+
+function JsonIdArray(ids as object) as string
+    parts = []
+    for each id in ids
+        parts.Push(Chr(34) + id + Chr(34))
+    end for
+    return "[" + parts.Join(", ") + "]"
+end function
+
+sub Test_Addons_BuiltinOrderIsFixed()
+    Harness_Suite("the shipped built-ins have a fixed, declared order")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+
+    Harness_Equal(JsonIdArray(addons.BuiltinIds()), "[" + Chr(34) + "com.linvo.cinemeta" + Chr(34) + ", " + Chr(34) + "org.stremio.opensubtitlesv3" + Chr(34) + "]", "BuiltinIds is the declared pair, metadata first")
+    AssertOrder(addons.GetAll(), ["com.linvo.cinemeta", "org.stremio.opensubtitlesv3"], "GetAll lists the built-ins in BuiltinIds order")
+end sub
+
+sub Test_Addons_GetAllUsesRegistrationOrder()
+    Harness_Suite("GetAll lists installed add-ons in registration order")
+    addons = AddonsStore(ScriptedTransport([]), invalid, "stremio")
+
+    ' Registered Z, A, M on purpose. Name order would be A, M, Z and map
+    ' iteration order is whatever the platform does — only registration order
+    ' gives Z, A, M.
+    Harness_Ok(addons.Register(RecordFixture("com.z.addon", "Zeta")), "Zeta registered")
+    Harness_Ok(addons.Register(RecordFixture("com.a.addon", "Alpha")), "Alpha registered")
+    Harness_Ok(addons.Register(RecordFixture("com.m.addon", "Mid")), "Mid registered")
+
+    AssertOrder(addons.GetAll(), ["com.z.addon", "com.a.addon", "com.m.addon"], "registration order, not name order")
+end sub
+
+sub Test_Addons_GetAllFollowsPersistedOrderNotRecordMap()
+    Harness_Suite("GetAll follows the persisted order list, not the record map")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    addons.Register(RecordFixture("com.a.addon", "Alpha"))
+    addons.Register(RecordFixture("com.b.addon", "Beta"))
+    addons.Register(RecordFixture("com.c.addon", "Charlie"))
+    AssertOrder(addons.GetAll(), ["com.a.addon", "com.b.addon", "com.c.addon"], "registration order first")
+
+    ' Rewrite ONLY the order key, leaving the record map exactly as written. A
+    ' GetAll that walked the map would ignore this and still report A, B, C.
+    registry.Write("stremio_addons_order", JsonIdArray(["com.c.addon", "com.a.addon", "com.b.addon"]))
+    reopened = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    AssertOrder(reopened.GetAll(), ["com.c.addon", "com.a.addon", "com.b.addon"], "the order key decides the list, the record map cannot")
+    Harness_Equal(reopened.GetAll().Count(), 3, "no record lost to the reorder")
+end sub
+
+sub Test_Addons_OrderSurvivesReload()
+    Harness_Suite("the display order survives a relaunch")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    addons.Register(RecordFixture("com.z.addon", "Zeta"))
+    addons.Register(RecordFixture("com.a.addon", "Alpha"))
+
+    reopened = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    AssertOrder(reopened.GetAll(), ["com.z.addon", "com.a.addon"], "order still registration order after reload")
+end sub
+
+sub Test_Addons_MissingOrderListFallsBackToNameSort()
+    Harness_Suite("records with no entry in the order list still land somewhere stable")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    addons.Register(RecordFixture("com.z.addon", "Zeta"))
+    addons.Register(RecordFixture("com.a.addon", "Alpha"))
+    addons.Register(RecordFixture("com.m.addon", "Mid"))
+
+    ' A registry written before the order key existed has no order to read.
+    registry.Write("stremio_addons_order", "")
+    reopened = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    AssertOrder(reopened.GetAll(), ["com.a.addon", "com.m.addon", "com.z.addon"], "no order list falls back to name order, not map order")
+
+    registry.Write("stremio_addons_order", "{ not json")
+    torn = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    AssertOrder(torn.GetAll(), ["com.a.addon", "com.m.addon", "com.z.addon"], "a corrupt order list is a cold start, not a crash")
+end sub
+
+sub Test_Addons_ReinstallMovesToEnd()
+    Harness_Suite("re-installing a removed add-on puts it at the end")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    addons.Register(RecordFixture("com.a.addon", "Alpha"))
+    addons.Register(RecordFixture("com.b.addon", "Beta"))
+    addons.Register(RecordFixture("com.c.addon", "Charlie"))
+
+    Harness_Ok(addons.Uninstall("com.b.addon"), "Beta removed")
+    AssertOrder(addons.GetAll(), ["com.a.addon", "com.c.addon"], "Beta gone from the list")
+    Harness_Ok(addons.Register(RecordFixture("com.b.addon", "Beta")), "Beta re-registered")
+    AssertOrder(addons.GetAll(), ["com.a.addon", "com.c.addon", "com.b.addon"], "Beta re-registered lands at the end, not back in its old slot")
+end sub
+
+sub Test_Addons_OrderLivesOutsideTheRecordMap()
+    Harness_Suite("the display order is persisted outside the record map")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry, "stremio")
+    addons.Register(RecordFixture("com.a.addon", "Alpha"))
+
+    ' The whole reason for a second key: the record map is persisted as a JSON
+    ' OBJECT and ParseJson does not preserve object key order, so an order kept
+    ' in there would be lost on the next launch. An ARRAY round-trips in
+    ' sequence; this asserts it is written as one.
+    Harness_Equal(registry.values["stremio_addons_order"], "[" + Chr(34) + "com.a.addon" + Chr(34) + "]", "order persisted as a JSON array of ids")
+    Harness_Ok(registry.values["stremio_addons"].Left(1) = "{", "records still persisted as the JSON object they are")
+
+    addons.SwitchSession("guest")
+    Harness_Equal(addons.GetAll().Count(), 2, "switching to guest drops the stremio order with the rest of its data")
+    Harness_Equal(registry.values["addons_order"], invalid, "the stremio order never leaked into the guest key")
+
+    addons.Register(RecordFixture("com.guest.addon", "Guest"))
+    Harness_Equal(registry.values["addons_order"], "[" + Chr(34) + "com.guest.addon" + Chr(34) + "]", "the guest session keeps its own order, holding only guest add-ons")
+    AssertOrder(addons.GetAll(), ["com.linvo.cinemeta", "org.stremio.opensubtitlesv3", "com.guest.addon"], "guest list is built-ins in fixed order, then the guest install")
+end sub
+
+sub Test_Addons_IsBuiltinSurvivesSyncProvenance()
+    Harness_Suite("IsBuiltin keys off the id, not the record's builtin flag")
+    addons = AddonsStore(ScriptedTransport([]), invalid, "stremio")
+    outcome = addons.InstallFromDescriptor("https://opensubtitles-v3.strem.io/manifest.json", {
+        id: "org.stremio.opensubtitlesv3"
+        name: "OpenSubtitles v3"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["subtitles"]
+    })
+
+    Harness_Ok(outcome.ok, "the account sync adopts the built-in by id")
+    ' The whole point: the synced record carries builtin: false, exactly like
+    ' every other add-on it synced. The flag is useless for ranking; the id is
+    ' not, which is why anything picking a provider asks for this and not for
+    ' record.builtin.
+    Harness_Equal(addons.Get("org.stremio.opensubtitlesv3").builtin, false, "a synced built-in is stamped builtin: false like everything else")
+    Harness_Ok(addons.IsBuiltin("org.stremio.opensubtitlesv3"), "IsBuiltin still recognises it")
+    Harness_Ok(not addons.IsBuiltin("com.example.addon"), "IsBuiltin does not claim a third-party add-on")
+end sub

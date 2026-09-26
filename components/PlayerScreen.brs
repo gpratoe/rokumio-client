@@ -51,6 +51,9 @@ sub init()
     m.pendingStop = false
     m.resolveTask = invalid
     m.subtitleTask = invalid
+    m.subtitleParams = invalid
+    m.subtitleCandidates = []
+    m.subtitleCursor = 0
     m.subtitleTracks = invalid
     m.subtitleIndex = -1
     m.subtitleNodesApplied = false
@@ -152,44 +155,113 @@ end sub
 
 ' Kick the caption fetch off the render thread. Subtitles never gate playback:
 ' StartPlayback applies whatever had arrived by then and a late result applies
-' to the live Video node the moment it reports in. The add-on scan prefers an
-' installed (non-built-in) add-on so a locally installed mock beats the
-' internet-bound OpenSubtitles built-in; OpenSubtitles is only used when
-' nothing else advertises the resource.
+' to the live Video node the moment it reports in.
+'
+' The candidate list comes from SubtitlesAddresses, which RANKS by what a
+' provider is rather than taking whatever the registry happened to yield first,
+' and which is then drained in that order — so a provider that cannot answer
+' costs one round trip and steps aside instead of ending the search.
 sub StartSubtitles(params as object)
     if m.stores = invalid then return
     if m.subtitleTask <> invalid then return
     if params.metaType = invalid or params.videoId = invalid then return
     if params.metaType = "" or params.videoId = "" then return
 
-    address = FindSubtitlesAddress(m.stores.addons.callFunc("AddonsGetAll"))
-    if address = "" then return
+    m.subtitleParams = { metaType: params.metaType, videoId: params.videoId }
+    m.subtitleCandidates = SubtitlesAddresses(m.stores.addons.callFunc("AddonsGetAll"))
+    m.subtitleCursor = 0
+    LaunchSubtitleFetch()
+end sub
+
+' Ask the next queued provider. One candidate is in flight at a time and the
+' cursor only ever moves forward, so a registry full of dead providers costs one
+' request each and still terminates.
+sub LaunchSubtitleFetch()
+    if m.subtitleParams = invalid then return
+    if m.subtitleTask <> invalid then return
+    if m.subtitleCandidates = invalid then return
+    if m.subtitleCursor >= m.subtitleCandidates.Count() then return
+
+    address = m.subtitleCandidates[m.subtitleCursor]
+    m.subtitleCursor = m.subtitleCursor + 1
+    if address = invalid or address = "" then
+        LaunchSubtitleFetch()
+        return
+    end if
 
     task = AsyncTask_Launch(m.top, "SubtitleLoaderTask", "onSubtitleResult", {
         addonAddress: address
-        metaType: params.metaType
-        videoId: params.videoId
+        metaType: m.subtitleParams.metaType
+        videoId: m.subtitleParams.videoId
     }, "playerSubtitles")
     m.subtitleTask = task
 end sub
 
-' Address of the add-on to ask for captions: the first installed (non-built-in)
-' add-on advertising "subtitles", else the built-in that does.
-function FindSubtitlesAddress(addons as object) as string
-    builtin = ""
+' Ranked list of addresses worth asking for captions, best first.
+'
+' This used to answer "the first add-on advertising subtitles, and prefer it
+' over the built-in" — a winner decided by POSITION, in a list that has no
+' position. The registry is an roAssociativeArray, so on a Roku device "the
+' first" was whichever entry the hash order produced: a different pick on every
+' device, and one no test in this repo could have caught because the brs
+' interpreter only has a single ordering. Guest sessions escaped it because the
+' two built-in seeds head the list and the winner fell out of that deterministic
+' part. A stremio session is hash-ordered end to end, so it was the only session
+' where the pick was arbitrary — and the symptom was the working provider
+' sitting right there in the registry, never being asked.
+'
+' Ranked by capability now:
+'   1. the official built-in, recognised by ID. The built-in is the one provider
+'      proven to need no credentials, so it leads.
+'   2. everything else advertising subtitles, ordered by name then id.
+'
+' Duplicates collapse, so a provider that answered under two records is asked
+' once rather than twice.
+function SubtitlesAddresses(addons as object) as object
+    ranked = []
+    rest = []
+    if addons = invalid then return ranked
     for each addon in addons
         if addon <> invalid and addon.address <> invalid and addon.address <> ""
             if addon.resources <> invalid and m.stores.addons.callFunc("AddonsHasResource", addon.resources, "subtitles")
-                if addon.builtin = true
-                    if builtin = "" then builtin = addon.address
+                if m.stores.addons.callFunc("AddonsIsBuiltin", addon.id)
+                    if not AddressIn(ranked, addon.address) then ranked.Push(addon.address)
                 else
-                    return addon.address
+                    if not AddressIn(rest, addon.address) then rest.Push(addon.address)
                 end if
             end if
         end if
     end for
-    return builtin
+    SortAddressesByName(rest)
+    for each address in rest
+        ranked.Push(address)
+    end for
+    return ranked
 end function
+
+function AddressIn(list as object, address as string) as boolean
+    if list = invalid then return false
+    for each entry in list
+        if entry = address then return true
+    end for
+    return false
+end function
+
+' Insertion sort so the tail of the candidate list is ordered by something the
+' screen controls outright, rather than by however the registry happened to
+' iterate.
+sub SortAddressesByName(list as object) as void
+    for i = 1 to list.Count() - 1
+        item = list[i]
+        j = i - 1
+        while j >= 0
+            if not (list[j] > item) then exit while
+            list[j + 1] = list[j]
+            j = j - 1
+        end while
+        list[j + 1] = item
+    end for
+end sub
 
 ' The caption list landed. The raw add-on tracks become the SubtitleTracks
 ' source and a pick index selects the active one; a failure leaves the player
@@ -203,10 +275,21 @@ sub onSubtitleResult()
     AsyncTask_Reap(task, m.top, false)
 
     if result = invalid or not result.ok or result.subtitles = invalid or result.subtitles.Count() = 0
+        ' This provider had nothing to give. Another candidate still queued
+        ' means the search is not over: choosing the wrong provider must not
+        ' read the same as owning no subtitles at all, which is exactly what
+        ' made an unreachable pick indistinguishable from a device with no
+        ' subtitle add-ons.
+        if m.subtitleCandidates <> invalid and m.subtitleCursor < m.subtitleCandidates.Count()
+            LaunchSubtitleFetch()
+            return
+        end if
         ClearSubtitles()
         return
     end if
 
+    m.subtitleCandidates = []
+    m.subtitleParams = invalid
     m.subtitleTracks = result.subtitles
     m.subtitleNodesApplied = false
     m.subtitleIndex = m.subtitlePicker.PickTrack(result.subtitles, DeviceLocale())
@@ -217,6 +300,9 @@ sub onSubtitleResult()
 end sub
 
 sub CancelSubtitles()
+    m.subtitleCandidates = []
+    m.subtitleCursor = 0
+    m.subtitleParams = invalid
     if m.subtitleTask <> invalid
         task = m.subtitleTask
         m.subtitleTask = invalid
@@ -253,8 +339,22 @@ sub ApplySubtitleIndex(content as object)
         return
     end if
 
-    if not m.subtitleNodesApplied
-        content.subtitleTracks = BuildSubtitleTracks()
+    ' Build the track list BEFORE the content node is touched, and bail out
+    ' entirely when it comes back empty. BuildSubtitleTracks drops every entry
+    ' without a usable URL, so a provider can hand back a non-empty raw list
+    ' that yields nothing playable — and the old order wrote that empty array
+    ' onto the LIVE content node anyway, blanking the caption state of a video
+    ' that was already playing. Writing nothing at all is the correct answer
+    ' when there is no track to select; the player already starts caption-free.
+    tracks = invalid
+    if not m.subtitleNodesApplied then tracks = BuildSubtitleTracks()
+    if tracks <> invalid and tracks.Count() = 0 then
+        m.subtitleNodesApplied = false
+        ClearSubtitles()
+        return
+    end if
+    if tracks <> invalid
+        content.subtitleTracks = tracks
         m.subtitleNodesApplied = true
     end if
 
@@ -267,7 +367,10 @@ sub ApplySubtitleIndex(content as object)
 
     content.subtitleConfig = { TrackName: selected }
     SelectSubtitleTrack(selected)
-    ' Force captions on when we have tracks so the user sees them by default
+    ' Force captions on only now, once a track with a real URL is confirmed
+    ' selected. Turning captions on over a list the platform cannot load is how
+    ' the player ends up in a caption state it cannot leave: the Options dialog
+    ' shows entries, every one fails to render, and there is no path back.
     SetCaptionMode("on")
 end sub
 

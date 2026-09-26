@@ -61,5 +61,13 @@
             <DiscoverScreen id="discoverScreen" visible="false" />
             <LibraryScreen id="libraryScreen" visible="false" />
         </Group>
+
+        <!-- One tick of delay between the player reporting a position and the
+             write-back worker being created. The report arrives from inside the
+             player's Video "state" observer, and building a Task node on that
+             stack wedges playback; see ScheduleWatchStatePush in MainScene.brs.
+             One-shot and restarted per publish, so a burst of position reports
+             coalesces into a single launch. -->
+        <Timer id="watchStatePump" duration="1" repeat="false" />
     </children>
 </component>

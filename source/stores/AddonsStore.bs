@@ -16,6 +16,12 @@
 ' section object is shared; only the key changes. Records are plain data only —
 ' FormatJson drops unsupported values.
 '
+' Each session also has an "<registry key>_order" key holding the display order
+' as a JSON array of ids. It is separate from the record map because that map
+' is persisted as a JSON OBJECT, and ParseJson does not preserve object key
+' order — a display order stored in the map is silently gone by the next
+' launch. See GetAll for why the order is explicit rather than emergent.
+'
 ' showBuiltIns rules the virtual built-in seeds: they appear for a guest
 ' session (a fresh install is already a working product) and never for a stremio
 ' session (only what the account syncs in — see the addon-sync stage).
@@ -35,6 +41,7 @@ class AddonsStore
     showBuiltIns as boolean
     installed as object
     removed as object
+    order as object
 
     sub new(http as object, registry = invalid as dynamic, sessionType = "guest" as string)
         m.transport = http
@@ -44,6 +51,7 @@ class AddonsStore
         m.showBuiltIns = (m.sessionType = "guest")
         m.installed = {}
         m.removed = []
+        m.order = []
         m.Load()
     end sub
 
@@ -83,6 +91,25 @@ class AddonsStore
                 builtin: true
             }
         }
+    end function
+
+    ' The shipped built-in ids in a FIXED order. BuiltIns() hands back an
+    ' roAssociativeArray and "for each" over its keys has NO defined order — the
+    ' brs simulator yields declaration order, a Roku device yields its own hash
+    ' order — so every walk of the built-ins goes through this list instead.
+    ' The order below is a product decision (metadata before captions), not an
+    ' accident of how the literal happens to be written.
+    function BuiltinIds() as object
+        return ["com.linvo.cinemeta", "org.stremio.opensubtitlesv3"]
+    end function
+
+    ' Whether the given id is one of the shipped built-ins. This keys off the
+    ' ID, never off a record's builtin flag: the account sync stamps every
+    ' record it adopts with builtin: false, so on a stremio session the flag
+    ' carries no information at all while the id survives intact. Anything
+    ' ranking a provider has to rank on this.
+    function IsBuiltin(id as string) as boolean
+        return m.HasKey(m.BuiltIns(), id)
     end function
 
     ' Validate that user input is a complete manifest URL (http(s)://...).
@@ -248,9 +275,32 @@ class AddonsStore
         if record = invalid or record.id = invalid or record.id = "" then return false
         if m.HasKey(m.installed, record.id) then return false
         m.installed[record.id] = record
+        ' Registration order is display order (see GetAll). Appended, not
+        ' inserted: during an account sync the descriptors arrive in the order
+        ' the Stremio API returned them, which is the user's own arrangement, so
+        ' a plain append reproduces it. A local install lands at the end, and a
+        ' re-install after a removal does too.
+        if not m.InOrder(record.id) then m.order.Push(record.id)
         m.Save()
         return true
     end function
+
+    function InOrder(id as string) as boolean
+        if m.order = invalid then return false
+        for each entry in m.order
+            if entry = id then return true
+        end for
+        return false
+    end function
+
+    ' Drop an id from the order list, keeping the rest in sequence.
+    private sub DropFromOrder(id as string) as void
+        kept = []
+        for each entry in m.order
+            if entry <> id then kept.Push(entry)
+        end for
+        m.order = kept
+    end sub
 
     ' Adopt an addon the account-sync API already described (transport URL +
     ' full manifest are in the addonCollectionGet response), so no manifest
@@ -322,6 +372,7 @@ class AddonsStore
         end if
         if m.HasKey(m.installed, id)
             m.installed.Delete(id)
+            m.DropFromOrder(id)
             m.Save()
             return true
         end if
@@ -342,26 +393,101 @@ class AddonsStore
         return invalid
     end function
 
-    ' Shipped built-ins first (minus any the user removed), then installed
-    ' add-ons. A same-id clone therefore appears twice (its built-in seed and
-    ' itself) until one of them is removed. Built-ins only render in sessions
-    ' that show them (guest); a stremio session lists exactly its installed set.
+    ' THE ordered view of the registry, and the reason this method exists at
+    ' all. Every row that lists add-ons and every "which provider do I ask"
+    ' picker reads its order from here.
+    '
+    ' It used to be "built-ins, then for each id in m.installed" — which is not
+    ' an order at all. m.installed is an roAssociativeArray, and iterating its
+    ' keys yields declaration order under the brs simulator and the runtime's
+    ' own hash order on a Roku device. Same registry, different list, per
+    ' platform, and no test could ever have caught it because the interpreter
+    ' only has one behaviour. The visible symptom was Home's catalog rows
+    ' landing in a different order on the device than in the simulator; the
+    ' quiet one was every "first add-on that advertises X" picker choosing a
+    ' different provider on device than in the sim.
+    '
+    ' A guest session hid it, because its list opened with the two built-in
+    ' seeds and only the tail moved. A stremio session is hash-ordered end to
+    ' end, so it was the only session where ANY of this was reachable.
+    '
+    ' Order is explicit now, in three parts:
+    '   1. built-in seeds in BuiltinIds() order (guest only)
+    '   2. installed add-ons in registration order — which for an account sync
+    '      is the order the Stremio API returned them in, i.e. the order the
+    '      user arranged them in their own Stremio app
+    '   3. anything installed before this existed, or out of band, sorted by
+    '      name then id so it still lands somewhere stable
+    '
+    ' Part 2 is persisted in its own key because the record map cannot carry it:
+    ' FormatJson(m.installed) writes a JSON OBJECT, and ParseJson does not
+    ' preserve object key order, so an order stored there is gone by the next
+    ' launch. A JSON ARRAY does preserve it, which is why OrderKey() is
+    ' separate from RegistryKey().
+    '
+    ' A same-id clone still appears twice (its built-in seed and itself) until
+    ' one of them is removed.
     function GetAll() as object
         list = []
         if m.showBuiltIns
             builtins = m.BuiltIns()
-            for each id in builtins
-                if not m.IsRemoved(id) then list.Push(builtins[id])
+            for each id in m.BuiltinIds()
+                if m.HasKey(builtins, id) and not m.IsRemoved(id) then list.Push(builtins[id])
             end for
         end if
+
+        ' Installed records the order list does not mention. Collected first so
+        ' the two output walks below stay a straight read of m.order.
+        listed = {}
+        for each id in m.order
+            listed[id] = true
+        end for
+        unlisted = []
         for each id in m.installed
-            list.Push(m.installed[id])
+            if not m.HasKey(listed, id) then unlisted.Push(m.installed[id])
+        end for
+        m.SortByNameThenId(unlisted)
+
+        for each id in m.order
+            if m.HasKey(m.installed, id) then list.Push(m.installed[id])
+        end for
+        for each record in unlisted
+            list.Push(record)
         end for
         return list
     end function
 
-    function IsBuiltin(id as string) as boolean
-        return m.HasKey(m.BuiltIns(), id)
+    ' Insertion sort by name, then by id. Deliberately not "whatever
+    ' roAssociativeArray iteration yields" and not an assumption that Sort() is
+    ' stable — this way the ordering is something the store fully controls and
+    ' a test can state.
+    private sub SortByNameThenId(list as object) as void
+        for i = 1 to list.Count() - 1
+            item = list[i]
+            j = i - 1
+            while j >= 0
+                if not m.SortsAfter(list[j], item) then exit while
+                list[j + 1] = list[j]
+                j = j - 1
+            end while
+            list[j + 1] = item
+        end for
+    end sub
+
+    ' True when a belongs strictly after b. Name first so the list reads the way
+    ' a person would say it, id as the tiebreak so two add-ons that share a name
+    ' still have one fixed order.
+    private function SortsAfter(a as object, b as object) as boolean
+        an = ""
+        if a.name <> invalid then an = a.name
+        bn = ""
+        if b.name <> invalid then bn = b.name
+        if an <> bn then return an > bn
+        ai = ""
+        if a.id <> invalid then ai = a.id
+        bi = ""
+        if b.id <> invalid then bi = b.id
+        return ai > bi
     end function
 
     ' Whether the user removed the shipped built-in with this id. Checked
@@ -408,6 +534,15 @@ class AddonsStore
         return "addons_removed"
     end function
 
+    ' The display order, in its own key. It cannot live inside the record map:
+    ' that map is persisted as a JSON OBJECT, and ParseJson does not preserve
+    ' object key order, so an order kept there is lost on the next launch. A
+    ' JSON ARRAY round-trips in sequence, which is the whole reason this key
+    ' exists separately — see GetAll.
+    function OrderKey() as string
+        return m.RegistryKey() + "_order"
+    end function
+
     ' Repoint the store at another session's data. A same-session switch is a
     ' no-op; installed/removed are reloaded fresh so the in-memory state always
     ' mirrors the active session's persisted key.
@@ -418,12 +553,14 @@ class AddonsStore
         m.showBuiltIns = (sessionType = "guest")
         m.installed = {}
         m.removed = []
+        m.order = []
         m.Load()
     end sub
 
     sub Save()
         if m.registry = invalid then return
         m.registry.Write(m.RegistryKey(), FormatJson(m.installed))
+        m.registry.Write(m.OrderKey(), FormatJson(m.order))
         m.registry.Flush()
     end sub
 
@@ -454,6 +591,29 @@ class AddonsStore
                     record = m.installed[id]
                     if record.resources <> invalid then record.resources = m.NormalizeResources(record.resources)
                 end for
+            end if
+        end if
+
+        ' The display order, in the key that can actually hold one. A missing or
+        ' malformed order is not an error: GetAll falls back to sorting by name,
+        ' which is stable even if it is not the user's arrangement.
+        orderRaw = m.registry.Read(m.OrderKey())
+        if orderRaw <> ""
+            parsedOrder = invalid
+            try
+                parsedOrder = ParseJson(orderRaw)
+            catch e
+                parsedOrder = invalid
+            end try
+            if parsedOrder <> invalid and Type(parsedOrder) = "roArray"
+                keptOrder = []
+                for each entry in parsedOrder
+                    ' Drop ids the order names but the record map no longer has,
+                    ' so a re-install of a removed add-on lands at the end rather
+                    ' than silently inheriting a slot it no longer owns.
+                    if m.HasKey(m.installed, entry) then keptOrder.Push(entry)
+                end for
+                m.order = keptOrder
             end if
         end if
 

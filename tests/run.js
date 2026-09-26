@@ -702,6 +702,103 @@ function checkSessionAuthorityContract() {
     return ok;
 }
 
+// A stremio session's add-ons exist ONLY as whatever the account sync wrote to
+// the stremio_addons registry key — AddonsStore deliberately shows no built-in
+// seeds for that session type. So an empty key means no Cinemeta, which means
+// every AddonsGet("com.linvo.cinemeta") caller gets invalid, including
+// MetaAddress(), which is what the Continue Watching row's Details fetch needs.
+//
+// Three claims about that were carried by COMMENTS rather than by anything a
+// test could contradict, and a single failed login-time sync made all of them
+// false at once: the session went permanently catalog-less, the failure printed
+// nothing, and the only recovery was logging out and re-pairing the account.
+// Each is pinned here.
+function checkStremioProvisioningContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const brs = read('components/MainScene.brs');
+    const screen = read('components/Screen.brs');
+    const api = read('source/stores/StremioApiStore.bs');
+    let ok = true;
+
+    const subBody = (source, name) => {
+        const start = source.indexOf(`sub ${name}()`);
+        if (start === -1) return '';
+        const next = source.indexOf('\nsub ', start + 1);
+        return next === -1 ? source.slice(start) : source.slice(start, next);
+    };
+
+    // 1. A relaunched stremio session must re-pull the collection, not trust
+    //    that a past login left one behind.
+    const start = subBody(brs, 'Start');
+    if (!/EffectiveSessionType\(\)\s*=\s*"stremio"/.test(start)) {
+        console.error('MainScene.brs sub Start() no longer branches on a stremio session — a relaunched account session would sync nothing at all');
+        ok = false;
+    } else if (!/StartAddonSync\(\)/.test(start)) {
+        console.error('MainScene.brs sub Start() does not call StartAddonSync() for a relaunched stremio session — an empty stremio_addons key can never recover, and recovery used to mean re-pairing the account');
+        ok = false;
+    }
+    if (!/StartLibrarySync\(\)/.test(start)) {
+        console.error('MainScene.brs sub Start() no longer re-pulls the library on a relaunched stremio session');
+        ok = false;
+    }
+
+    // 2. The collection is the one unbounded response in the client (whole
+    //    collection, every manifest embedded, update:true on top), so it must
+    //    ride the long-timeout path. On the default window it returned the same
+    //    { ok: false } as a real refusal and the caller could not tell them apart.
+    const collection = /function\s+AddonCollectionGet\(\)[\s\S]*?end\s+function/.exec(api);
+    if (!collection) {
+        console.error('StremioApiStore.bs has no AddonCollectionGet — the account collection pull is gone');
+        ok = false;
+    } else if (!/PostLong\(\s*"\/api\/addonCollectionGet"/.test(collection[0])) {
+        console.error('StremioApiStore.bs AddonCollectionGet must use PostLong, not Post — the collection is the one unbounded response in the client and aborts on the default window');
+        ok = false;
+    }
+    if (!/private\s+function\s+PostLong\s*\(/.test(api)) {
+        console.error('StremioApiStore.bs has no PostLong helper — AddonCollectionGet cannot reach the long-timeout path');
+        ok = false;
+    }
+
+    // 3. A sync that reports nothing must say so. A transport timeout, an HTTP
+    //    error and an empty account all used to fall off the end of the sub
+    //    identically, so Home kept rendering pre-login rows looking healthy.
+    const result = subBody(brs, 'onAddonSyncResult');
+    if (!/ClearAddonSyncFaults\(\)/.test(result)) {
+        console.error('MainScene.brs onAddonSyncResult does not retract its previous fault lines — a retry that failed differently would leave stale errors up forever');
+        ok = false;
+    }
+    if (!/if\s+not\s+result\.ok\s*\n[\s\S]{0,400}?AddAddonSyncFault\(/.test(result)) {
+        console.error('MainScene.brs onAddonSyncResult still falls off the end when the sync fails — an unreported failed sync is indistinguishable from a healthy one');
+        ok = false;
+    }
+    if (!/result\.error/.test(result)) {
+        console.error('MainScene.brs onAddonSyncResult never reads result.error — the transport\'s own reason is discarded instead of shown');
+        ok = false;
+    }
+    if (!/AddAddonSyncFault\(\s*"addon sync: the account reported no add-ons"/.test(result)) {
+        console.error('MainScene.brs onAddonSyncResult must name the synced-but-empty outcome — that is the exact state that used to require re-pairing');
+        ok = false;
+    }
+
+    // 4. The bind probe must not report a stremio session's pre-sync emptiness as
+    //    a hand-off fault. It did, and it pointed the investigation at StoreHost
+    //    instead of at the request that never arrived.
+    const condition = /else\s+if\s+installed\.Count\(\)\s*=\s*0([^\n]*)\n/.exec(screen);
+    if (!condition) {
+        console.error('Screen.brs no longer reports an empty add-on list as a store fault — the probe lost its "the store answered with nothing" hop');
+        ok = false;
+    } else if (!/callFunc\(\s*"AuthGetSession"\s*\)\s*<>\s*"stremio"/.test(condition[1])) {
+        console.error('Screen.brs raises the empty-add-ons fault for a stremio session — that state is normal between launch and the collection landing, and reporting it names the wrong subsystem');
+        ok = false;
+    }
+    if (!/callFunc\(\s*"AuthGetSession"/.test(screen)) {
+        console.error('Screen.brs reads the session through something other than callFunc("AuthGetSession") — the store alias must be spelled at the call site or the hand-off check cannot see it');
+        ok = false;
+    }
+    return ok;
+}
+
 // FinishImport calls m.homeScreen.callFunc('RebuildRows') after a deep-link
 // import lands new add-ons. Same callFunc interface-declaration trap as
 // MainScene above — pin it or a missing declaration silently no-ops on device.
@@ -904,6 +1001,402 @@ function checkThemeContract() {
     return ok;
 }
 
+// The one bug class this repository cannot test its way out of.
+//
+// m.installed is an roAssociativeArray. "for each" over its keys has NO defined
+// order: the brs interpreter yields declaration order, a Roku device yields the
+// runtime's own hash order. So code that walks it to build a list — or that
+// takes "the first entry that has property X" — produces a DIFFERENT list, and
+// makes a DIFFERENT choice, on the device than under `npm test`. Every test in
+// this repo passes against the broken version, permanently, because the
+// interpreter only has one behaviour to exhibit.
+//
+// That is not hypothetical here. It shipped: Home's catalog rows came out in a
+// different order on the device than in the simulator, and the subtitle
+// provider picker asked whichever add-on the hash order happened to yield first
+// — a provider the app could not drive, while the working one sat in the same
+// registry. Guest sessions hid it because their list opens with the built-in
+// seeds, so only the tail moved; a stremio session is hash-ordered end to end.
+//
+// The lesson belongs in the harness as much as in the code: a green suite is
+// NOT evidence about anything that depends on iteration order. Pin order by
+// construction — an explicit list, persisted as a JSON array — and pin the
+// absence of the old shape here, where the interpreter cannot launder it.
+function checkAddonOrderingContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const store = read('source/stores/AddonsStore.bs');
+    const player = read('components/PlayerScreen.brs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    // Scan CODE, not prose: these files document the exact bug in their headers,
+    // and a raw-text scan would match the documentation describing it.
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const storeCode = code(store);
+    const playerCode = code(player);
+
+    // Body of a `function Name(`/`sub Name(` member, found by depth counting so
+    // it works for both indented BSL class methods and flat component subs.
+    // Indexed by position, NOT lines.indexOf: every `end for` in a method body
+    // is a duplicate line, and indexOf would cut the body at the first one.
+    const member = (src, name) => {
+        const head = new RegExp(`^[ \\t]*(?:private\\s+)?(?:function|sub)\\s+${name}\\s*\\(`, 'm');
+        const m = head.exec(src);
+        if (!m) return null;
+        const lines = src.slice(m.index).split('\n');
+        let depth = 0;
+        for (let i = 0; i < lines.length; i++) {
+            if (/^\s*(?:private\s+)?(?:function|sub)\s/.test(lines[i])) depth++;
+            else if (/^\s*end\s+(?:function|sub)\b/.test(lines[i])) {
+                depth--;
+                if (depth === 0) return code(lines.slice(0, i + 1).join('\n'));
+            }
+        }
+        return null;
+    };
+
+    // The body of the `for each` loop whose header is at `from`, matched on
+    // indentation so a nested loop does not end it early.
+    const loopBody = (src, from) => {
+        const lines = src.split('\n');
+        const start = src.slice(0, from).split('\n').length - 1;
+        const indent = (lines[start].match(/^\s*/) || [''])[0];
+        const out = [];
+        for (let i = start + 1; i < lines.length; i++) {
+            out.push(lines[i]);
+            if (new RegExp(`^${indent}end\\s+for\\b`).test(lines[i])) return out.join('\n');
+        }
+        return out.join('\n');
+    };
+    // Every `for each` header matching a pattern, with the body of each loop.
+    // More than one is normal (GetAll walks m.order twice: once to build a
+    // lookup, once to emit), so a check has to say which of them it means.
+    //
+    // `[ \t]*` and the trailing `$`, never `\s*`: \s matches a newline, so a
+    // pattern that can skip lines starts matching on the BLANK line above the
+    // header, the captured indent comes out empty, and loopBody then runs to the
+    // end of the member and reports pushes that belong to a later loop. That
+    // silently disabled two of these checks once already.
+    const walks = (src, pattern) => {
+        const re = new RegExp(pattern, 'gm');
+        const out = [];
+        let m;
+        while ((m = re.exec(src)) !== null) out.push({ header: m[0], body: loopBody(src, m.index) });
+        return out;
+    };
+    const pushesTo = (w, list) => w.body.split('\n').some(line => new RegExp(`\\b${list}\\.Push\\s*\\(`).test(line));
+    const anyPushes = (ws, list) => ws.some(w => pushesTo(w, list));
+
+    // --- the ordered view is the only view ------------------------------------
+    const getAll = member(storeCode, 'GetAll');
+    if (!getAll) {
+        err('AddonsStore has no GetAll — the one ordered view of the registry is gone');
+    } else {
+        // Every record that reaches the returned list must arrive through one of
+        // these four walks, and no walk of the record map may push into the
+        // result at all. Asserted per loop rather than as one regex so a push in
+        // a later loop cannot be read as belonging to an earlier one.
+        const mapWalks = walks(getAll, '^[ \\t]*for\\s+each\\s+\\w+\\s+in\\s+m\\.installed\\b[^\\n]*$');
+        if (mapWalks.length === 0) {
+            err('AddonsStore.GetAll no longer walks m.installed at all — records with no entry in the order list need somewhere to be collected and sorted');
+        } else if (anyPushes(mapWalks, 'list')) {
+            err('AddonsStore.GetAll pushes straight out of its m.installed walk again — that walk is roAssociativeArray key order, which is declaration order in the simulator and hash order on a device, so rows reorder and "first match" picks change per platform. Collect them and sort; append via m.order.');
+        }
+        const builtinWalks = walks(getAll, '^[ \\t]*for\\s+each\\s+\\w+\\s+in\\s+m\\.BuiltinIds\\(\\)[^\\n]*$');
+        if (builtinWalks.length === 0) {
+            err('AddonsStore.GetAll no longer walks BuiltinIds() — iterating the BuiltIns() associative array is the same undefined-order trap one level up');
+        } else if (!anyPushes(builtinWalks, 'list')) {
+            err('AddonsStore.GetAll walks BuiltinIds() but never appends what it yields — the built-in seeds would be missing from every ordered view');
+        }
+        const orderWalks = walks(getAll, '^[ \\t]*for\\s+each\\s+\\w+\\s+in\\s+m\\.order\\b[^\\n]*$');
+        if (orderWalks.length === 0) {
+            err('AddonsStore.GetAll does not walk the persisted m.order list — with no explicit order, the display order falls back to registry iteration');
+        } else if (!anyPushes(orderWalks, 'list')) {
+            err('AddonsStore.GetAll walks m.order but never appends what it yields — the explicit order would be computed and then ignored');
+        }
+        // The map walk has to be FILTERED by whatever the order walks build, or
+        // every record counts as a leftover: the ordered pass emits it, then the
+        // sorted leftovers emit it again. Caught here because nothing else in
+        // the guard notices — the four walks are all still present and correct.
+        if (mapWalks.length > 0 && orderWalks.length > 0) {
+            const built = new Set();
+            for (const w of orderWalks) {
+                for (const m of w.body.matchAll(/^[ \t]*(\w+)(?:\[\w+\])?[ \t]*=/gm)) built.add(m[1]);
+            }
+            const filtered = built.size > 0 && mapWalks.some(w =>
+                [...built].some(name => new RegExp(`\\b${name}\\b`).test(w.body)));
+            if (!filtered) {
+                err('AddonsStore.GetAll walks the record map without filtering it against the set the m.order walk builds — every record would be collected as a leftover and appended twice (ordered pass, then sorted leftovers)');
+            }
+        }
+        // Anything appended outside a loop has no order behind it at all.
+        const outside = getAll
+            .replace(/^\s*for\s+each[^\n]*\n(?:^[^\n]*\n)*?^\s*end\s+for\b/gm, '')
+            .replace(/^\s*(?:private\s+)?(?:function|sub)\s+[^\n]*$/gm, '');
+        if (/\blist\.Push\s*\(/.test(outside)) {
+            err('AddonsStore.GetAll appends to the result list outside every loop — an un-ordered append can only come from somewhere with no defined position');
+        }
+        if (!/m\.SortByNameThenId\(/.test(getAll)) {
+            err('AddonsStore.GetAll does not sort its leftovers — records with no entry in the order list (a registry written before the order key existed) would land in map order');
+        }
+    }
+
+    const sortBy = member(storeCode, 'SortByNameThenId');
+    if (!sortBy || !/^\s*private\s+sub\s+SortByNameThenId/m.test(store)) {
+        err('AddonsStore has no private SortByNameThenId — the leftover sort has to be one the store fully controls, not Sort() or map iteration');
+    }
+    const sortsAfter = member(storeCode, 'SortsAfter');
+    if (!sortsAfter || !/a\.name/.test(sortsAfter) || !/a\.id/.test(sortsAfter)) {
+        err('AddonsStore.SortsAfter must compare name AND id — name alone leaves two same-named add-ons in a platform-defined order');
+    }
+
+    // --- the order is persisted where it can survive --------------------------
+    const orderKey = member(storeCode, 'OrderKey');
+    if (!orderKey || !/m\.RegistryKey\(\)\s*\+\s*"_order"/.test(orderKey)) {
+        err('AddonsStore.OrderKey must derive from RegistryKey() + "_order" so each session keeps its own order beside its own records');
+    }
+    if (!/^\s*order\s+as\s+object/m.test(store)) {
+        err('AddonsStore has no `order as object` field — there is nowhere for the display order to live');
+    }
+    const save = member(storeCode, 'Save');
+    if (!save || !/m\.registry\.Write\(\s*m\.OrderKey\(\)/.test(save)) {
+        err('AddonsStore.Save does not write the order key — a record written without its order reloads with no order at all');
+    }
+    if (!/m\.registry\.Write\(\s*m\.RegistryKey\(\)/.test(save || '')) {
+        err('AddonsStore.Save no longer writes the record map');
+    }
+    const load = member(storeCode, 'Load');
+    if (!load || !/m\.registry\.Read\(\s*m\.OrderKey\(\)/.test(load)) {
+        err('AddonsStore.Load does not read the order key — the order would be rebuilt from scratch on every launch');
+    }
+    // The reason a second key exists at all: FormatJson(m.installed) is a JSON
+    // OBJECT, and ParseJson does not preserve object key order, so an order
+    // stored there is silently gone by the next relaunch.
+    if (/FormatJson\(\s*m\.order\s*\)/.test(storeCode.replace(/m\.registry\.Write\(\s*m\.OrderKey\(\)\s*,\s*FormatJson\(\s*m\.order\s*\)\s*\)/, ''))) {
+        err('AddonsStore formats m.order somewhere other than its own array key — a JSON object does not round-trip key order, so the order cannot live in the record map');
+    }
+
+    // --- the order is kept truthful on every write ----------------------------
+    const register = member(storeCode, 'Register');
+    if (!register || !/m\.order\.Push\(\s*record\.id\s*\)/.test(register)) {
+        err('AddonsStore.Register does not append the new id to m.order — a record with no order slot is a record the display order has to guess about');
+    }
+    const uninstall = member(storeCode, 'Uninstall');
+    if (!uninstall || !/m\.DropFromOrder\(/.test(uninstall)) {
+        err('AddonsStore.Uninstall does not drop the id from m.order — a re-install would inherit a slot it no longer owns');
+    }
+    const switchSession = member(storeCode, 'SwitchSession');
+    if (!switchSession || !/m\.order\s*=\s*\[\]/.test(switchSession)) {
+        err('AddonsStore.SwitchSession does not clear m.order — the other session\'s order would leak across the switch');
+    }
+
+    // --- provenance is the id, never the record's flag ------------------------
+    // The account sync stamps every record it adopts with builtin: false, so on
+    // a stremio session the flag is a constant and carries no information. The
+    // one picker that consulted it could not tell the working built-in from the
+    // providers that answer with nothing.
+    const isBuiltin = member(storeCode, 'IsBuiltin');
+    if (!isBuiltin || !/m\.BuiltIns\(\)/.test(isBuiltin)) {
+        err('AddonsStore.IsBuiltin must resolve through BuiltIns() (by id) — resolving through a record\'s builtin flag is a constant false on every synced add-on');
+    }
+
+    // --- the subtitle provider is ranked, and the queue drains ---------------
+    if (/FindSubtitlesAddress/.test(playerCode)) {
+        err('PlayerScreen still has FindSubtitlesAddress — it returns the first add-on advertising subtitles, and "first" in an unordered registry is a different add-on on every device');
+    }
+    const ranked = member(playerCode, 'SubtitlesAddresses');
+    if (!ranked) {
+        err('PlayerScreen has no SubtitlesAddresses — subtitle provider choice is back to depending on registry order');
+    } else {
+        if (!/AddonsIsBuiltin/.test(ranked)) {
+            err('PlayerScreen.SubtitlesAddresses does not consult AddonsIsBuiltin — ranking has to be by id, since a synced record\'s builtin flag is always false');
+        }
+        if (!/AddonsHasResource/.test(ranked)) {
+            err('PlayerScreen.SubtitlesAddresses does not check AddonsHasResource — it would queue providers that cannot serve captions at all');
+        }
+        if (!/SortAddressesByName\(/.test(ranked)) {
+            err('PlayerScreen.SubtitlesAddresses does not sort the non-built-in candidates — the tail is still registry order, so it is still device-dependent');
+        }
+    }
+    // No check here that StoreHost forwards AddonsIsBuiltin: the callFunc
+    // contract (forwarder AND the <function> declaration in StoreHost.xml) is
+    // owned by checkStoreHandoffContract, which reports both halves. What is
+    // specific to this bug — that ranking goes through the id path at all — is
+    // the AddonsIsBuiltin consult asserted above.
+
+    // A wrong pick must cost one round trip, not the whole search: that was the
+    // difference between "no subtitles at all" and "this provider had none".
+    const startSubs = member(playerCode, 'StartSubtitles');
+    if (!startSubs || !/SubtitlesAddresses\(/.test(startSubs) || !/LaunchSubtitleFetch\(\)/.test(startSubs)) {
+        err('PlayerScreen.StartSubtitles no longer drains a ranked candidate list — one unreachable provider would end the search the way it used to');
+    }
+    const onResult = member(playerCode, 'onSubtitleResult');
+    if (!onResult || !/m\.subtitleCursor\s*<\s*m\.subtitleCandidates\.Count\(\)[\s\S]{0,200}?LaunchSubtitleFetch\(\)/.test(onResult)) {
+        err('PlayerScreen.onSubtitleResult no longer falls through to the next candidate when a provider returns nothing — picking a provider that cannot answer is back to meaning "no subtitles"');
+    }
+    const cancel = member(playerCode, 'CancelSubtitles');
+    if (!cancel || !/m\.subtitleCandidates\s*=\s*\[\]/.test(cancel)) {
+        err('PlayerScreen.CancelSubtitles does not drop the candidate queue — leaving the player would leave a stale provider queue to walk on the next play');
+    }
+
+    // --- an unusable track list never reaches the live content node ---------
+    // BuildSubtitleTracks drops entries without a URL, so a non-empty raw list
+    // can build to nothing. Writing that empty list onto a playing video blanks
+    // its caption state mid-playback, and SetCaptionMode("on") over a list the
+    // platform cannot load is how the player ends up in a caption state it
+    // cannot leave.
+    const apply = member(playerCode, 'ApplySubtitleIndex');
+    if (!apply) {
+        err('PlayerScreen has no ApplySubtitleIndex');
+    } else {
+        // Scoped to AFTER the raw-empty guard: writing an empty array there is
+        // the documented reset, not the defect. The defect is building the track
+        // list after the content node has already been written.
+        const rawGuard = apply.indexOf('m.subtitleTracks = invalid');
+        if (rawGuard === -1) {
+            err('PlayerScreen.ApplySubtitleIndex no longer has the raw-empty-track-list guard');
+        } else {
+            const guardEnd = apply.indexOf('end if', rawGuard);
+            const after = guardEnd === -1 ? apply.slice(rawGuard) : apply.slice(guardEnd);
+            const build = after.indexOf('BuildSubtitleTracks()');
+            const write = after.indexOf('content.subtitleTracks');
+            if (build === -1 || write === -1 || build > write) {
+                err('PlayerScreen.ApplySubtitleIndex writes content.subtitleTracks before building the tracks — an empty result still lands on the live content node');
+            }
+        }
+        if (!/tracks\.Count\(\)\s*=\s*0[\s\S]{0,200}?return/.test(apply)) {
+            err('PlayerScreen.ApplySubtitleIndex has no empty-tracks bail-out — a provider can return entries that all fail to resolve to a URL');
+        }
+        const guard = apply.indexOf('if selected = ""');
+        const on = apply.indexOf('SetCaptionMode("on")');
+        if (guard === -1 || on === -1 || on < guard) {
+            err('PlayerScreen.ApplySubtitleIndex turns captions on before a track is confirmed — globalCaptionMode "On" over an unloadable list is the caption state the player cannot exit');
+        }
+    }
+
+    return ok;
+}
+
+// The player used to wedge — app-wide, unrecoverable without killing the
+// channel — and the cause was not media, not the stream, and not the server.
+//
+// The player publishes its position from INSIDE the Video node's "state"
+// observer: pausing reports "paused", leaving reports through SavePosition.
+// That write woke MainScene's onWatchStateUpdate, which built a
+// WatchStatePushTask inline — CreateObject + AppendChild + control = "RUN" —
+// on the render thread, underneath a Video node that was mid-transition into the
+// OS's own pause screen. The SceneGraph stopped servicing input and never
+// recovered. Back froze it, pause froze it, and the three separate theories
+// offered for it (a hung stream server, the pendingStop teardown lockout, a
+// leaked duplicate player) were all wrong; the same stream from the same server
+// played fine, and it never happened in a guest session — because a guest
+// session returns at the AuthGetSession gate before the launch, and only a
+// stremio session got far enough to wedge.
+//
+// The invariant is not "be careful here", it is structural: the handler that a
+// Video state observer feeds must not build a node. Pin it.
+function checkWatchStatePushContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const main = read('components/MainScene.brs');
+    const xml = read('components/MainScene.xml');
+    const player = read('components/PlayerScreen.brs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const brs = code(main);
+    const body = (name) => {
+        const m = new RegExp(`^sub ${name}\\(\\)`, 'm').exec(brs);
+        if (!m) return '';
+        const lines = brs.slice(m.index).split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            if (i > 0 && /^end sub\b/.test(lines[i])) return lines.slice(0, i + 1).join('\n');
+        }
+        return brs.slice(m.index);
+    };
+
+    // 1. The handler that the player's Video observer feeds must not build a
+    //    node. This is the whole defect.
+    const handler = body('onWatchStateUpdate');
+    if (!handler) {
+        err('MainScene.brs has no onWatchStateUpdate — the watch-state write-back has no entry point');
+    } else {
+        if (/AsyncTask_Launch\s*\(/.test(handler)) {
+            err('MainScene.brs onWatchStateUpdate launches the push worker itself — this handler runs inside the player\'s Video "state" observer, and creating a node on that stack is what froze playback. Go through ScheduleWatchStatePush.');
+        }
+        if (/CreateObject\s*\(/.test(handler)) {
+            err('MainScene.brs onWatchStateUpdate calls CreateObject — nothing on the Video state observer\'s stack may build a node');
+        }
+        if (!/ScheduleWatchStatePush\(\)/.test(handler)) {
+            err('MainScene.brs onWatchStateUpdate does not defer through ScheduleWatchStatePush — the push would start on the Video state observer\'s stack');
+        }
+        // The gate that made this stremio-only, and the reason "works in guest"
+        // proved nothing about it. Matched as a callFunc ARGUMENT — "AuthGet"
+        // followed by a closing paren is a direct call, and this is a string
+        // inside one.
+        if (!/callFunc\(\s*"AuthGetSession"\s*\)\s*<>\s*"stremio"/.test(handler)) {
+            err('MainScene.brs onWatchStateUpdate lost its stremio-session gate — a guest session would now do the write-back this bug lived in');
+        }
+    }
+
+    // 2. The deferral has to be real: a one-shot timer, actually observed, and
+    //    actually restarted per publish (a burst of pause/seek reports must not
+    //    launch a worker per report).
+    const schedule = body('ScheduleWatchStatePush');
+    if (!schedule) {
+        err('MainScene.brs has no ScheduleWatchStatePush — the deferral the player fix depends on is gone');
+    } else {
+        if (!/m\.watchStatePump\.control\s*=\s*"stop"[\s\S]{0,120}?m\.watchStatePump\.control\s*=\s*"start"/.test(schedule)) {
+            err('MainScene.brs ScheduleWatchStatePush does not (re)start the one-shot pump timer — a timer that is never restarted pushes nothing, silently dropping every watch state');
+        }
+        if (!/m\.watchStatePump\s*=\s*invalid[\s\S]{0,200}?PumpWatchStatePush\(\)/.test(schedule)) {
+            err('MainScene.brs ScheduleWatchStatePush has no inline fallback when the timer is missing — a wiring mistake would drop the user\'s watch state instead of pushing it');
+        }
+    }
+    if (!/PumpWatchStatePush\(\)/.test(body('onWatchStatePumpFire') || '')) {
+        err('MainScene.brs onWatchStatePumpFire does not pump — the deferral would resolve to nothing');
+    }
+    if (!/m\.watchStatePump\.ObserveField\(\s*"fire"\s*,\s*"onWatchStatePumpFire"\s*\)/.test(brs)) {
+        err('MainScene.brs never observes the watchStatePump timer\'s fire field — the deferred push would never run');
+    }
+    if (!/<Timer\s+id="watchStatePump"[^>]*duration="1"/.test(xml)) {
+        err('MainScene.xml has no <Timer id="watchStatePump" duration="1" ... /> — a FindNode miss means the deferral silently degrades to the inline push that froze the player');
+    }
+    if (!/<Timer\s+id="watchStatePump"[^>]*repeat="false"/.test(xml)) {
+        err('MainScene.xml watchStatePump must be repeat="false" — a repeating one-shot pump would re-run forever and keep launching workers');
+    }
+
+    // 3. The deferred pump must carry the packet across the gap on state THIS
+    //    scene owns, never on the player node: by the time a deferred pump
+    //    runs, a Back-out may already have popped and destroyed the player.
+    if (!/callFunc\(\s*"WatchLatest"\s*\)/.test(handler)) {
+        err('MainScene.brs onWatchStateUpdate no longer reads the packet out of the shared watch buffer via WatchLatest() — the whole point of the buffer is that it outlives the player node that published it');
+    }
+    const pump = body('PumpWatchStatePush');
+    if (!/packet\s*=\s*m\.pendingWatchState\b/.test(pump)) {
+        err('MainScene.brs PumpWatchStatePush no longer takes its packet from m.pendingWatchState — a deferred pump cannot re-read the player node, it can only use the slot the handler left it');
+    }
+
+    // 4. The publisher itself must stay trivial. It runs on the Video observer's
+    //    stack, so every line of it is a candidate for the same wedge.
+    const publish = /sub PublishWatchState\(\)[\s\S]*?\nend sub/.exec(code(player));
+    if (!publish) {
+        err('PlayerScreen.brs has no PublishWatchState');
+    } else {
+        for (const forbidden of ['CreateObject', 'AppendChild', 'AsyncTask_Launch', 'Wait(']) {
+            if (new RegExp(`\\b${forbidden.replace('(', '\\(')}`).test(publish[0])) {
+                err(`PlayerScreen.brs PublishWatchState calls ${forbidden} — it runs inside the Video "state" observer, where anything but a local field write is what froze the player`);
+            }
+        }
+        if (!/m\.top\.watchStateUpdate\s*=/.test(publish[0])) {
+            err('PlayerScreen.brs PublishWatchState no longer publishes through the watchStateUpdate field — MainScene\'s deferred pump is fed by that write');
+        }
+    }
+
+    return ok;
+}
+
 function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
@@ -949,7 +1442,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
         process.exit(1);
     }
 

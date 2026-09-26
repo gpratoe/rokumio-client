@@ -63,6 +63,32 @@ sub init()
     m.libraryScreen.ObserveField("pushRequest", "onLibraryAction")
     m.uiRoot = m.top.FindNode("uiRoot")
     m.top.FindNode("background").color = Theme().screenBg
+
+    ' "Is a write-back worker in flight" for the three stremio-gated pumps.
+    ' These MUST be initialized here, not lazily, and this is not a style
+    ' preference: a field that was never assigned reads back as invalid, and
+    ' Roku refuses a truthiness test on invalid with &h18 ("Invalid is used in
+    ' IF-clause") on the render thread. Each of these three is read on the first
+    ' line of its own pump, before anything writes it, so an uninitialized flag
+    ' is a guaranteed crash the first time that pump runs.
+    '
+    ' The brs test interpreter treats `if invalid` as false, so the suite is
+    ' structurally blind to this and a green run is not evidence either way. That
+    ' is what made the missing initialization survive review: the watch-state
+    ' one presented on device as an unrecoverable app-wide hang when the player
+    ' published a position on pause or on leave, because the throw landed
+    ' inside the player's Video "state" observer and could not even paint a
+    ' debugger prompt. The library and watched flags below were the same latent
+    ' crash, reachable from a Details toggle and from mark-watched.
+    m.pushingWatchState = false
+    m.pushingLibraryChange = false
+    m.pushingWatchedChange = false
+
+    ' The watch-state push is launched off a timer, not off the publisher that
+    ' reports it: the publisher is the player's Video "state" observer, and a
+    ' node created on that stack wedges the player (see ScheduleWatchStatePush).
+    m.watchStatePump = m.top.FindNode("watchStatePump")
+    m.watchStatePump.ObserveField("fire", "onWatchStatePumpFire")
     ' Settings can start the link-code flow; logout reuses the pairing worker.
     ' Both flags are session-flow state with no store counterpart.
     m.loginFromSettings = false
@@ -146,6 +172,12 @@ sub init()
     m.faultText.color = Theme().textWhite
     m.faultText.visible = false
     m.top.AppendChild(m.faultText)
+
+    ' The keys the last add-on sync published into the strip. Held so a later
+    ' sync can retract exactly what it published: the reason strings carry the
+    ' transport's error text, so a clear-by-same-text would leave a stale line
+    ' up whenever the wording changed.
+    m.addonSyncFaults = []
 
     m.homeScreen.callFunc("SetStores", m.storeHost, m.top)
     m.authScreen.callFunc("SetStores", m.storeHost, m.top)
@@ -340,6 +372,43 @@ sub onWatchStateUpdate()
     if m.lastPacketKey = key then return
     m.lastPacketKey = key
     m.pendingWatchState = packet
+    ScheduleWatchStatePush()
+end sub
+
+' The watch-state push is the one thing the PLAYER triggers from inside a Video
+' "state" observer: pausing reports "paused", leaving reports through
+' SavePosition, and both end up writing the watchStateUpdate field that wakes
+' this handler. So the stack under this call is the OS's own playback
+' transition, and nothing that touches the SceneGraph may run on it.
+'
+' It used to. onWatchStateUpdate called PumpWatchStatePush directly, which built
+' a WatchStatePushTask with CreateObject + AppendChild + control = "RUN" —
+' inserting a node under a Video node mid-transition, on the render thread. The
+' app stopped answering the remote entirely, and never recovered: pausing froze
+' it, backing out of a frozen pause froze it the same way, and the only way out
+' was killing the channel. It looked like a media or stream fault and was not
+' one at all — it reproduced on a stream from the user's own server, and never
+' in a guest session, because a guest session returns at the AuthGetSession gate
+' above and never reaches the launch. Only a stremio session got far enough to
+' wedge.
+'
+' So the packet is RECORDED here and the push starts one tick later, off the
+' timer, after the transition has settled. That is safe to defer: the pump reads
+' WatchLatest() out of the shared watch buffer, and the buffer lives past the
+' player node, so a pump that fires after the player was already torn down still
+' has the packet it needs.
+sub ScheduleWatchStatePush()
+    if m.watchStatePump = invalid then
+        ' No timer to defer onto. Push inline rather than never — a missing timer
+        ' is a wiring mistake, not a reason to drop the user's watch state.
+        PumpWatchStatePush()
+        return
+    end if
+    m.watchStatePump.control = "stop"
+    m.watchStatePump.control = "start"
+end sub
+
+sub onWatchStatePumpFire()
     PumpWatchStatePush()
 end sub
 
@@ -530,10 +599,14 @@ sub Start()
     if not m.storeHost.callFunc("AuthIsLoggedIn")
         m.stack.push("authScreen")
     else if EffectiveSessionType() = "stremio"
-        ' Relaunched stremio session: addons are already in the registry key
-        ' from the login that synced them, but the library always re-syncs from
-        ' the account in the background — the persisted Continue Watching stack
-        ' renders first, then freshens when the sync lands.
+        ' Relaunched stremio session. Both pulls run every launch, for the same
+        ' reason: the library is re-pulled because only the continue-watching
+        ' stack persists, and the addon collection is re-pulled because a
+        ' session whose stremio_addons key is empty has no catalogs at all —
+        ' AddonsStore hides the built-in seeds for a stremio session, so nothing
+        ' renders until the collection lands. See StartAddonSync for how a
+        ' single failed login-time sync used to make that state permanent.
+        StartAddonSync()
         StartLibrarySync()
     end if
 end sub
@@ -779,12 +852,22 @@ sub onLogoutResult()
     AsyncTask_Reap(task, m.top, false)
 end sub
 
-' Kick the account addon sync for a freshly-logged-in stremio session. The API
-' answers with the full collection incl. each manifest, so no per-addon fetches
-' follow — the task returns the descriptors and MainScene adopts them through
-' AddonsStore (the single writer for installed records). Created per sync like
-' the pairing task; a relaunched stremio session skips this (its addons are
-' already in the stremio_addons registry key from the login that synced them).
+' Kick the account addon sync for a stremio session. The API answers with the
+' full collection incl. each manifest, so no per-addon fetches follow — the task
+' returns the descriptors and MainScene adopts them through AddonsStore (the
+' single writer for installed records). Created per sync like the pairing task.
+'
+' Runs at BOTH login and relaunch. It used to run only at login, on the strength
+' of "a relaunched stremio session skips this (its addons are already in the
+' stremio_addons registry key from the login that synced them)" — a claim about
+' persisted state that nothing checked and that a single failed login-time sync
+' made permanently false. The consequence was severe and silent: AddonsStore
+' deliberately shows no built-in seeds for a stremio session, so an empty
+' stremio_addons meant no Cinemeta, which meant every AddonsGet("com.linvo.
+' cinemeta") caller got invalid — including MetaAddress(), so the Continue
+' Watching row's Details fetch went out with an empty addon address and rendered
+' a title with no poster and no description. The only recovery was to log out
+' and re-pair the account. One idempotent GET is now the recovery.
 sub StartAddonSync()
     fields = {}
     if m.storeHost <> invalid then fields.authKey = m.storeHost.callFunc("AuthGetAuthKey")
@@ -794,8 +877,16 @@ end sub
 
 ' One sync settled. Register every descriptor through AddonsStore (duplicates
 ' are skipped, so re-syncing is idempotent) and rebuild Home's rows from the
-' new catalog set. Failures are non-fatal — whatever synced registers, the rest
-' is logged and the session proceeds (an empty collection is a legit outcome).
+' new catalog set. Partial failures are non-fatal — whatever synced registers
+' and the session proceeds.
+'
+' What is NOT non-fatal is a sync that reported nothing, which is what this
+' sub used to do: a transport timeout, an HTTP error and an empty account all
+' fell off the end identically, the caller counted zero adds, RebuildRows was
+' skipped, and Home went on rendering the pre-login rows as though nothing had
+' happened. The app looked healthy and was not. Every outcome now names itself
+' in the fault strip, carrying the transport's own error text where there is
+' one, so the next occurrence is a diagnosis instead of an inference.
 sub onAddonSyncResult()
     task = m.addonSyncTask
     m.addonSyncTask = invalid
@@ -803,15 +894,29 @@ sub onAddonSyncResult()
     result = task.result
     AsyncTask_Reap(task, m.top, false)
 
+    ClearAddonSyncFaults()
+
     if result <> invalid and result.revokedSession
         HandleRevokedSession()
+        return
+    end if
+
+    if result = invalid
+        AddAddonSyncFault("addon sync: the task reported no result at all")
+        return
+    end if
+
+    if not result.ok
+        reason = "unknown error"
+        if result.error <> invalid and result.error <> "" then reason = result.error
+        AddAddonSyncFault("addon sync failed: " + reason)
         return
     end if
 
     added = 0
     skipped = 0
     failed = 0
-    if result <> invalid and result.ok and result.descriptors <> invalid
+    if result.descriptors <> invalid
         for each descriptor in result.descriptors
             if m.storeHost <> invalid
                 outcome = m.storeHost.callFunc("AddonsInstallFromDescriptor", descriptor.transportUrl, descriptor.manifest)
@@ -828,6 +933,32 @@ sub onAddonSyncResult()
     if added > 0 and m.homeScreen <> invalid
         m.homeScreen.callFunc("RebuildRows")
     end if
+    if failed > 0
+        AddAddonSyncFault("addon sync: " + failed.ToStr() + " of " + result.descriptors.Count().ToStr() + " add-ons were rejected")
+    end if
+    ' A sync that succeeded and still left the registry empty is the exact state
+    ' that used to require re-pairing. Name it, so a launch in that state is a
+    ' visible fault rather than a session that mysteriously has no catalogs.
+    if m.storeHost <> invalid and m.storeHost.callFunc("AddonsGetAll").Count() = 0
+        AddAddonSyncFault("addon sync: the account reported no add-ons")
+    end if
+end sub
+
+' Retract exactly the lines the last add-on sync published. Clearing by text
+' would not work: the reasons embed the transport's error string, so a retry
+' that failed differently would leave the previous line up forever.
+sub ClearAddonSyncFaults()
+    if m.addonSyncFaults <> invalid
+        for each key in m.addonSyncFaults
+            ReportStoreFault(key, false)
+        end for
+    end if
+    m.addonSyncFaults = []
+end sub
+
+sub AddAddonSyncFault(reason as string)
+    ReportStoreFault(reason, true)
+    m.addonSyncFaults.Push(reason)
 end sub
 
 ' Kick the account library sync. Runs on every stremio launch — a fresh login

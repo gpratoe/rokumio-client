@@ -11,6 +11,7 @@
         <function name="AddonsGetAll" />
         <function name="AddonsHasResource" />
         <function name="AddonsInstallFromDescriptor" />
+        <function name="AddonsIsBuiltin" />
         <function name="AddonsRegister" />
         <function name="AddonsUninstall" />
         <function name="AuthGetAuthKey" />

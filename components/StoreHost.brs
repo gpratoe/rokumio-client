@@ -97,6 +97,15 @@ function AddonsHasResource(resources as dynamic, name as string) as boolean
     return m.stores.addons.HasResource(resources, name)
 end function
 
+' addons.IsBuiltin
+'
+' Rank providers on this, never on a record's builtin flag: the account sync
+' stamps every record it adopts with builtin: false, so on a stremio session the
+' flag is a constant while the id is not.
+function AddonsIsBuiltin(id as string) as boolean
+    return m.stores.addons.IsBuiltin(id)
+end function
+
 ' addons.InstallFromDescriptor
 function AddonsInstallFromDescriptor(transportUrl as dynamic, manifest as dynamic) as object
     return m.stores.addons.InstallFromDescriptor(transportUrl, manifest)
