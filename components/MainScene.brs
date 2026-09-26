@@ -112,17 +112,31 @@ sub init()
     ' auth flow reconciles it automatically.
     m.sessionAware = [m.stores.addons, m.stores.library]
 
-    m.homeScreen.callFunc("SetStores", m.stores)
-    m.authScreen.callFunc("SetStores", m.stores)
-    m.linkStremioScreen.callFunc("SetStores", m.stores)
-    m.detailsScreen.callFunc("SetStores", m.stores)
-    m.episodesScreen.callFunc("SetStores", m.stores)
-    m.streamsScreen.callFunc("SetStores", m.stores)
-    m.settingsScreen.callFunc("SetStores", m.stores)
-    m.addonsScreen.callFunc("SetStores", m.stores)
-    m.searchScreen.callFunc("SetStores", m.stores)
-    m.discoverScreen.callFunc("SetStores", m.stores)
-    m.libraryScreen.callFunc("SetStores", m.stores)
+    ' Published for the screens, which read it in Screen.brs's SetStores. A
+    ' class instance cannot cross a component boundary intact (Roku copies the
+    ' associative array and drops its function members), so the facade is not
+    ' passed as a callFunc argument; roGlobal is not a component, so publishing
+    ' it here hands every screen the same live instances. The facade is built
+    ' once and never replaced — a session switch mutates the session-aware
+    ' stores in place — so this one publish covers the app's whole life and must
+    ' happen before the first SetStores below. (The global AA is reached with
+    ' GetGlobalAA(), not CreateObject("roGlobal") — roGlobal is a BrightSign
+    ' component that does not exist on Roku, and CreateObject returns invalid
+    ' for an unknown class.)
+    storesAA = GetGlobalAA()
+    storesAA.rokumioStores = m.stores
+
+    m.homeScreen.callFunc("SetStores", invalid)
+    m.authScreen.callFunc("SetStores", invalid)
+    m.linkStremioScreen.callFunc("SetStores", invalid)
+    m.detailsScreen.callFunc("SetStores", invalid)
+    m.episodesScreen.callFunc("SetStores", invalid)
+    m.streamsScreen.callFunc("SetStores", invalid)
+    m.settingsScreen.callFunc("SetStores", invalid)
+    m.addonsScreen.callFunc("SetStores", invalid)
+    m.searchScreen.callFunc("SetStores", invalid)
+    m.discoverScreen.callFunc("SetStores", invalid)
+    m.libraryScreen.callFunc("SetStores", invalid)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -206,7 +220,7 @@ sub onStreamsAction()
     player = CreateObject("roSGNode", "PlayerScreen")
     player.id = "playerScreen"
     m.uiRoot.AppendChild(player)
-    player.callFunc("SetStores", m.stores)
+    player.callFunc("SetStores", invalid)
     player.ObserveField("closeRequest", "onPlayerClose")
     player.ObserveField("watchStateUpdate", "onWatchStateUpdate")
     m.activePlayer = player

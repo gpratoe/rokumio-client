@@ -3,12 +3,24 @@
 ' The screen contract (documented in this header, previously source/core/Screen.bs)
 ' is now a real component, declared once and implemented here with defaults:
 '
-'   function SetStores(stores as object)  - hands the store facade to the
-'                                           screen. Class instances cannot cross
-'                                           components through an interface
-'                                           field, so the Scene delivers them via
-'                                           callFunc, and this is the byte-for-byte
-'                                           body every screen used to re-type.
+'   function SetStores()                - binds the store facade to the
+'                                           screen. The facade is READ here off
+'                                           the global AA, never handed in: a bsc
+'                                           class instance is an roAssociativeArray
+'                                           whose members are function references,
+'                                           and Roku copies (dropping every
+'                                           function member) any associative array
+'                                           that crosses a component boundary.
+'                                           MainScene used to pass m.stores in as
+'                                           a callFunc argument and every screen
+'                                           received a data-only copy, so
+'                                           m.stores.addons.GetAll() died on
+'                                           device with &hf4 "Member function not
+'                                           found in BrightScript Component or
+'                                           interface". The global AA is not a
+'                                           component, so the read is by
+'                                           reference and every screen gets the
+'                                           live instances the Scene owns.
 '   function OnEnter(params as object)    - called when the screen is pushed or
 '                                           restored; params is invalid when it is
 '                                           only being uncovered by a pop.
@@ -30,8 +42,11 @@
 ' never overrides. This file touches nothing but m.stores and platform globals,
 ' so it resolves from any screen's scope with no cross-file dependencies.
 
-function SetStores(stores as object) as void
-    m.stores = stores
+function SetStores() as void
+    ' GetGlobalAA() is a runtime function, not a component: CreateObject
+    ' ("roGlobal") is a BrightSign-ism that returns invalid on Roku.
+    storesAA = GetGlobalAA()
+    m.stores = storesAA.rokumioStores
 end function
 
 function OnEnter(params as object) as void

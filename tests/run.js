@@ -117,6 +117,84 @@ function checkScreenContract() {
     return ok;
 }
 
+// Roku copies any associative array that crosses a component boundary — a
+// callFunc argument, a callFunc return value, an interface field — and drops its
+// function members. A bsc class instance IS such an array, so handing the store
+// facade to a screen used to deliver a data-only copy: every method call died
+// with &hf4 "Member function not found in BrightScript Component or interface"
+// (this bit us on device at HomeScreen.brs `m.stores.addons.GetAll()`, and the
+// data-only copy still satisfied every `m.stores = invalid` guard, so nothing
+// upstream noticed). The facade is published on the global AA — fetched with
+// GetGlobalAA(), not a component, so the read is by reference — and read inside
+// the receiving screen. Note roGlobal is a BrightSign component that does not
+// exist on Roku: CreateObject("roGlobal") returns invalid, which the compiler
+// also rejects as BS1129, so it can never be the carrier. The interpreter
+// models one flat scope and cannot catch any of this, so pin it statically:
+// MainScene must publish before binding, SetStores must take no argument, and
+// no screen may be handed a store.
+function checkStoreHandoffContract() {
+    const fs = require('fs');
+    let ok = true;
+    // Scan code, not prose: the files document this exact contract in their
+    // headers, and a raw-text scan matches the documentation describing the bug.
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const mainScene = code(fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8'));
+    const publish = mainScene.indexOf('.rokumioStores = m.stores');
+    if (publish === -1) {
+        console.error('MainScene.brs never publishes the facade — screens read it off the global AA, so nothing would bind');
+        ok = false;
+    } else {
+        const firstBind = mainScene.search(/callFunc\("SetStores"/);
+        if (firstBind !== -1 && firstBind < publish) {
+            console.error('MainScene.brs binds a screen before publishing the facade on the global AA — that screen would read invalid');
+            ok = false;
+        }
+    }
+    for (const match of mainScene.matchAll(/callFunc\("SetStores"\s*,\s*([^)]*)\)/g)) {
+        if (match[1].trim() !== 'invalid') {
+            console.error(`MainScene.brs passes "${match[1].trim()}" through callFunc("SetStores", ...) — a class instance cannot survive that hop; pass invalid and let SetStores read the global AA`);
+            ok = false;
+        }
+    }
+    // A screen binding the facade from an undeclared m field is exactly what the
+    // global-AA read replaces; a redeclared interface field would marshal the
+    // value and strip the methods again, so m.stores must stay undeclared.
+    const screenXml = fs.readFileSync(path.join(projectRoot, 'components', 'Screen.xml'), 'utf8');
+    if (/<field\s+id="stores"/i.test(screenXml)) {
+        console.error('Screen.xml must not declare <field id="stores"> — assigning the facade to a node field copies it and drops its methods; keep m.stores undeclared');
+        ok = false;
+    }
+    const screenBrs = code(fs.readFileSync(path.join(projectRoot, 'components', 'Screen.brs'), 'utf8'));
+    // Match the definition only: the header comment also spells
+    // `function SetStores()`, and a first-match regex would read that instead.
+    const setStores = screenBrs.match(/^function\s+SetStores\s*\(([^)]*)\)/m);
+    if (!setStores) {
+        console.error('Screen.brs no longer defines SetStores — every screen would come up with no stores');
+        ok = false;
+    } else if (setStores[1].trim() !== '') {
+        console.error(`Screen.brs SetStores must take no argument (found "${setStores[1].trim()}") — a passed-in facade arrives without its methods`);
+        ok = false;
+    }
+    if (!/GetGlobalAA\(\)/.test(screenBrs)) {
+        console.error('Screen.brs SetStores must read the facade off the global AA (GetGlobalAA()) so the class instances arrive by reference');
+        ok = false;
+    }
+    // No other component may take a store through callFunc or an interface
+    // field either; the stores are reachable from the global AA and nowhere else.
+    for (const name of fs.readdirSync(path.join(projectRoot, 'components')).filter(f => f.endsWith('.brs'))) {
+        const src = code(fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8'));
+        for (const match of src.matchAll(/callFunc\([^,]+,\s*(m\.stores[^)]*)\)/g)) {
+            console.error(`${name} passes the store facade through callFunc (${match[1].trim()}) — that hop drops every method; bind with SetStores and read the global AA instead`);
+            ok = false;
+        }
+        if (/CreateObject\(\s*"roGlobal"/i.test(src)) {
+            console.error(`${name} uses CreateObject("roGlobal") — roGlobal is a BrightSign component, not a Roku one; CreateObject returns invalid. Use GetGlobalAA()`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 // Including the same script file twice in one component corrupts the shared
 // function namespace at load time — a class that some other script then calls
 // resolves to a non-function ("Function Call Operator ( ) attempted on
@@ -504,7 +582,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
         process.exit(1);
     }
 
