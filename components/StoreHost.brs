@@ -227,6 +227,26 @@ function LibraryMarkAllIfDone(metaId as string, anyRegular as boolean, allDone a
     m.stores.library.MarkAllIfDone(metaId, anyRegular, allDone)
 end function
 
+' library.MarkEpisodeUnwatched
+function LibraryMarkEpisodeUnwatched(metaId as string, videoId as string) as void
+    m.stores.library.MarkEpisodeUnwatched(metaId, videoId)
+end function
+
+' library.MarkEpisodeWatched
+function LibraryMarkEpisodeWatched(metaId as string, videoId as string) as void
+    m.stores.library.MarkEpisodeWatched(metaId, videoId)
+end function
+
+' library.MarkUpToUnwatched
+function LibraryMarkUpToUnwatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
+    m.stores.library.MarkUpToUnwatched(metaId, orderedEpisodeIds, lastIndex)
+end function
+
+' library.MarkUpToWatched
+function LibraryMarkUpToWatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
+    m.stores.library.MarkUpToWatched(metaId, orderedEpisodeIds, lastIndex)
+end function
+
 ' library.MarkWatchedIfFinished
 function LibraryMarkWatchedIfFinished(metaId as string, videoId as string, position as integer, duration as integer) as void
     m.stores.library.MarkWatchedIfFinished(metaId, videoId, position, duration)

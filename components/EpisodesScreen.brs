@@ -345,15 +345,14 @@ end sub
 ' from its first episode through the focused one.
 sub ApplyWatchChange(kind as string, action as object)
     if m.stores = invalid then return
-    library = m.stores.library
     if kind = "watch"
-        library.MarkEpisodeWatched(action.metaId, action.videoId)
+        m.stores.library.callFunc("LibraryMarkEpisodeWatched", action.metaId, action.videoId)
     else if kind = "restWatched"
-        library.MarkUpToWatched(action.metaId, action.seasonIds, action.seasonIndex)
+        m.stores.library.callFunc("LibraryMarkUpToWatched", action.metaId, action.seasonIds, action.seasonIndex)
     else if kind = "restUnwatched"
-        library.MarkUpToUnwatched(action.metaId, action.seasonIds, action.seasonIndex)
+        m.stores.library.callFunc("LibraryMarkUpToUnwatched", action.metaId, action.seasonIds, action.seasonIndex)
     else
-        library.MarkEpisodeUnwatched(action.metaId, action.videoId)
+        m.stores.library.callFunc("LibraryMarkEpisodeUnwatched", action.metaId, action.videoId)
     end if
     m.top.watchedChange = {
         metaId: action.metaId

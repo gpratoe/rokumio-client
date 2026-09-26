@@ -2,6 +2,12 @@
 <component name="MainScene" extends="Scene">
     <interface>
         <field id="exitApp" type="boolean" alwaysNotify="true" value="false" />
+        <!-- Every dialog in the app is shown by assigning it here and dismissed
+             by assigning invalid. The Scene only renders this slot if the field
+             is DECLARED: m.top.dialog = node on its own writes an undeclared
+             dynamic field, which nothing observes, so the dialog never appears.
+             wasClosed is built into the Dialog interface, not declared here. -->
+        <field id="dialog" type="node" />
         <function name="Start" />
         <function name="HandleDeepLink" />
         <!-- A screen whose store bind came up short reports the failing hop

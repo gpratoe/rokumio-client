@@ -166,6 +166,38 @@ function checkStoreHandoffContract() {
         const start = src.indexOf(header) + header.length;
         return src.slice(start, src.indexOf('\nend ', start));
     };
+    // Split a BrightScript argument or parameter list on its TOP-LEVEL commas,
+    // so `{ a: 1, b: 2 }` or `[[0, 10]]` counts as the one argument it is.
+    const splitTop = (text) => {
+        const out = [];
+        let depth = 0, quote = false, cur = '';
+        for (const ch of text) {
+            if (quote) { cur += ch; if (ch === '"') quote = false; continue; }
+            if (ch === '"') { quote = true; cur += ch; }
+            else if ('[{('.includes(ch)) { depth++; cur += ch; }
+            else if (']})'.includes(ch)) { depth--; cur += ch; }
+            else if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; }
+            else cur += ch; }
+        if (cur.trim().length > 0) out.push(cur.trim());
+        return out;
+    };
+    // The argument text of the callFunc whose "(" is at `from`, up to the paren
+    // that closes it, or null if that paren is not on the same line. Bounded to
+    // one line on purpose: the comment stripper above truncates at the first
+    // apostrophe, so a three-line scan could be thrown off by a string literal
+    // elsewhere in the file, and no call site in this codebase wraps a line.
+    const callArgs = (src, from) => {
+        let depth = 1, quote = false;
+        for (let i = from; i < src.length; i++) {
+            const ch = src[i];
+            if (ch === '\n') return null;
+            if (quote) { if (ch === '"') quote = false; continue; }
+            if (ch === '"') quote = true;
+            else if (ch === '(') depth++;
+            else if (ch === ')' && --depth === 0) return src.slice(from, i);
+        }
+        return null;
+    };
 
     // --- the host exists, and exists before anything binds to it -------------
     if (!/m\.storeHost\s*=\s*CreateObject\(\s*"roSGNode"\s*,\s*"StoreHost"\s*\)/.test(mainScene)) {
@@ -263,23 +295,61 @@ function checkStoreHandoffContract() {
         }
     }
 
+    // The name in a callFunc is a string, so nothing but a static check stands
+    // between a typo and the device's &hf4 "Member function not found", and an
+    // argument count the entry point does not take fails the same way one hop
+    // later. Both are checked below, against the signatures the host actually
+    // declares. This is the check that would have caught the four
+    // Library Mark* calls EpisodesScreen made on a store that had no entry
+    // points for them at all — those shipped to the TV and killed the debugger
+    // on the first mark-as-watched press.
+    const hostSigs = new Map();
+    for (const m of hostBrs.matchAll(/^(?:function|sub)\s+(\w+)\s*\(([^)]*)\)/gm)) {
+        hostSigs.set(m[1], splitTop(m[2]).map(p => ({ text: p, required: p.split(/\s+as\s+/)[0].indexOf('=') === -1 })));
+    }
     // --- every store call resolves, and no store instance is ever in flight --
     for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.brs'))) {
         if (name === 'StoreHost.brs') continue;
         const src = readBr(name);
-        for (const m of src.matchAll(/\bm\.stores\.([a-z]+)\.callFunc\(\s*"([A-Za-z_]+)"/g)) {
-            const [, store, fn] = m;
+        for (const m of src.matchAll(/\bm\.(stores\.[a-z]+|storeHost)\.callFunc\(\s*"([A-Za-z_]+)"/g)) {
+            const [, alias, fn] = m;
             if (!defined.has(fn) || !declared.has(fn)) {
                 err(`${name} calls callFunc("${fn}") but the StoreHost has no such entry point — the screen would read invalid and render nothing`);
+                continue;
             }
-            if (!fn.startsWith(cap(store))) {
-                err(`${name} reaches m.stores.${store} for "${fn}" — the name's store prefix must match the alias, or a screen can quietly be handed another store's data`);
+            if (alias.startsWith('stores.')) {
+                const store = alias.slice('stores.'.length);
+                if (!fn.startsWith(cap(store))) {
+                    err(`${name} reaches m.stores.${store} for "${fn}" — the name's store prefix must match the alias, or a screen can quietly be handed another store's data`);
+                }
+            }
+            const sig = hostSigs.get(fn);
+            // The match ends on the entry point's NAME, so the callFunc "(" is
+            // the last paren inside it, not one past the end: step from there to
+            // just inside the argument list, where the scan starts at depth 1.
+            const argText = callArgs(src, m.index + m[0].lastIndexOf('(') + 1);
+            const given = argText === null ? null : splitTop(argText).slice(1);
+            if (given === null) {
+                err(`${name} calls callFunc("${fn}") with an argument list that never closes — read it as unverified, not as correct`);
+            } else if (given.length > sig.length) {
+                err(`${name} calls callFunc("${fn}") with ${given.length} arguments but StoreHost.brs ${fn} takes ${sig.length} (${sig.map(p => p.text).join(', ')}) — the VM raises an arity error at runtime, after the call has already left the screen`);
+            } else if (given.length < sig.length) {
+                const missing = sig.slice(given.length).filter(p => p.required);
+                if (missing.length > 0) {
+                    err(`${name} calls callFunc("${fn}") without ${missing.map(p => p.text).join(', ')} — StoreHost.brs ${fn} requires ${sig.length} arguments, and a call that omits a required one raises a runtime error`);
+                }
             }
         }
-        for (const m of src.matchAll(/\bm\.storeHost\.callFunc\(\s*"([A-Za-z_]+)"/g)) {
-            if (!defined.has(m[1]) || !declared.has(m[1])) {
-                err(`MainScene.brs calls callFunc("${m[1]}") but the StoreHost has no such entry point — the Scene would read invalid`);
-            }
+        // A store alias stashed in a local is how the Mark* crash got through:
+        // the call on the NEXT line was spelled `<local>.Method(`, which no
+        // rewrite pattern and no direct-call check above can see, because the
+        // alias is a hop away. The alias has to be spelled at the call site,
+        // where it is greppable and where the store prefix is checkable.
+        for (const m of src.matchAll(/=\s*m\.stores\.[a-z]+\s*$/gm)) {
+            err(`${name} assigns a store alias to a variable — spell it at the call site instead (m.stores.${m[0].match(/stores\.([a-z]+)/)[1]}.callFunc("<Store><Method>", ...)). A local hides the store behind a name nothing resolves, so a direct call on it compiles, ships, and dies with &hf4 on the device`);
+        }
+        if (/=\s*m\.storeHost\s*$/m.test(src)) {
+            err(`${name} assigns m.storeHost to a variable — same reason: keep the host spelled at the call site so every store call stays checkable`);
         }
         for (const m of src.matchAll(/\bm\.stores\.[a-z]+\.(?!callFunc\b)([A-Za-z_]+)\s*\(/g)) {
             err(`${name} calls m.stores.${m[1]} directly — a store class instance cannot be handed to another component (Roku copies the associative array and drops its function members); ask the host instead: m.stores.<store>.callFunc("<Store><Method>", ...)`);
@@ -498,6 +568,8 @@ function checkTileContract() {
 // both here so the bootstrap contract stays honest.
 function checkMainSceneContract() {
     const fs = require('fs');
+    const brs = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8')
+        .split('\n').map(line => line.split("'")[0]).join('\n');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
     const declared = new Set(
         [...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1])
@@ -508,6 +580,18 @@ function checkMainSceneContract() {
             console.error(`MainScene.xml is missing <function name="${fn}" /> from its interface`);
             ok = false;
         }
+    }
+    // Every dialog in the app — support, confirm-exit, logout, session-revoked,
+    // deep-link import — is shown by assigning it to m.top.dialog. That slot is
+    // NOT built into Scene: assign to it without declaring it and the write
+    // lands in an undeclared dynamic field that nothing observes, so the dialog
+    // simply never appears. No error, no log line, no crash — which is why
+    // every dialog in the app was broken at once and looked like one component
+    // misbehaving. `dialog` was never declared, here or at any earlier commit.
+    const assigns = [...brs.matchAll(/\bm\.top\.dialog\s*=\s*(?!invalid\b)/g)];
+    if (assigns.length > 0 && !/<field\s+id="dialog"\s+type="node"/.test(xml)) {
+        console.error(`MainScene.brs shows ${assigns.length} dialog(s) through m.top.dialog but MainScene.xml does not declare <field id="dialog" type="node" /> — the Scene renders no dialog slot it has not been told about, so every one of these assignments writes an undeclared field and shows nothing`);
+        ok = false;
     }
     return ok;
 }

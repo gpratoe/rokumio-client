@@ -36,6 +36,10 @@
         <function name="LibraryIsSaved" />
         <function name="LibraryLibraryView" />
         <function name="LibraryMarkAllIfDone" />
+        <function name="LibraryMarkEpisodeUnwatched" />
+        <function name="LibraryMarkEpisodeWatched" />
+        <function name="LibraryMarkUpToUnwatched" />
+        <function name="LibraryMarkUpToWatched" />
         <function name="LibraryMarkWatchedIfFinished" />
         <function name="LibraryProgressFraction" />
         <function name="LibraryRemoveSaved" />
