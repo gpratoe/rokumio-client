@@ -60,11 +60,6 @@
             <SearchScreen id="searchScreen" visible="false" />
             <DiscoverScreen id="discoverScreen" visible="false" />
             <LibraryScreen id="libraryScreen" visible="false" />
-
-            <!-- Scene-owned system UI: the confirm-exit and support dialogs.
-                 Screens stay ignorant of the Scene's exit policy. -->
-            <ConfirmExitDialog id="confirmExitDialog" visible="false" />
-            <SupportDialog id="supportDialog" visible="false" />
         </Group>
     </children>
 </component>

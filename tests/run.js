@@ -593,6 +593,62 @@ function checkMainSceneContract() {
         console.error(`MainScene.brs shows ${assigns.length} dialog(s) through m.top.dialog but MainScene.xml does not declare <field id="dialog" type="node" /> — the Scene renders no dialog slot it has not been told about, so every one of these assignments writes an undeclared field and shows nothing`);
         ok = false;
     }
+    // Dialogs are BUILT, not declared. Both custom dialogs used to be declared as
+    // Scene children with visible="false". On device they dimmed the background
+    // and took focus — blind OK on the Exit button still fired buttonSelected,
+    // so they were alive, laid out and interactive — and painted nothing at all.
+    // Their own code was never at fault; the CreateObject shape that the three
+    // StandardMessageDialogs already use renders every one of them.
+    // Comments describe the old shape by name, so strip them before matching.
+    const dialogTags = [...xml.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<([A-Za-z0-9_]*Dialog)\b/g)].map(m => m[1]);
+    if (dialogTags.length > 0) {
+        console.error(`MainScene.xml declares ${dialogTags.join(', ')} as a Scene child — a dialog declared in markup dims the background and takes focus but paints nothing on this device (verified on both the exit and support dialogs). Build it with CreateObject("roSGNode", "...") and show it through scene.dialog, the shape the three StandardMessageDialogs use`);
+        ok = false;
+    }
+    // Every node handed to the dialog slot must have been built in code.
+    // (Holding a reference is not the concern it looks like: assigning to
+    // scene.dialog puts the node in the Scene's dialog group, and from there the
+    // scene graph itself keeps it alive. The Scene keeps m.confirmExit and
+    // m.supportDialog because it re-shows them and their observers are scoped.)
+    const built = new Set([...brs.matchAll(/([\w.]+)\s*=\s*CreateObject\(\s*"roSGNode"\s*,\s*"[A-Za-z0-9_]*Dialog"/g)].map(m => m[1]));
+    for (const m of brs.matchAll(/m\.top\.dialog\s*=\s*([^=\n]+)/g)) {
+        const target = m[1].trim();
+        if (target === 'invalid') continue;
+        if (!built.has(target)) {
+            console.error(`MainScene.brs shows "${target}" through m.top.dialog but nothing ever builds it with CreateObject — a dialog that is declared in markup, or reached any other way, dims the background and paints nothing`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+// Poster.loadStatus is a string with four legal values: notLoaded, loading,
+// loaded, failed. Two guesses were shipped against it and both are invisible at
+// build time: "ready" on the pairing screen's SUCCESS path, so a QR that loaded
+// perfectly matched nothing and the column was never revealed; and "<> error"
+// in both tiles, which is always true, so a poster whose image failed was
+// treated as having art and its title fallback was suppressed. The literals are
+// strings, so nothing but a static check stands between a guess and the device.
+function checkPosterStatusContract() {
+    const fs = require('fs');
+    const LEGAL = ['notLoaded', 'loading', 'loaded', 'failed'];
+    let ok = true;
+    for (const name of fs.readdirSync(path.join(projectRoot, 'components')).filter(f => f.endsWith('.brs'))) {
+        const src = fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8')
+            .split('\n').map(line => line.split("'")[0]).join('\n');
+        // Which locals hold a loadStatus in this file, then every string each of
+        // them is compared against. Dataflow is one assignment wide on purpose:
+        // the bug is a mistyped literal, not a mistyped variable.
+        const vars = new Set([...src.matchAll(/(\w+)\s*=\s*[\w.]+\.loadStatus\b/g)].map(m => m[1]));
+        for (const v of vars) {
+            for (const m of src.matchAll(new RegExp('\\b' + v + '\\s*(?:<>|<|>|=)\\s*"([^"]+)"', 'g'))) {
+                if (!LEGAL.includes(m[1])) {
+                    console.error(`${name} compares ${v} (a Poster loadStatus) against "${m[1]}" — the only values are ${LEGAL.join(' / ')}; a status that can never occur makes the branch dead, silently`);
+                    ok = false;
+                }
+            }
+        }
+    }
     return ok;
 }
 
@@ -852,7 +908,11 @@ function checkScreensHidden() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
     let ok = true;
-    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen', 'ConfirmExitDialog', 'SupportDialog']) {
+    // Every static child of the Scene starts hidden so nothing flashes before the
+    // stack shows it. The two custom dialogs are deliberately NOT here: they are
+    // built with CreateObject (a dialog declared in markup dims the background and
+    // paints nothing — see checkMainSceneContract), so there is nothing to hide.
+    for (const name of ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen']) {
         const element = xml.match(new RegExp(`<${name}[^>]*>`));
         if (!element) {
             console.error(`MainScene.xml is missing a <${name} ... /> child`);
@@ -889,7 +949,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
         process.exit(1);
     }
 

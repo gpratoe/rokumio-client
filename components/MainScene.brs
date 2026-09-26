@@ -75,12 +75,24 @@ sub init()
 
     ' Bottom-of-stack Back opens the native exit dialog through the Scene's dialog
     ' field (a StandardDialog) rather than using the ScreenStack.
-    m.confirmExit = m.top.FindNode("confirmExitDialog")
+    '
+    ' Both custom dialogs are BUILT HERE rather than declared as children in the
+    ' markup. The three StandardMessageDialogs (delete add-on, ECP sent, session
+    ' revoked) are created in code and every one of them renders. The two custom
+    ' ones declared as Scene children dimmed the background and took focus —
+    ' blind OK on the Exit button still fired buttonSelected — but painted
+    ' nothing at all, which rules out a broken component: their side card, QR
+    ' and palette are the same code either way. The declaration was the only
+    ' thing that differed. Keep the reference: a CreateObject'd node that
+    ' nothing holds can be collected while it is on screen.
+    m.confirmExit = CreateObject("roSGNode", "ConfirmExitDialog")
+    m.confirmExit.id = "confirmExitDialog"
     m.confirmExit.ObserveFieldScoped("wasClosed", "onExitDialogClosed")
 
     ' The support modal is another native dialog; the Scene owns it and decides
     ' which platform to show. Both dialogs dismiss through wasClosed.
-    m.supportDialog = m.top.FindNode("supportDialog")
+    m.supportDialog = CreateObject("roSGNode", "SupportDialog")
+    m.supportDialog.id = "supportDialog"
     m.supportDialog.ObserveFieldScoped("wasClosed", "onSupportDialogClosed")
 
     ' The whole data layer lives in ONE component — StoreHost — which builds

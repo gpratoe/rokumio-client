@@ -140,8 +140,12 @@ sub ShowQr(url as string)
     ' If the image was already fetched (pre-bound settled task), the observer
     ' won't fire again — check the current status so we don't leave the spinner
     ' up forever.
+    ' Poster.loadStatus is one of notLoaded / loading / loaded / failed. There is
+    ' no "ready" and no "error": this screen shipped testing for "ready" on the
+    ' success path, so a QR that loaded perfectly matched nothing, the column was
+    ' never revealed from here, and the countdown never started.
     status = m.qrPoster.loadStatus
-    if status = "ready" or status = "failed" then onQrLoadStatus()
+    if status = "loaded" or status = "failed" then onQrLoadStatus()
 end sub
 
 ' The QR image finished loading or failing — swap the spinner for the column.
@@ -152,11 +156,11 @@ end sub
 sub onQrLoadStatus()
     if m.column.visible then return
     status = m.qrPoster.loadStatus
-    if status = "error" or status = "failed"
+    if status = "failed"
         m.qrPoster.visible = false
         m.qrFallback.visible = true
         Reveal()
-    else if status = "ready"
+    else if status = "loaded"
         m.qrPoster.visible = true
         m.qrFallback.visible = false
         Reveal()

@@ -74,6 +74,6 @@ end sub
 ' or a URL whose load errored out.
 sub UpdateFallback()
     status = m.poster.loadStatus
-    hasArt = m.poster.uri <> invalid and m.poster.uri <> "" and status <> "error"
+    hasArt = m.poster.uri <> invalid and m.poster.uri <> "" and status <> "failed"
     m.titleText.visible = not hasArt
 end sub
