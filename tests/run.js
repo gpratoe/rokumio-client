@@ -1158,6 +1158,126 @@ function checkHomeCatalogStalenessContract() {
     return ok;
 }
 
+// Subtitle providers are MERGED, not raced.
+//
+// It used to be first-hit-wins: the drain stopped at the first provider that
+// returned tracks, and its list REPLACED whatever was there. So a user with two
+// working subtitle add-ons saw only one provider's captions, ranked order decided
+// which one got to answer at all, and a user with one flaky add-on and one good
+// one got captions on some plays and not others with nothing on screen to say
+// which. The fix is sequential merge: every ranked provider is asked, in rank
+// order, and their tracks accumulate.
+//
+// Merge is only safe because of two properties, and both are invisible in the
+// resulting track list — which is why they need pinning rather than eyeballing:
+//
+//   m.subtitleIndex is computed ONCE, on the first provider that yields tracks.
+//   Re-picking per provider renumbers an append-only list underneath a selection
+//   the user may already have made, silently switching them to another caption.
+//
+//   The append is genuinely append-only — no dedup, no re-sort, no replace. A
+//   dedup would make the surviving track depend on provider order, which is the
+//   device-dependent ordering this whole area was rebuilt to eliminate.
+//
+// The brs interpreter can run these subs, but the drain is driven by task
+// callbacks the interpreter never fires, so the sequence is not observable from a
+// test. Pinned structurally.
+function checkSubtitleMergeContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const player = code(read('components/PlayerScreen.brs'));
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const member = (src, name) => {
+        const start = src.search(new RegExp(`^[ \\t]*(?:public\\s+|private\\s+|override\\s+)*(?:sub|function)\\s+${name}\\s*\\(`, 'm'));
+        if (start === -1) return null;
+        const rest = src.slice(start);
+        const end = rest.slice(1).search(/^[ \t]*end\s+(?:sub|function)\b/m);
+        return end === -1 ? rest : rest.slice(0, end + 1);
+    };
+
+    const onResult = member(player, 'onSubtitleResult');
+    if (!onResult) {
+        err('PlayerScreen.brs has no onSubtitleResult — the merge has no entry point');
+        return ok;
+    }
+
+    // 1. It must APPEND, not assign. `m.subtitleTracks = result.subtitles` is the
+    //    exact first-hit-wins line this replaced, and it is the single most
+    //    important thing to keep gone.
+    if (/m\.subtitleTracks\s*=\s*result\.subtitles/.test(onResult)) {
+        err('PlayerScreen.onSubtitleResult assigns m.subtitleTracks = result.subtitles — that REPLACES the merged list, which is first-hit-wins: the first provider to answer becomes the only one with a say');
+    }
+    if (!/m\.subtitleTracks\.Push\(\s*track\s*\)/.test(onResult)) {
+        err('PlayerScreen.onSubtitleResult no longer appends with m.subtitleTracks.Push(track) — tracks must accumulate across providers, and the merge is the whole point');
+    }
+
+    // 2. The default pick happens once. A PickTrack call outside the firstTracks
+    //    branch renumbers the list under the user on every provider that answers.
+    const pick = /m\.subtitleIndex\s*=\s*m\.subtitlePicker\.PickTrack\(/.exec(onResult);
+    if (!pick) {
+        err('PlayerScreen.onSubtitleResult no longer picks a default track — nothing would ever be selected, only listed');
+    } else {
+        if (!/firstTracks/.test(onResult)) {
+            err('PlayerScreen.onSubtitleResult re-picks the default on every provider — the pick must be gated on the first merge that yields tracks, or later providers renumber the list under the user\'s existing selection');
+        } else {
+            // The pick must be INSIDE the firstTracks guard, not merely near it.
+            const guard = /if\s+firstTracks\s+then[^\n]*PickTrack\(/.test(onResult);
+            if (!guard) {
+                err('PlayerScreen.onSubtitleResult does not gate the PickTrack call on firstTracks — a pick per provider renumbers an append-only list and silently switches the user to a different caption');
+            }
+        }
+    }
+
+    // 3. The drain must continue after a provider SUCCEEDS, not only after one
+    //    returns nothing. This is the difference between "one provider answered"
+    //    and "every ranked provider answered".
+    const lines = onResult.split('\n');
+    const pushLine = lines.findIndex(l => /m\.subtitleTracks\.Push\(\s*track\s*\)/.test(l));
+    const drainLine = lines.findIndex((l, i) => i > pushLine && /LaunchSubtitleFetch\(\)/.test(l));
+    if (drainLine === -1) {
+        err('PlayerScreen.onSubtitleResult does not launch the next provider after a SUCCESSFUL merge — first-hit-wins is back: the first provider to answer ends the search and the rest are never asked');
+    }
+
+    // 4. A merge is append-only, so it must start from nothing. Reusing the
+    //    previous play's tracks mixes two videos' captions into one list and
+    //    leaves the index pointing into the older half.
+    const start = member(player, 'StartSubtitles');
+    if (!start) {
+        err('PlayerScreen.brs has no StartSubtitles');
+    } else {
+        if (!/m\.subtitleTracks\s*=\s*invalid/.test(start)) {
+            err('PlayerScreen.StartSubtitles does not reset m.subtitleTracks — an append-only merge that starts from the previous play\'s list mixes two videos\' captions together and points m.subtitleIndex into the older half');
+        }
+        if (!/m\.subtitleIndex\s*=\s*-1/.test(start)) {
+            err('PlayerScreen.StartSubtitles does not reset m.subtitleIndex — a stale index against a freshly reset track list selects whatever happens to sit at that position');
+        }
+    }
+
+    // 5. The reap-before-check defect, in this handler. The result field is
+    //    alwaysNotify with no value, so it also notifies while the request is
+    //    still in flight; reaping on that unobserves the field and removes the
+    //    node, and the real answer lands on a node nobody is watching.
+    const resultAt = /result\s*=\s*task\.result/.exec(onResult);
+    const reapAt = /AsyncTask_Reap\(/.exec(onResult);
+    if (!resultAt) {
+        err('PlayerScreen.onSubtitleResult no longer reads task.result');
+    }
+    if (!reapAt) {
+        err('PlayerScreen.onSubtitleResult never reaps the subtitle task — a finished task node would stay in the tree for the life of the screen');
+    } else if (resultAt && !/if\s+result\s*=\s*invalid\s+then\s+return/.test(onResult)) {
+        err('PlayerScreen.onSubtitleResult reaps without declining an empty result — the alwaysNotify notification arrives while the request is in flight, so this destroys the real result (the same defect that ate the add-on sync result)');
+    } else if (resultAt && reapAt) {
+        const bail = /if\s+result\s*=\s*invalid\s+then\s+return/.exec(onResult);
+        if (bail && reapAt.index < bail.index) {
+            err('PlayerScreen.onSubtitleResult reaps BEFORE declining an empty result — the node is unobserved and removed while the worker is still running, so the real result can never land');
+        }
+    }
+    return ok;
+}
+
 function checkHomeScreenContract() {
     const fs = require('fs');
     const xml = fs.readFileSync(path.join(projectRoot, 'components', 'HomeScreen.xml'), 'utf8');
@@ -1588,8 +1708,25 @@ function checkAddonOrderingContract() {
         err('PlayerScreen.StartSubtitles no longer drains a ranked candidate list — one unreachable provider would end the search the way it used to');
     }
     const onResult = member(playerCode, 'onSubtitleResult');
-    if (!onResult || !/m\.subtitleCursor\s*<\s*m\.subtitleCandidates\.Count\(\)[\s\S]{0,200}?LaunchSubtitleFetch\(\)/.test(onResult)) {
+    const more = member(playerCode, 'MoreSubtitleCandidates');
+    if (!more || !/m\.subtitleCursor\s*<\s*m\.subtitleCandidates\.Count\(\)/.test(more)) {
+        err('PlayerScreen.MoreSubtitleCandidates no longer asks whether the ranked queue has anyone left — the drain has no terminator, so it either stops at the first provider or never stops');
+    }
+    if (!onResult || !/MoreSubtitleCandidates\(\)[\s\S]{0,120}?LaunchSubtitleFetch\(\)/.test(onResult)) {
         err('PlayerScreen.onSubtitleResult no longer falls through to the next candidate when a provider returns nothing — picking a provider that cannot answer is back to meaning "no subtitles"');
+    }
+    // A later provider coming back empty must not discard captions an earlier
+    // one already contributed. Under a merge this is the difference between
+    // "this add-on had nothing" and "the player lost its subtitles".
+    if (onResult) {
+        const emptyBranch = onResult.slice(onResult.indexOf('result.subtitles.Count() = 0'));
+        const clearAt = emptyBranch.search(/ClearSubtitles\(\)/);
+        if (clearAt !== -1) {
+            const guard = emptyBranch.slice(0, clearAt);
+            if (!/m\.subtitleTracks\s*=\s*invalid\s+or\s+m\.subtitleTracks\.Count\(\)\s*=\s*0/.test(guard)) {
+                err('PlayerScreen.onSubtitleResult clears the subtitle list when a LATER provider returns nothing, discarding tracks an earlier provider already merged — under a merge, one flaky add-on would blank captions the user can already see');
+            }
+        }
     }
     const cancel = member(playerCode, 'CancelSubtitles');
     if (!cancel || !/m\.subtitleCandidates\s*=\s*\[\]/.test(cancel)) {
@@ -1798,7 +1935,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkHomeCatalogStalenessContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
+    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkHomeCatalogStalenessContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
         process.exit(1);
     }
 

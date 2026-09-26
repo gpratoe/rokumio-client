@@ -158,19 +158,39 @@ end sub
 ' to the live Video node the moment it reports in.
 '
 ' The candidate list comes from SubtitlesAddresses, which RANKS by what a
-' provider is rather than taking whatever the registry happened to yield first,
-' and which is then drained in that order — so a provider that cannot answer
-' costs one round trip and steps aside instead of ending the search.
+' provider is rather than taking whatever the registry happened to yield first.
+'
+' Every ranked provider is asked, in that order, and their tracks are MERGED
+' rather than raced: first provider's captions are usable after one round trip,
+' and each later provider only adds to them. So the ranking decides which captions
+' appear first in the list and which provider's pick wins by default, not which
+' provider is the only one that gets a say — a provider that cannot answer costs
+' one round trip and contributes nothing rather than ending the search.
 sub StartSubtitles(params as object)
     if m.stores = invalid then return
     if m.subtitleTask <> invalid then return
     if params.metaType = invalid or params.videoId = invalid then return
     if params.metaType = "" or params.videoId = "" then return
 
+    ' A merge is append-only, so it has to start from nothing. Reusing the
+    ' previous play's tracks would mix two videos' captions into one list and
+    ' leave m.subtitleIndex pointing into the older half.
+    m.subtitleTracks = invalid
+    m.subtitleIndex = -1
+    m.subtitleNodesApplied = false
+
     m.subtitleParams = { metaType: params.metaType, videoId: params.videoId }
     m.subtitleCandidates = SubtitlesAddresses(m.stores.addons.callFunc("AddonsGetAll"))
     m.subtitleCursor = 0
     LaunchSubtitleFetch()
+end sub
+
+' Is there another ranked provider left to ask? Kept as one predicate because
+' two branches need it — a provider that answered with nothing, and a provider
+' that answered with something and still has company — and they must agree.
+sub MoreSubtitleCandidates() as boolean
+    if m.subtitleCandidates = invalid then return false
+    return m.subtitleCursor < m.subtitleCandidates.Count()
 end sub
 
 ' Ask the next queued provider. One candidate is in flight at a time and the
@@ -263,36 +283,75 @@ sub SortAddressesByName(list as object) as void
     end for
 end sub
 
-' The caption list landed. The raw add-on tracks become the SubtitleTracks
-' source and a pick index selects the active one; a failure leaves the player
-' caption-free, which is fine (no subs is never an error). Results that land
-' after a Back-out are dropped by the m.subtitleTask guard.
+' One provider answered. Its tracks are APPENDED to whatever earlier providers
+' contributed, and the drain continues: the ranking decides the order tracks
+' appear in and which provider's pick wins by default, not which provider gets to
+' be the only one with a say. First-hit-wins meant a perfectly good second
+' provider was never asked, so a user with one flaky add-on and one good one
+' sometimes got captions and sometimes did not, with nothing on screen to explain
+' which.
+'
+' Two properties make append-only safe rather than merely different:
+'
+'   m.subtitleIndex is chosen ONCE, on the first provider that yields tracks, and
+'   never recomputed. Later providers only push to the end of the list, so every
+'   index the user could already be looking at still means the same track. A
+'   re-pick per provider would renumber the list underneath a selection the user
+'   had already made, silently switching them to a different caption.
+'
+'   BuildSubtitleTracks numbers duplicates per language as it walks the list
+'   ("English 1", "English 2"), so two providers offering English produce two
+'   distinguishable entries rather than two identical-looking ones. No dedup is
+'   wanted: the same caption offered twice is not an error, and dropping the
+'   second copy would make the count depend on provider order.
 sub onSubtitleResult()
     if m.subtitleTask = invalid then return
     task = m.subtitleTask
     m.subtitleTask = invalid
     result = task.result
+
+    ' An empty result means "not yet", not "nothing to report": `result` is
+    ' alwaysNotify with no value, so it also notifies before this worker wrote
+    ' anything, and that notification is dispatched on the event loop — i.e. while
+    ' the request is still in flight. Reaping here unobserves the field and
+    ' removes the node, and removing a running Task does not kill its worker, so
+    ' the real answer would land on a node nobody is watching. See
+    ' MainScene.onAddonSyncResult for the same defect and the same fix.
+    if result = invalid then return
     AsyncTask_Reap(task, m.top, false)
 
-    if result = invalid or not result.ok or result.subtitles = invalid or result.subtitles.Count() = 0
-        ' This provider had nothing to give. Another candidate still queued
-        ' means the search is not over: choosing the wrong provider must not
-        ' read the same as owning no subtitles at all, which is exactly what
-        ' made an unreachable pick indistinguishable from a device with no
-        ' subtitle add-ons.
-        if m.subtitleCandidates <> invalid and m.subtitleCursor < m.subtitleCandidates.Count()
+    if not result.ok or result.subtitles = invalid or result.subtitles.Count() = 0
+        ' This provider had nothing to give. Another candidate still queued means
+        ' the search is not over: choosing the wrong provider must not read the
+        ' same as owning no subtitles at all, which is exactly what made an
+        ' unreachable pick indistinguishable from a device with no subtitle
+        ' add-ons. Tracks already merged from an EARLIER provider are kept — a
+        ' later provider coming back empty is not a reason to throw away captions
+        ' the user can already see.
+        if MoreSubtitleCandidates() then
             LaunchSubtitleFetch()
             return
         end if
-        ClearSubtitles()
+        if m.subtitleTracks = invalid or m.subtitleTracks.Count() = 0 then ClearSubtitles()
         return
     end if
 
-    m.subtitleCandidates = []
-    m.subtitleParams = invalid
-    m.subtitleTracks = result.subtitles
+    ' First tracks of this play? Then this is the one provider whose preference
+    ' wins the default pick.
+    firstTracks = m.subtitleTracks = invalid or m.subtitleTracks.Count() = 0
+    if m.subtitleTracks = invalid then m.subtitleTracks = []
+    for each track in result.subtitles
+        m.subtitleTracks.Push(track)
+    end for
+    ' The built array is a snapshot of the raw list, so it has to be rebuilt
+    ' before the newly appended tracks can reach the content node.
     m.subtitleNodesApplied = false
-    m.subtitleIndex = m.subtitlePicker.PickTrack(result.subtitles, DeviceLocale())
+    if firstTracks then m.subtitleIndex = m.subtitlePicker.PickTrack(m.subtitleTracks, DeviceLocale())
+
+    ' Everyone ranked is still worth asking, even though the list already has
+    ' tracks in it.
+    if MoreSubtitleCandidates() then LaunchSubtitleFetch()
+
     ' Playback never waits for this fetch, so a list that lands here applies to
     ' the live content node (and writes video.subtitleTrack) mid-play; the
     ' native Options dialog picks the tracks up from the updated SubtitleTracks.

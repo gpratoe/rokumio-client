@@ -408,6 +408,7 @@ function OnEnter(params as object) as void
     ' StartCatalogLoad above is a no-op once the walk has latched. Running it here
     ' as well means leaving for another screen and coming back repairs a stale
     ' grid, instead of the staleness being permanent until a relaunch.
+    EnsureCurrentRows()
     m.catalog.SetFocus(true)
 end function
 
