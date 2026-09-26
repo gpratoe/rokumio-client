@@ -28,14 +28,19 @@
 
         <!-- The full-width vertical group centers every child by its own
              measured size, so wider translations stay centered with no manual
-             math. Starts hidden; Reveal flips it on once the QR arrives. -->
+             math. Starts hidden; ShowLink flips it on as soon as the scan URL
+             arrives, which is deliberately NOT gated on the QR image: a slow or
+             failed PNG must not hold the screen behind a spinner.
+             No width here: LayoutGroup has no such field, and feeding the
+             attribute produced a group whose children were laid out at a
+             broken extent — Labels still painted their glyphs, the Poster
+             painted nothing. That is why only the QR was missing. -->
         <LayoutGroup
             id="pairColumn"
             layoutDirection="vert"
             horizAlignment="center"
             itemSpacings="[24]"
             translation="[960, 150]"
-            width="1920"
             visible="false">
             <Label
                 id="pairTitle"
@@ -44,8 +49,7 @@
             <Poster
                 id="pairQr"
                 width="360"
-                height="360"
-                failBackgroundColor="0x0" />
+                height="360" />
             <Label
                 id="pairQrFallback"
                 width="700"

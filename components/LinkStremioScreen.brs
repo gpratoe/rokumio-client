@@ -1,13 +1,16 @@
 ' LinkStremioScreen — displays the link-code pairing UI.
 '
 ' Observes the LinkStremioTask's qrcode/link fields to show the pairing info, and
-' the result field to detect completion or failure. A spinner covers the QR
-' fetch, then a centered column appears with the QR, the scan URL (in accent
-' green), the two instruction steps, a "Press OK to get a new code" hint and a
-' countdown to the pairing deadline. OK on the revealed column asks MainScene to
-' restart the flow, which swaps in a fresh task; this screen re-binds through the
-' taskNode field observer. Back publishes a cancelLogin; MainScene cancels the
-' task and pops to AuthScreen.
+' the result field to detect completion or failure. A spinner covers the create
+' call, then a centered column appears the moment the scan URL is known — with
+' the two instruction steps, a "Press OK to get a new code" hint and a countdown
+' to the pairing deadline. The QR is NOT what reveals the screen: it loads into
+' the already-visible column and fills in when it arrives, or is replaced by
+' "QR code unavailable — use the link below" if it fails, so a slow or broken
+' image can never hide the link the user can type by hand. OK on the revealed
+' column asks MainScene to restart the flow, which swaps in a fresh task; this
+' screen re-binds through the taskNode field observer. Back publishes a
+' cancelLogin; MainScene cancels the task and pops to AuthScreen.
 
 sub init()
     m.PAIR_LIFETIME_SECONDS = 300
@@ -108,6 +111,11 @@ sub ResetUI()
     m.spinner.visible = true
     m.column.visible = false
     m.qrPoster.uri = ""
+    ' onQrLoadStatus hides the poster when an image fails. ResetUI has to put it
+    ' back: without this, one failed fetch left the poster hidden for the rest of
+    ' the session, so "Request new code" could never show a QR again — the
+    ' fallback text stayed up permanently even once a good code arrived.
+    m.qrPoster.visible = true
     m.qrFallback.visible = false
     m.linkLabel.text = ""
     m.statusLabel.text = "..."
@@ -124,6 +132,14 @@ end sub
 
 sub ShowLink(link as string)
     m.linkLabel.text = link
+    ' The link is what the user needs; the QR is an enhancement on top of it.
+    ' Reveal on the link and start the pairing clock here, NOT when the PNG
+    ' lands: the whole screen used to stay behind a spinner until a network
+    ' image resolved, so a slow or stuck QR fetch meant no code, no URL and no
+    ' way out but Back. The poster still fills in when it loads, and still falls
+    ' back to text when it cannot.
+    Reveal()
+    StartCountdown()
 end sub
 
 sub onTaskQrcode()
@@ -137,34 +153,28 @@ end sub
 sub ShowQr(url as string)
     m.qrPoster.uri = url
     m.qrPoster.ObserveField("loadStatus", "onQrLoadStatus")
-    ' If the image was already fetched (pre-bound settled task), the observer
-    ' won't fire again — check the current status so we don't leave the spinner
-    ' up forever.
+    ' A task that settled before this screen started observing will not fire the
+    ' observer again, so read the current status too.
     ' Poster.loadStatus is one of notLoaded / loading / loaded / failed. There is
     ' no "ready" and no "error": this screen shipped testing for "ready" on the
-    ' success path, so a QR that loaded perfectly matched nothing, the column was
-    ' never revealed from here, and the countdown never started.
+    ' success path, so a QR that loaded perfectly matched neither branch and the
+    ' poster was never even asked to paint.
     status = m.qrPoster.loadStatus
     if status = "loaded" or status = "failed" then onQrLoadStatus()
 end sub
 
-' The QR image finished loading or failing — swap the spinner for the column.
-' A ready QR starts the countdown; a failure reveals the column too (so the
-' error + refresh button are reachable) but leaves the timer hidden. Once
-' revealed, ignore further load-status events (the observer survives the initial
-' bind and fires on every later assignment too).
+' The QR image finished loading or failing — swap the poster for the fallback
+' text. This no longer reveals anything or touches the clock: ShowLink owns both
+' now, so the image is purely a decoration and cannot hold the screen hostage.
+' A ready QR paints; a failure swaps in the text the user can actually read.
 sub onQrLoadStatus()
-    if m.column.visible then return
     status = m.qrPoster.loadStatus
     if status = "failed"
         m.qrPoster.visible = false
         m.qrFallback.visible = true
-        Reveal()
     else if status = "loaded"
         m.qrPoster.visible = true
         m.qrFallback.visible = false
-        Reveal()
-        StartCountdown()
     end if
 end sub
 
