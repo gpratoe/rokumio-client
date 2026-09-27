@@ -21,8 +21,8 @@
              shows through. titleText is the fallback for tiles with no art (or
              whose art failed to load): hidden whenever art is showing. -->
         <Rectangle id="tileBorder" width="320" height="180">
-            <Rectangle id="tileBg" width="312" height="172" translation="[4, 4]" />
-            <Poster id="poster" width="312" height="172" translation="[4, 4]" />
+            <Rectangle id="tileBg" width="320" height="180"/>
+            <Poster id="poster" width="320" height="180"/>
             <Label id="titleText" width="296" height="164" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" />
             <!-- Optional watched badge (40px check, top-right). Hidden until a
                  screen passes itemContent.watched. -->

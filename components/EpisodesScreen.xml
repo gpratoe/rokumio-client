@@ -60,7 +60,7 @@
             showRowLabel="[true]"
             rowLabelOffset="[0, 0]"
             rowLabelFont="font:MediumBoldSystemFont"
-            drawFocusFeedback="false"
+            drawFocusFeedback="true"
             itemComponentName="EpisodeTile"
             vertFocusAnimationStyle="fixedFocusWrap"
           wrapDividerBitmapUri="pkg:/images/divider.9.png"/>

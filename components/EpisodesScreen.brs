@@ -25,6 +25,8 @@ sub init()
     m.epTitle.color = t.accent
     m.epDesc.color = t.textSecondary
     m.epList.rowLabelTextColor = t.textSecondary
+    m.epList.focusBitmapBlendColor = t.accent
+    m.epList.rowLabelOffset = [0,10]
 
     m.epList.ObserveField("rowItemFocused", "onItemFocused")
     m.epList.ObserveField("rowItemSelected", "onItemSelected")

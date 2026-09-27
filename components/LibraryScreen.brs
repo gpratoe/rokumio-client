@@ -24,6 +24,7 @@ sub init()
     m.top.FindNode("librarySub").color = t.textSecondary
     m.status.color = t.accent
     m.header.color = t.textSecondary
+    m.grid.focusBitmapBlendColor = t.accent
 
     m.filterBar.ObserveField("chipActivated", "onChipActivated")
     m.filterBar.ObserveField("optionPicked", "onOptionPicked")
