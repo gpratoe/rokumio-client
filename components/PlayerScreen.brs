@@ -58,6 +58,13 @@ sub init()
     m.subtitleIndex = -1
     m.subtitleNodesApplied = false
     m.subtitlePicker = SubtitlesStore(invalid)
+
+    ' The tick boundary StartPlayback defers `control = "play"` across. Observed
+    ' here rather than in CreateVideo so it is armed exactly once, and armed
+    ' before any play can ask for it.
+    m.playTimer = m.top.FindNode("playKick")
+    m.playArmed = false
+    if m.playTimer <> invalid then m.playTimer.ObserveField("fire", "onPlayKickFire")
 end sub
 
 function OnEnter(params as object) as void
@@ -81,14 +88,21 @@ function OnEnter(params as object) as void
         m.bufferingGroup.visible = false
     end if
 
-    StartResolve(params.stream, params.serverAddress)
+    StartResolve(params.stream, params.serverAddress, ResolveOrdinal(params.season), ResolveOrdinal(params.episode))
     StartSubtitles(params)
 end function
 
 ' Kick the stream resolution off the render thread. The task frees the UI as the
 ' create/torrent warm-up parks (up to the long timeout); a direct URL resolves
 ' instantly through the same path.
-sub StartResolve(stream as object, serverAddress as dynamic)
+'
+' Season and episode go across as INTEGERS, not as the name fragments the server
+' will match release names against. Two reasons, and the second is the one that
+' bites: the fragments are the streaming server's protocol, so the store builds
+' them; and a Task field is assigned through AddReplace, which enforces its
+' declared type and rejects an array on the device with a runtime "Type
+' mismatch" the test suite cannot see.
+sub StartResolve(stream as object, serverAddress as dynamic, season = 0 as integer, episode = 0 as integer)
     if stream = invalid then
         m.status.text = "This source is poorly available or your internet connection is not fast enough."
         return
@@ -97,9 +111,23 @@ sub StartResolve(stream as object, serverAddress as dynamic)
     task = AsyncTask_Launch(m.top, "StreamResolveTask", "onResolveResult", {
         stream: stream
         serverAddress: serverAddress
+        season: season
+        episode: episode
     }, "playerResolve")
     m.resolveTask = task
 end sub
+
+' Season and episode as whole numbers, 0 when the play has neither. Coerced
+' rather than passed through because the Task fields are declared integer and
+' AddReplace will not coerce a float on the player's behalf.
+function ResolveOrdinal(value as dynamic) as integer
+    if value = invalid then return 0
+    try
+        return Int(value)
+    catch notANumber
+        return 0
+    end try
+end function
 
 sub StartResolvePulse()
     if m.resolvePulse = invalid then return
@@ -128,20 +156,29 @@ end sub
 ' out") stays on the player with the Stremio wording and Back returns to the
 ' stream list. Results that land after a Back-out are dropped by the
 ' m.resolveTask guard.
+'
+' The handoff to the player is wrapped in a try. Uncaught, a throw between here
+' and the first frame killed playback with nothing on screen to say why — the
+' status line kept whatever the pre-resolve text was, so a dead player and a
+' player that had not started yet looked identical. This says which it was.
 sub onResolveResult()
     if m.resolveTask = invalid then return
     task = m.resolveTask
     m.resolveTask = invalid
     result = task.result
-    AsyncTask_Reap(task, m.top, false)
+    try
+        AsyncTask_Reap(task, m.top, false)
+        StopResolvePulse()
 
-    StopResolvePulse()
+        if result = invalid or not result.ok or result.url = invalid or result.url = ""
+            m.status.text = "This source is poorly available or your internet connection is not fast enough."
+            return
+        end if
 
-    if result = invalid or not result.ok or result.url = invalid or result.url = ""
-        m.status.text = "This source is poorly available or your internet connection is not fast enough."
-        return
-    end if
-    StartPlayback(result.url)
+        StartPlayback(result.url)
+    catch e
+        m.status.text = "The player could not start."
+    end try
 end sub
 
 sub CancelResolve()
@@ -392,8 +429,15 @@ sub ApplySubtitleIndex(content as object)
     if content = invalid then return
 
     if m.subtitleTracks = invalid or m.subtitleTracks.Count() = 0
-        content.subtitleTracks = []
-        content.subtitleConfig = {}
+        ' Nothing is written to the content node here, and that is the whole
+        ' point. This runs on the node that is about to become m.video.content,
+        ' so an empty subtitleTracks array and an empty subtitleConfig are two
+        ' fields handed to the Video node for it to accept or reject on the very
+        ' tick that decides whether it plays at all — and an empty collection is
+        ' exactly the kind of value a node has cause to refuse. A player with no
+        ' captions needs no fields set; it already starts caption-free. Writing
+        ' nothing is what the rest of this sub argues for, and this path never
+        ' did it.
         SetCaptionMode("off")
         return
     end if
@@ -524,7 +568,29 @@ function DeviceLocale() as string
 end function
 
 sub CustomizeVideoNode()
-    m.video.trickPlayBar.filledBarBlendColor = Theme().accent
+    if m.video = invalid then return
+    ' trickPlayBar is a member READ, and a read of a member the running Roku OS
+    ' does not have THROWS — where a set of a missing member (see
+    ' enablePositionTracking in StartPlayback) only warns and is discarded. The
+    ' throw used to land here, inside CreateVideo, which runs BEFORE
+    ' m.video.content is assigned: the player was therefore never handed a URL
+    ' at all. What that looks like from the room is the resolve logo pulse ending
+    ' on schedule and then nothing playing, with no message, because nothing
+    ' failed that anything was watching — the buffer indicator is hidden by the
+    ' "finished"/"stopped" state handler, and direct streams and torrents fail
+    ' identically because neither ever reached the player.
+    '
+    ' Guarded the way globalCaptionMode and asyncStopSemantics already are below,
+    ' and additionally wrapped, because a trick-play bar tint is decoration and
+    ' decoration is not allowed to be the reason a video does not start. On a
+    ' Roku OS that does have trickPlayBar this changes nothing.
+    if not m.video.HasField("trickPlayBar") then return
+    try
+        m.video.trickPlayBar.filledBarBlendColor = Theme().accent
+    catch e
+        ' Decoration only. A tint this firmware will not take is not a reason to
+        ' refuse playback.
+    end try
 end sub
 
 ' The Video node is declared in XML so Roku owns its native UI lifecycle. Each
@@ -543,6 +609,7 @@ end sub
 ' not gate playback — a list already in hand rides the content pre-play, and a
 ' result still in flight applies to the live node the moment it lands.
 sub StartPlayback(url as string)
+    m.playArmed = false
     CreateVideo()
 
     content = CreateObject("roSGNode", "ContentNode")
@@ -557,10 +624,45 @@ sub StartPlayback(url as string)
     streamFormat = DetectStreamFormat(url)
     if streamFormat <> "" then content.streamFormat = streamFormat
 
-    m.video.enablePositionTracking = true
+    ' Guarded for the same reason trickPlayBar is, and because the warning this
+    ' used to print on every single play ("Tried to set nonexistent field
+    ' enablepositiontracking") was the loudest thing in the console and buried
+    ' anything real. A set of a missing field is discarded, so losing it costs
+    ' nothing; position still reads back, it just is not tracked by the node.
+    if m.video.HasField("enablePositionTracking") then m.video.enablePositionTracking = true
     ApplySubtitleIndex(content)
     m.video.content = content
     m.video.SetFocus(true)
+
+    ' Play is asked for on the NEXT tick, not this one. Handing the node its
+    ' content and its control in the same tick lets it act on `control` before it
+    ' has taken the content in, and the symptom of that is precisely the one
+    ' being chased: the buffer indicator comes up, the node goes straight to a
+    ' terminal state, and nothing plays with no error anywhere to find. A
+    ' one-shot timer is a guaranteed tick boundary. m.playArmed makes it at most
+    ' one kick per StartPlayback, and disarms a kick still in flight when a new
+    ' play starts before it lands.
+    ' Armed through `control`, not Start()/Stop(): an roSGNode Timer has no such
+    ' methods and calling one is a runtime &hf4 "Member function not found",
+    ' which is what the first version of this did — thrown inside StartPlayback,
+    ' so the player died on the one function that must never throw. Same as
+    ' stopWatchdog above, which has always been armed this way.
+    m.playArmed = true
+    if m.playTimer <> invalid
+        m.playTimer.control = "stop"
+        m.playTimer.control = "start"
+    else
+        m.playArmed = false
+        m.video.control = "play"
+    end if
+end sub
+
+' The deferred half of StartPlayback. Kept to the one assignment it exists for,
+' so a failure in it cannot be anything else.
+sub onPlayKickFire()
+    if not m.playArmed then return
+    m.playArmed = false
+    if m.video = invalid then return
     m.video.control = "play"
 end sub
 

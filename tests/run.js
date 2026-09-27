@@ -74,15 +74,114 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs')
 ];
 
-// The ScreenStack drives every screen through the five callFunc'd contract
-// functions — SetStores plus the four lifecycle hooks. They now live on the
-// Screen base component and are inherited, so a screen only declares what it
-// adds or overrides. Pin the contract at its source: the base must carry the
-// five, every standard screen must extend it (a screen that skipped extends
-// would not inherit SetStores and MainScene's callFunc would silently no-op),
-// and a screen that re-declares a contract function locally must actually
-// implement it (declare-without-impl was how BlurFocus silently no-opped before
-// the base existed).
+function checkDeferredVideoPlayContract() {
+    const fs = require('fs');
+    const xml = fs.readFileSync(path.join(projectRoot, 'components', 'PlayerScreen.xml'), 'utf8');
+    const src = fs.readFileSync(path.join(projectRoot, 'components', 'PlayerScreen.brs'), 'utf8');
+    const code = src.split('\n').map((line) => line.split("'")[0]).join('\n');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    if (!/<Timer\s+id="playKick"/.test(xml)) {
+        err('PlayerScreen.xml declares no <Timer id="playKick" /> — StartPlayback defers `control = "play"` across it, so without it the player is never asked to play at all');
+    }
+    if (!/FindNode\(\s*"playKick"\s*\)/.test(code)) {
+        err('PlayerScreen.brs never looks up the playKick Timer — the node exists in the XML but nothing holds it, so nothing can start it');
+    }
+    if (!/ObserveField\(\s*"fire"\s*,\s*"onPlayKickFire"\s*\)/.test(code)) {
+        err('PlayerScreen.brs does not ObserveField("fire", "onPlayKickFire") on the playKick Timer — an unobserved Timer fires into nothing and the deferred play never happens');
+    }
+    const kick = new RegExp('^[ \\t]*sub\\s+onPlayKickFire\\s*\\(', 'm').exec(code);
+    if (!kick) {
+        err('PlayerScreen.brs has no onPlayKickFire() — the field observer names a handler that does not exist, which is a no-op, so the deferred play never happens');
+    } else {
+        const rest = code.slice(kick.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+sub\b/m);
+        const body = end === -1 ? rest : rest.slice(0, end + 1);
+        if (!/m\.video\.control\s*=\s*"play"/.test(body)) {
+            err('PlayerScreen.brs onPlayKickFire() never sets m.video.control = "play" — the timer fires and does nothing');
+        }
+    }
+
+    // And the assignment must not still be sitting in the same tick, which is
+    // the thing being fixed. A play inside StartPlayback is only allowed as the
+    // fallback for a missing Timer, and only after the timer has been offered.
+    const start = new RegExp('^[ \\t]*sub\\s+StartPlayback\\s*\\(', 'm').exec(code);
+    if (!start) {
+        err('PlayerScreen.brs has no StartPlayback()');
+    } else {
+        const rest = code.slice(start.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+sub\b/m);
+        const body = end === -1 ? rest : rest.slice(0, end + 1);
+        const contentAt = body.indexOf('m.video.content =');
+        const kickAt = body.indexOf('m.playTimer.control = "start"');
+        for (const hit of body.matchAll(/m\.video\.control\s*=\s*"play"/g)) {
+            if (kickAt === -1) {
+                err('PlayerScreen.brs StartPlayback plays without ever starting the playKick timer — remove the deferral entirely or restore it, but do not leave a play that only runs in some paths');
+            } else if (hit.index < kickAt) {
+                err('PlayerScreen.brs StartPlayback sets m.video.control = "play" before the playKick timer is started — the play is back on the same tick as the content assignment, which is the race this was split to remove');
+            }
+        }
+        if (contentAt === -1) {
+            err('PlayerScreen.brs StartPlayback never assigns m.video.content — the deferral guard has nothing to protect');
+        }
+        // The other way this can rot silently: with the kick gone AND the
+        // fallback play gone, there is no `control = "play"` left in StartPlayback
+        // at all and the loop above has nothing to complain about — but nothing
+        // ever asks the node to play. Either the timer carries the play or
+        // StartPlayback does; never neither.
+        if (kickAt === -1 && !/m\.video\.control\s*=\s*"play"/.test(body)) {
+            err('PlayerScreen.brs StartPlayback neither starts the playKick timer nor sets control = "play" itself — the video is never asked to play by any path');
+        }
+    }
+    return ok;
+}
+
+function checkScreenRuntimeHazards() {
+    const fs = require('fs');
+    const dir = path.join(projectRoot, 'components');
+    let ok = true;
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.brs'))) {
+        const src = fs.readFileSync(path.join(dir, file), 'utf8');
+        const code = src.split('\n').map((line) => line.split("'")[0]).join('\n');
+
+        // Members this same file assigns [] are arrays; anything else named m.x
+        // is left alone rather than guessed at.
+        const arrays = new Set([...code.matchAll(/\b(m\.[A-Za-z_][\w.]*)\s*=\s*\[\]/g)].map((hit) => hit[1]));
+        for (const hit of code.matchAll(/\bLen\(\s*(m\.[A-Za-z_][\w.]*)/g)) {
+            if (arrays.has(hit[1])) {
+                console.error(`${file}: Len(${hit[1]}) — ${hit[1]} is assigned [] in this file, so it is an array. Len() on an array is a runtime type mismatch (&h18) that aborts the enclosing function; use ${hit[1]}.Count()`);
+                ok = false;
+            }
+        }
+
+        for (const hit of code.matchAll(/CreateObject\(\s*"(roFileSystem)"\s*\)/g)) {
+            console.error(`${file}: creates ${hit[1]}, which is MAIN|TASK-only. Screen callbacks include the Video node's state and bufferingStatus handlers, which arrive on the RENDER thread, so this fails there and takes the handler down with it. Read the value you need from m, or hand the work to a Task.`);
+            ok = false;
+        }
+
+        // An roSGNode Timer is driven through its `control` field ("start" /
+        // "stop"); it has no Start()/Stop() methods, and calling one is a
+        // runtime &hf4 "Member function not found". Both timers in PlayerScreen
+        // are armed the same way, and the first version of the playKick deferral
+        // called Start() on it, which threw inside StartPlayback and stopped the
+        // player dead — the one function that must never throw. Resolve the
+        // member back to the node it holds so a Timer is only flagged when it
+        // really is one.
+        const xmlPath = path.join(dir, file.replace(/\.brs$/, '.xml'));
+        if (!fs.existsSync(xmlPath)) continue;
+        const xml = fs.readFileSync(xmlPath, 'utf8');
+        for (const bind of code.matchAll(/\b(m\.[A-Za-z_][\w]*)\s*=\s*m\.top\.FindNode\(\s*"([^"]+)"\s*\)/g)) {
+            if (!new RegExp(`<Timer\\s+id="${bind[2]}"`).test(xml)) continue;
+            for (const call of code.matchAll(new RegExp(`\\b${bind[1].replace('.', '\\.')}\\.(Start|Stop)\\s*\\(`, 'g'))) {
+                console.error(`${file}: calls ${bind[1]}.${call[1]}() on the "${bind[2]}" Timer. An roSGNode Timer has no such methods — it is armed with \`control = "start"\` / \`control = "stop"\`, as this file's other Timer already is. Calling one is a runtime &hf4 that aborts whatever function it sits in.`);
+                ok = false;
+            }
+        }
+    }
+    return ok;
+}
+
 function checkScreenContract() {
     const fs = require('fs');
     const contract = ['SetStores', 'OnEnter', 'OnExit', 'OnBackPressed', 'BlurFocus'];
@@ -843,6 +942,144 @@ function checkStremioProvisioningContract() {
 // structurally here, and the worker narrates its own progress into a "stage" field
 // so that if it ever fails again the fault text names the hop instead of costing
 // another round of hypotheses.
+function checkStreamResolveTaskContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const taskXml = read('components/StreamResolveTask.xml');
+    const taskBrs = code(read('components/StreamResolveTask.brs'));
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const body = (src, name) => {
+        const start = new RegExp(`^[ \\t]*(?:public\\s+|private\\s+|override\\s+)*(?:sub|function)\\s+${name}\\s*\\(`, 'm').exec(src);
+        if (!start) return null;
+        const rest = src.slice(start.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+(?:sub|function)\b/m);
+        return end === -1 ? rest : rest.slice(0, end + 1);
+    };
+
+    // The whole readiness wait lives in a Task component, which the brs
+    // interpreter never executes — Wait() there ABORTS the run and Ticks() does
+    // not exist — so none of this is reachable by an interpreter test. These
+    // checks are the only thing standing between a silent no-op and a fix that
+    // reads as present. Every one of them is about the wait degenerating into
+    // doing nothing while still looking correct.
+    if (!/<field\s+id="result"\s+type="assocarray"[^>]*alwaysNotify="true"/.test(taskXml)) {
+        err('StreamResolveTask.xml does not declare <field id="result" type="assocarray" ... alwaysNotify="true" /> — without it the screen never hears back');
+    }
+
+    const wait = body(taskBrs, 'WaitForPlaylist');
+    if (!wait) {
+        err('StreamResolveTask.brs has no WaitForPlaylist() — the readiness wait is gone, and the Video node is back to eating the cold-engine response itself');
+        return ok;
+    }
+
+    // 1. NO CLOCK. The most expensive thing this file has ever contained was a
+    //    clock reading: an earlier version bounded the wait with
+    //    CreateObject("roDateTime").AsMilliseconds(), a method this codebase has
+    //    never put on a device (the only two it does use are ToISOString() and
+    //    GetYear()), and the device answered &hf4, member function not found.
+    //    No interpreter test can catch a missing platform method, and the file is
+    //    never executed by one, so refusing to use a clock here is the only
+    //    defence there is. The bound is a count of attempts.
+    const clock = /\broDateTime\b|\bTicks\s*\(|\bNowMs\b/.exec(taskBrs);
+    if (clock) {
+        err(`StreamResolveTask.brs references ${clock[0]} — the readiness wait is bounded by attempt count, and no platform clock is verified on this device (roDateTime.AsMilliseconds answered &hf4). A throw from one here shares resolve()'s catch and takes an already-resolved URL down with it`);
+    }
+
+    const interval = /Wait\(\s*(\d+)\s*,\s*invalid\s*\)/.exec(wait);
+    if (!interval) {
+        err('StreamResolveTask.brs WaitForPlaylist never pauses between attempts — a cold engine would be polled flat out');
+    } else if (Number(interval[1]) < 1000) {
+        err(`StreamResolveTask.brs WaitForPlaylist pauses ${interval[1]}ms between attempts — that is hammering a server that is still starting an engine`);
+    }
+
+    // 2. With no clock, attempts x (per-request timeout + interval) IS the
+    //    ceiling — so the per-request timeout is now load-bearing, and it has to
+    //    be a short one AND the one the probe actually passes. At Transport's
+    //    default 15s, six attempts hold the player for over 90 seconds, which is
+    //    longer than the stall this whole mechanism exists to prevent.
+    const store = read('source/stores/PlaybackStore.bs');
+    const probeTimeout = /const\s+PROBE_TIMEOUT_MS\s*=\s*(\d+)/.exec(store);
+    if (!probeTimeout) {
+        err('PlaybackStore.bs has no PROBE_TIMEOUT_MS — without a probe-specific timeout the wait ceiling is attempts x the default 15s, over 90s of holding the player for a stream that may never start');
+    } else {
+        if (Number(probeTimeout[1]) > 8000) {
+            err(`PlaybackStore.bs PROBE_TIMEOUT_MS is ${probeTimeout[1]}ms — a probe asks whether the server is up and the caller re-asks, so a request that can take this long is only delaying the next attempt`);
+        }
+        if (!/GetRaw\(url,\s*PROBE_TIMEOUT_MS\)/.test(store)) {
+            err('PlaybackStore.bs ProbePlaylist does not pass PROBE_TIMEOUT_MS to GetRaw — the constant is declared but the probe still pays the default timeout');
+        }
+    }
+
+    // 2. The retry must be a counted loop, not `while true`. A `while true`
+    //    bounded only by a clock is unbounded to a reader, and to a future edit.
+    const loop = /for\s+attempt\s*=\s*1\s+to\s+(\d+)/.exec(wait);
+    if (!loop) {
+        err('StreamResolveTask.brs WaitForPlaylist does not retry a counted number of times — an unbounded wait here is a render-thread-adjacent hang waiting for a bad edit');
+    } else if (Number(loop[1]) < 2) {
+        err(`StreamResolveTask.brs WaitForPlaylist tries ${loop[1]} time(s) — with one attempt the readiness wait is not a wait, it is the request that was always there`);
+    }
+
+    // 3. The pause has to be skipped on the final attempt. With no budget
+    //    consulted mid-loop, an unconditional sleep costs a full interval of dead
+    //    time after the loop has already decided to give up. Located by the line
+    //    the sleep is on, since there are no constant names to find.
+    const sleepLine = /^[ \t]*(.*Wait\(\s*\d+\s*,\s*invalid\s*\).*)$/m.exec(wait);
+    if (sleepLine && !/if\s+attempt\s*<\s*\d+\s+then/.test(sleepLine[1])) {
+        err('StreamResolveTask.brs WaitForPlaylist sleeps unconditionally — the final attempt then waits a whole interval after the loop has already decided to give up');
+    }
+
+    // 4. Handing over must not depend on the server having answered. If the give
+    //    up path stopped returning a URL, the wait would have quietly become the
+    //    thing that prevents playback instead of the thing that delays it.
+    if (!/if\s+not\s+probe\.ok\s+then\s+probe\.gaveUp\s*=\s*true/.test(wait)) {
+        err('StreamResolveTask.brs WaitForPlaylist does not mark gaveUp — "we stopped waiting" and "the server answered" would be indistinguishable in the record');
+    }
+    const resolveBody = body(taskBrs, 'resolve');
+    if (!resolveBody) {
+        err('StreamResolveTask.brs has no resolve() — the worker body is gone');
+    } else {
+        // 5. The probe is the diagnosis, so it has to be attached BEFORE the
+        //    result is published, or it is never read by anyone.
+        const probeAt = resolveBody.indexOf('resolved.probe =');
+        const resultAt = resolveBody.indexOf('m.top.result =');
+        if (probeAt === -1) {
+            err('StreamResolveTask.brs resolve() never attaches a probe — "how long, and what did the server say" is the whole diagnosis when this is still wrong');
+        } else if (resultAt === -1) {
+            err('StreamResolveTask.brs resolve() never sets m.top.result — the screen would wait for a result that never lands');
+        } else if (probeAt > resultAt) {
+            err('StreamResolveTask.brs resolve() publishes the result before attaching the probe — the probe would never reach the screen');
+        }
+        if (!/store\.IsTorrent\(/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() probes unconditionally — a direct URL has no server to wait for, and waiting on one delays a stream that was ready immediately');
+        }
+
+        // 6. The probe has to run in its OWN try. Sharing resolve()'s catch is
+        //    what turned a fault in a diagnostic into a broken player: the URL
+        //    had already resolved correctly, the throw in the wait loop reached
+        //    the outer catch, and the screen was told the stream had failed —
+        //    "resolve FAILED: Member function not found" for a server that was
+        //    never asked for anything. A diagnostic may only ever ADD what is
+        //    known, so its failure has to be recorded and then ignored.
+        if (!/resolved\.probe\s*=\s*WaitForPlaylist/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() no longer calls WaitForPlaylist — torrents get no readiness wait, and the Video node is back to eating the cold-engine response itself');
+        } else if (!/resolved\.probe\s*=\s*\{/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() runs the probe in the same try as the resolve — a throw in a diagnostic then discards a URL that already resolved, which is how every torrent reported "Member function not found"');
+        } else {
+            // The inner catch has to come BEFORE the result is published, or the
+            // fallback probe object is attached to nothing.
+            const fallbackAt = /resolved\.probe\s*=\s*\{/.exec(resolveBody).index;
+            if (resultAt !== -1 && fallbackAt > resultAt) {
+                err('StreamResolveTask.brs resolve() publishes the result before the probe fallback — the record of a failed probe would never reach the screen');
+            }
+        }
+    }
+
+    return ok;
+}
+
 function checkAddonSyncTaskContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
@@ -1935,7 +2172,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkHomeCatalogStalenessContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
         process.exit(1);
     }
 

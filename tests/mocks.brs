@@ -35,6 +35,25 @@ function ScriptedTransport(script as object) as object
     transport.Get = function(url as string, headers = invalid as dynamic) as object
         return m._respond("GET", url, invalid)
     end function
+    ' The raw twin of _respond: the body comes back as text rather than as parsed
+    ' json, which is the shape Transport.GetRaw speaks. An entry that scripts no
+    ' `body` yields an empty one rather than a fabricated body.
+    transport._respondRaw = function(method as string, url as string) as object
+        for each entry in m._script
+            if (entry.method = invalid or entry.method = method) and (entry.url = invalid or entry.url = url)
+                m.log.Push({ method: method, url: url, body: entry.body })
+                return { ok: entry.ok, status: entry.status, body: entry.body, error: entry.error }
+            end if
+        end for
+        m.log.Push({ method: method, url: url, body: invalid })
+        return { ok: false, status: 0, body: invalid, error: "no scripted response" }
+    end function
+    ' timeoutMs is accepted and ignored, matching Transport.GetRaw's signature.
+    ' A mock that declared one parameter and was called with two is how a seam
+    ' starts lying about what the real client accepts.
+    transport.GetRaw = function(url as string, timeoutMs = invalid as dynamic) as object
+        return m._respondRaw("GET", url)
+    end function
     transport.Post = function(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
         return m._respond("POST", url, body)
     end function
@@ -45,6 +64,12 @@ function ScriptedTransport(script as object) as object
         at = storedAddress.InStr("?")
         if at < 0 then return storedAddress + endpointPath
         return storedAddress.Left(at) + endpointPath + storedAddress.Mid(at)
+    end function
+    ' Forwards to the real implementation in Transport.bs rather than repeating
+    ' it. A copy here would let the suite assert an encoding the device never
+    ' produces, which is precisely the failure this file exists to prevent.
+    transport.UrlEncode = function(value as string) as string
+        return PercentEncode(value)
     end function
     return transport
 end function

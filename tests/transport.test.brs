@@ -9,8 +9,8 @@
 
 function ScriptedHttpClient(script as object, log as object) as object
     client = { _script: script, _log: log }
-    client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
-        m._log.Push({ method: method, url: url, headers: headers, body: body })
+    client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic, timeoutMs = invalid as dynamic) as object
+        m._log.Push({ method: method, url: url, headers: headers, body: body, timeoutMs: timeoutMs })
         for each entry in m._script
             if entry.method = method and (entry.url = invalid or entry.url = url)
                 return { ok: entry.ok, status: entry.status, body: entry.body, error: entry.error }
@@ -93,17 +93,55 @@ end sub
 sub Test_Transport_PostLong_RoutesLongRequest()
     Harness_Suite("Transport.PostLong rides the long-window client request")
     log = []
-    body = "{" + QuoteString("guessFileIdx") + ":7}"
+    body = "{" + QuoteString("collection") + ":7}"
     script = [
         { method: "POST", ok: true, status: 200, body: body, error: "" }
     ]
-    result = Transport(ScriptedHttpClient(script, log)).PostLong("http://host/abc/create", { guessFileIdx: 7 })
+    result = Transport(ScriptedHttpClient(script, log)).PostLong("http://host/abc/collection", { collection: 7 })
 
     Harness_Ok(result.ok, "postLong ok")
-    Harness_Equal(result.json.guessFileIdx, 7, "json parsed")
+    Harness_Equal(result.json.collection, 7, "json parsed")
     Harness_Equal(log[0].method, "POST", "method forwarded")
-    Harness_Equal(log[0].url, "http://host/abc/create", "url forwarded")
-    Harness_Equal(log[0].body.guessFileIdx, 7, "body forwarded to the client")
+    Harness_Equal(log[0].url, "http://host/abc/collection", "url forwarded")
+    Harness_Equal(log[0].body.collection, 7, "body forwarded to the client")
+end sub
+
+sub Test_Transport_GetRaw_ReturnsBodyUnparsed()
+    Harness_Suite("Transport.GetRaw returns the body verbatim instead of parsing it as JSON")
+    log = []
+    manifest = "#EXTM3U" + Chr(10) + "#EXT-X-VERSION:3" + Chr(10) + "#EXTINF:9.0," + Chr(10) + "seg1.ts"
+    script = [
+        { method: "GET", url: "http://host/abc/hls.m3u8", ok: true, status: 200, body: manifest, error: "" }
+    ]
+    result = Transport(ScriptedHttpClient(script, log)).GetRaw("http://host/abc/hls.m3u8")
+
+    Harness_Ok(result.ok, "ok for a 200 whose body is not JSON at all")
+    Harness_Equal(result.status, 200, "status surfaced")
+    Harness_Equal(result.body, manifest, "manifest returned verbatim, newlines and all")
+    Harness_Equal(log[0].method, "GET", "method forwarded")
+    ' The same bytes through Get, which is the whole reason GetRaw exists. If
+    ' this ever stops failing, GetRaw has been folded into Get and the readiness
+    ' probe is reading "invalid JSON response" instead of the server's answer.
+    jsonResult = Transport(ScriptedHttpClient(script, log)).Get("http://host/abc/hls.m3u8")
+    Harness_Ok(not jsonResult.ok, "Get rejects this very body as unparseable JSON - which is the bug GetRaw exists to route around")
+end sub
+
+sub Test_Transport_GetRaw_ForwardsTimeout()
+    Harness_Suite("Transport.GetRaw forwards a caller-supplied timeout and otherwise keeps the default")
+    log = []
+    script = [
+        { method: "GET", ok: true, status: 200, body: "#EXTM3U", error: "" }
+    ]
+    transport = Transport(ScriptedHttpClient(script, log))
+    transport.GetRaw("http://host/abc/hls.m3u8", 4000)
+    transport.GetRaw("http://host/abc/hls.m3u8")
+
+    ' The probe's short timeout has to actually arrive. The wait is bounded by
+    ' attempts x (timeout + interval) and there is no clock in the loop, so a
+    ' default that quietly won would hold the player for over 90 seconds across
+    ' six attempts — the exact stall the probe exists to prevent.
+    Harness_Equal(log[0].timeoutMs, 4000, "the probe's short timeout reaches the client")
+    Harness_Equal(log[1].timeoutMs, 15000, "no timeout given keeps the 15s default, so every other caller is unchanged")
 end sub
 
 sub Test_Transport_EndpointUrl()

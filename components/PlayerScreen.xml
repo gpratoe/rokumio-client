@@ -60,15 +60,24 @@
              solid. Stopped and reset to solid the moment resolution reports in;
              the same pair then carries the buffering reveal (logoFront clipping
              from left to right as % arrives). -->
+        <!-- No easeFunction: the running Roku OS has no such field on
+             FloatFieldInterpolator and rejects the attribute outright
+             ("Tried to set nonexistent field"), so the one that was here did
+             nothing but print a warning on every player screen. The default
+             easing is what a logo pulse wants anyway. -->
         <Animation id="resolvePulse" duration="3" repeat="true">
             <FloatFieldInterpolator
                 id="resolvePulseOpacity"
                 fieldToInterp="logoBack.opacity"
                 key="[0.0, 0.35, 0.5, 0.65, 1.0]"
-                keyValue="[0.15, 0.35, 1.0, 0.35, 0.15]"
-                easeFunction="linear" />
+                keyValue="[0.15, 0.35, 1.0, 0.35, 0.15]" />
         </Animation>
 
         <Timer id="stopWatchdog" duration="3" repeat="false" />
+
+        <!-- Not cosmetic: StartPlayback hands the Video node its content and
+             asks it to play from separate ticks, and this is the boundary. See
+             StartPlayback for why the same tick is not good enough. -->
+        <Timer id="playKick" duration="0.25" repeat="false" />
     </children>
 </component>
