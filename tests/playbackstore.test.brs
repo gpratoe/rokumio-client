@@ -1,13 +1,24 @@
 ' PlaybackStore unit tests.
 '
-' Streams() talks to an add-on through the scripted transport; CreateSession
-' POSTs to the streaming-server create endpoint and asserts the request + log;
-' PlaybackUrl/ResolvePlayback are pure middle (> a transport script the
-' torrent path needs).
+' Streams() talks to an add-on through the scripted transport. Everything else
+' is pure: a torrent resolves to a streaming-server URL built from the stream
+' itself, so the empty script is the assertion — an unscripted call returns
+' not-ok AND is logged, so any request sneaking back in fails on both counts
+' rather than one.
 
 function TorrentStream(infoHash as string, fileIdx = invalid as dynamic) as object
     stream = { infoHash: infoHash }
     if fileIdx <> invalid then stream.fileIdx = fileIdx
+    return stream
+end function
+
+' A torrent stream carrying engine sources. `sources` is what the add-on
+' protocol calls the list the streaming server calls `announce`; add-ons in the
+' wild send either, so both are settable here.
+function SourcedTorrentStream(infoHash as string, sources = invalid as dynamic, announce = invalid as dynamic) as object
+    stream = { infoHash: infoHash }
+    if sources <> invalid then stream.sources = sources
+    if announce <> invalid then stream.announce = announce
     return stream
 end function
 
@@ -64,100 +75,175 @@ sub Test_Playback_DirectStreamResolvesAsIs()
     Harness_Equal(result.url, "http://direct.example/file.mp4", "url unchanged")
 end sub
 
-sub Test_Playback_CreateSessionForwardsFileIdx()
-    Harness_Suite("PlaybackStore.CreateSession POSTs the stream fileIdx hint")
+' --- the file index the stream already carries -----------------------------
+'
+' The stream's own fileIdx IS the file, so the URL is the whole answer and the
+' server is never asked anything.
+sub Test_Playback_IntegerFileIdxResolvesWithoutAskingTheServer()
+    Harness_Suite("PlaybackStore.ResolvePlayback uses an integer fileIdx without calling the server")
     server = "http://127.0.0.1:11470"
     infoHash = "0123456789abcdef0123456789abcdef01234567"
-    script = [
-        {
-            method: "POST"
-            url: server + "/" + infoHash + "/create"
-            ok: true
-            status: 200
-            json: { files: [{ idx: 7 }, { idx: 9 }], guessedFileIdx: 7 }
-            error: ""
-        }
-    ]
-    store = PlaybackStore(ScriptedTransport(script))
-    session = store.CreateSession(server, TorrentStream(infoHash, 7))
+    store = PlaybackStore(ScriptedTransport([]))
+    result = store.ResolvePlayback(server, TorrentStream(infoHash, 3))
 
-    Harness_Ok(session.ok, "session created")
-    Harness_Equal(store.transport.log.Count(), 1, "one request logged")
-    Harness_Equal(store.transport.log[0].method, "POST", "create is a POST")
-    Harness_Equal(store.transport.log[0].body.guessFileIdx, 7, "fileIdx hint forwarded in body")
-    Harness_Equal(session.fileIdx, 7, "guessedFileIdx surfaced")
-    Harness_Equal(session.files.Count(), 2, "file list surfaced")
+    Harness_Ok(result.ok, "resolves")
+    Harness_Equal(store.transport.log.Count(), 0, "no request made at all")
+    Harness_Equal(result.url, server + "/" + infoHash + "/3/hls.m3u8", "HLS url built from the index")
 end sub
 
-sub Test_Playback_TorrentResolvesThroughServer()
-    Harness_Suite("PlaybackStore.ResolvePlayback creates a torrent then serves HLS")
+' 0 is the index that was most wrong before: sent as a guessFileIdx needle it
+' matched the first path containing a zero, which on a 1080p/x264 release is the
+' 1080p file regardless of what the add-on meant.
+sub Test_Playback_ZeroFileIdxIsAnIndexNotANeedle()
+    Harness_Suite("PlaybackStore.ResolvePlayback treats fileIdx 0 as index 0")
     server = "http://127.0.0.1:11470"
     infoHash = "0123456789abcdef0123456789abcdef01234567"
-    script = [
-        {
-            method: "POST"
-            url: server + "/" + infoHash + "/create"
-            ok: true
-            status: 200
-            json: { files: [], guessedFileIdx: 2 }
-            error: ""
-        }
-    ]
-    store = PlaybackStore(ScriptedTransport(script))
+    store = PlaybackStore(ScriptedTransport([]))
+    result = store.ResolvePlayback(server, TorrentStream(infoHash, 0))
+
+    Harness_Ok(result.ok, "resolves")
+    Harness_Equal(store.transport.log.Count(), 0, "no request made at all")
+    Harness_Equal(result.url, server + "/" + infoHash + "/0/hls.m3u8", "index 0, not a name search")
+end sub
+
+' A stream with no index is not a problem to be solved by asking the server.
+' -1 IS the protocol's way of saying "you choose", and the file list it chooses
+' from is on the server already, so the URL is fully determined without a
+' request. This is the test that the create round-trip cannot come back: there
+' is no longer a fallback path that could quietly make a request while still
+' producing a working URL.
+sub Test_Playback_MissingFileIdxAsksTheServerToChoose()
+    Harness_Suite("PlaybackStore.ResolvePlayback answers a missing fileIdx with -1, no round trip")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    store = PlaybackStore(ScriptedTransport([]))
     result = store.ResolvePlayback(server, TorrentStream(infoHash))
 
-    Harness_Ok(result.ok, "torrent resolves")
-    Harness_Equal(result.url, server + "/" + infoHash + "/2/hls.m3u8", "HLS master url")
+    Harness_Ok(result.ok, "resolves")
+    Harness_Equal(store.transport.log.Count(), 0, "no request made at all")
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8", "-1 tells the server to choose")
 end sub
 
-sub Test_Playback_CreateSessionLargestVideoWhenGuessedMissing()
-    Harness_Suite("PlaybackStore.CreateSession picks the largest video file when guessedFileIdx is absent")
+' A filename is not an index. The official client types this field as an
+' integer and treats anything else as absent; forwarding a name as a search
+' needle was how fileIdx 0 came to match the 1080p release, so a name is now
+' treated exactly like a missing value rather than given a second meaning.
+sub Test_Playback_StringFileIdxIsNotAnIndex()
+    Harness_Suite("PlaybackStore.ResolvePlayback treats a string fileIdx as absent")
     server = "http://127.0.0.1:11470"
     infoHash = "0123456789abcdef0123456789abcdef01234567"
-    script = [
-        {
-            method: "POST"
-            url: server + "/" + infoHash + "/create"
-            ok: true
-            status: 200
-            json: {
-                files: [
-                    { name: "Episode 1.mkv", length: 1048576 }
-                    { name: "sample.mp4", length: 10485760 }
-                ]
-                guessedFileIdx: invalid
-            }
-            error: ""
-        }
-    ]
-    store = PlaybackStore(ScriptedTransport(script))
-    session = store.CreateSession(server, TorrentStream(infoHash))
+    store = PlaybackStore(ScriptedTransport([]))
+    result = store.ResolvePlayback(server, TorrentStream(infoHash, "Show.S01E05.1080p.mkv"))
 
-    Harness_Ok(session.ok, "session created despite no guessedFileIdx")
-    Harness_Equal(session.fileIdx, 1, "largest video file chosen")
-    Harness_Equal(session.files.Count(), 2, "file list surfaced")
+    Harness_Ok(result.ok, "still resolves")
+    Harness_Equal(store.transport.log.Count(), 0, "no request made at all")
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8", "-1, and the name is nowhere in the url")
 end sub
 
-sub Test_Playback_CreateSessionNamesServerKeysWhenNothingPicked()
-    Harness_Suite("PlaybackStore.CreateSession reports the server keys when no file can be picked")
+' A fraction is not a position in any file list, so it is not an index either.
+sub Test_Playback_FractionalFileIdxIsNotAnIndex()
+    Harness_Suite("PlaybackStore.ResolvePlayback will not index into a file list with a fraction")
     server = "http://127.0.0.1:11470"
     infoHash = "0123456789abcdef0123456789abcdef01234567"
-    script = [
-        {
-            method: "POST"
-            url: server + "/" + infoHash + "/create"
-            ok: true
-            status: 200
-            json: { files: [], guessedFileIdx: invalid }
-            error: ""
-        }
-    ]
-    store = PlaybackStore(ScriptedTransport(script))
-    session = store.CreateSession(server, TorrentStream(infoHash))
+    store = PlaybackStore(ScriptedTransport([]))
+    result = store.ResolvePlayback(server, TorrentStream(infoHash, 1.5))
 
-    Harness_Ok(not session.ok, "session refused")
-    Harness_Ok(session.error.InStr("guessedFileIdx") >= 0, "error names guessedFileIdx")
-    Harness_Ok(session.error.InStr("files") >= 0, "error names the returned keys")
+    Harness_Ok(result.ok, "still resolves")
+    Harness_Equal(store.transport.log.Count(), 0, "no request made at all")
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8", "-1, not a truncated 1")
+end sub
+
+' --- filters and trackers ride the URL -------------------------------------
+'
+' The server collects every occurrence of a key, so a repeated f= is two
+' constraints it ANDs together. One comma-joined value would be a single
+' constraint looking for a literal comma, which matches nothing and fails
+' silently into the largest-video fallback — the wrong episode, no error.
+sub Test_Playback_EpisodeFiltersTravelAsRepeatedParams()
+    Harness_Suite("PlaybackStore sends the season/episode filters as repeated f= parameters")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    store = PlaybackStore(ScriptedTransport([]))
+    result = store.ResolvePlayback(server, TorrentStream(infoHash), 1, 5)
+
+    Harness_Ok(result.ok, "resolves")
+    Harness_Equal(store.transport.log.Count(), 0, "no request made at all")
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8?f=episode%3A%205&f=season%3A%201", "both filters, percent-encoded, as separate keys")
+end sub
+
+' A movie has no season or episode, and neither does a special. "season: 0" would
+' not narrow the match to the right file, it would narrow it to a wrong one, so
+' specials are left on the server's own largest-video choice.
+sub Test_Playback_NoFiltersWithoutARealEpisode()
+    Harness_Suite("PlaybackStore asks for no filters for a movie or a special")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    store = PlaybackStore(ScriptedTransport([]))
+
+    movie = store.ResolvePlayback(server, TorrentStream(infoHash), 0, 0)
+    Harness_Equal(movie.url, server + "/" + infoHash + "/-1/hls.m3u8", "a movie asks for nothing")
+
+    special = store.ResolvePlayback(server, TorrentStream(infoHash), 0, 5)
+    Harness_Equal(special.url, server + "/" + infoHash + "/-1/hls.m3u8", "season 0 asks for nothing")
+
+    noEpisode = store.ResolvePlayback(server, TorrentStream(infoHash), 2, 0)
+    Harness_Equal(noEpisode.url, server + "/" + infoHash + "/-1/hls.m3u8", "episode 0 asks for nothing")
+end sub
+
+' The trackers are the engine's bootstrapping sources and the official client
+' passes every one through. Dropping them is what made a cold engine expensive:
+' with nothing to try, metadata has to arrive over DHT alone.
+sub Test_Playback_TrackersTravelAsRepeatedParams()
+    Harness_Suite("PlaybackStore sends the stream's sources as repeated tr= parameters")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    store = PlaybackStore(ScriptedTransport([]))
+    stream = SourcedTorrentStream(infoHash, ["udp://tracker.example:1337/announce", "http://backup.example/announce"])
+    result = store.ResolvePlayback(server, stream)
+
+    Harness_Ok(result.ok, "resolves")
+    Harness_Equal(store.transport.log.Count(), 0, "no request made at all")
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8?tr=udp%3A%2F%2Ftracker.example%3A1337%2Fannounce&tr=http%3A%2F%2Fbackup.example%2Fannounce", "both trackers, percent-encoded, as separate keys")
+end sub
+
+' The add-on protocol says `sources` and the streaming server says `announce`.
+' They are the same list, and both spellings are in the wild.
+sub Test_Playback_AnnounceIsReadWhenSourcesIsAbsent()
+    Harness_Suite("PlaybackStore reads announce when the stream has no sources")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    store = PlaybackStore(ScriptedTransport([]))
+    stream = SourcedTorrentStream(infoHash, invalid, ["udp://only.example:1337/announce"])
+    result = store.ResolvePlayback(server, stream)
+
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8?tr=udp%3A%2F%2Fonly.example%3A1337%2Fannounce", "announce used when sources is absent")
+end sub
+
+' Filters first, then trackers, sharing ONE question mark. Two "?" would make
+' the second one part of the first value's data.
+sub Test_Playback_FiltersAndTrackersShareOneQuery()
+    Harness_Suite("PlaybackStore joins filters and trackers into a single query string")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    store = PlaybackStore(ScriptedTransport([]))
+    stream = SourcedTorrentStream(infoHash, ["udp://tracker.example:1337/announce"])
+    result = store.ResolvePlayback(server, stream, 2, 7)
+
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8?f=episode%3A%207&f=season%3A%202&tr=udp%3A%2F%2Ftracker.example%3A1337%2Fannounce", "one ?, filters then trackers")
+end sub
+
+' A malformed entry from an add-on must cost that entry, not the whole URL: an
+' exception escaping here would take playback down over a bad tracker.
+sub Test_Playback_OneBadTrackerDoesNotCostTheUrl()
+    Harness_Suite("PlaybackStore drops unusable tracker entries instead of failing")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    store = PlaybackStore(ScriptedTransport([]))
+    stream = SourcedTorrentStream(infoHash, ["udp://good.example:1337/announce", 42])
+    result = store.ResolvePlayback(server, stream)
+
+    Harness_Ok(result.ok, "still resolves")
+    Harness_Equal(result.url, server + "/" + infoHash + "/-1/hls.m3u8?tr=udp%3A%2F%2Fgood.example%3A1337%2Fannounce", "the number is dropped, the tracker survives")
 end sub
 
 sub Test_Playback_TorrentWithoutServerAddress()
@@ -170,12 +256,17 @@ sub Test_Playback_TorrentWithoutServerAddress()
 end sub
 
 sub Test_Playback_PlaybackUrl()
-    Harness_Suite("PlaybackStore.PlaybackUrl builds the master HLS url")
+    Harness_Suite("PlaybackStore.PlaybackUrl builds the master HLS url and appends the query")
     store = PlaybackStore(ScriptedTransport([]))
     Harness_Equal(
         store.PlaybackUrl("http://127.0.0.1:11470", "abc123", 4),
         "http://127.0.0.1:11470/abc123/4/hls.m3u8",
-        "master HLS url"
+        "master HLS url, no query when there is nothing to say"
+    )
+    Harness_Equal(
+        store.PlaybackUrl("http://127.0.0.1:11470", "abc123", -1, ["episode: 5"], ["udp://t.example:1337/announce"]),
+        "http://127.0.0.1:11470/abc123/-1/hls.m3u8?f=episode%3A%205&tr=udp%3A%2F%2Ft.example%3A1337%2Fannounce",
+        "query appended after the suffix"
     )
 end sub
 
@@ -190,4 +281,89 @@ sub Test_Playback_Heartbeat()
     Harness_Ok(alive.ok, "heartbeat ok")
     Harness_Ok(alive.alive, "server alive")
     Harness_Ok(not dead.ok, "blank address refused")
+end sub
+
+' --- IsTorrent: which streams need a server that has to be ready ------------
+'
+' The predicate that decides whether a stream gets the readiness wait, so it has
+' to agree with ResolvePlayback about the same stream. A stream carrying both a
+' playable URL and a hash resolves as the URL there, and is not a torrent here.
+sub Test_Playback_IsTorrentOnlyForHashes()
+    Harness_Suite("PlaybackStore.IsTorrent distinguishes a server-backed torrent from a direct URL")
+    store = PlaybackStore(ScriptedTransport([]))
+
+    Harness_Ok(store.IsTorrent(TorrentStream("abc123")), "a bare infoHash is a torrent")
+    Harness_Ok(not store.IsTorrent({ url: "http://direct.example/f.mp4" }), "a direct URL is not a torrent")
+    Harness_Ok(store.IsTorrent({ url: "   ", infoHash: "abc123" }), "a blank URL does not make it a direct stream")
+    Harness_Ok(not store.IsTorrent({ url: "http://direct.example/f.mp4", infoHash: "abc123" }), "URL wins over hash, as in ResolvePlayback")
+    Harness_Ok(not store.IsTorrent(invalid), "no stream is not a torrent")
+end sub
+
+' --- ProbePlaylist: the request the player is not asked to make --------------
+'
+' The body comes back as text, not parsed json: a manifest is not json, and
+' through Get a perfectly good playlist would read as "invalid JSON response" —
+' the one response whose text is the whole diagnosis thrown away.
+sub Test_Playback_ProbePlaylistReportsStatusAndBody()
+    Harness_Suite("PlaybackStore.ProbePlaylist returns the manifest text the server sent")
+    server = "http://127.0.0.1:11470"
+    infoHash = "0123456789abcdef0123456789abcdef01234567"
+    url = server + "/" + infoHash + "/0/hls.m3u8"
+    manifest = "#EXTM3U" + Chr(10) + "#EXT-X-VERSION:3" + Chr(10) + "#EXTINF:4.0," + Chr(10) + "seg1.ts" + Chr(10)
+    store = PlaybackStore(ScriptedTransport([{ method: "GET", url: url, ok: true, status: 200, body: manifest, error: "" }]))
+
+    probe = store.ProbePlaylist(url)
+
+    Harness_Ok(probe.ok, "probe ok")
+    Harness_Equal(probe.status, 200, "status reported")
+    Harness_Equal(probe.body, manifest, "manifest text intact, not json-parsed away")
+    Harness_Equal(store.transport.log.Count(), 1, "exactly one request, and it is logged")
+    Harness_Equal(store.transport.log[0].url, url, "the playlist url is what got asked for")
+end sub
+
+' A cold engine refusing the playlist is the case this whole probe exists for,
+' so the refusal has to survive into the record rather than collapsing into a
+' generic failure.
+sub Test_Playback_ProbePlaylistRecordsTheServersRefusal()
+    Harness_Suite("PlaybackStore.ProbePlaylist reports a refusal with its status and reason")
+    url = "http://127.0.0.1:11470/abc/0/hls.m3u8"
+    store = PlaybackStore(ScriptedTransport([{ method: "GET", url: url, ok: false, status: 503, body: "", error: "HTTP 503" }]))
+
+    probe = store.ProbePlaylist(url)
+
+    Harness_Ok(not probe.ok, "probe not ok")
+    Harness_Equal(probe.status, 503, "the status that says why")
+    Harness_Equal(probe.error, "HTTP 503", "the server's own reason kept")
+end sub
+
+' An unscripted url must be both not-ok AND logged: a probe that silently did
+' nothing would look exactly like a server that refused, and those are opposite
+' bugs.
+sub Test_Playback_ProbePlaylistOnAnUnscriptedUrl()
+    Harness_Suite("PlaybackStore.ProbePlaylist records that it asked, even when nothing answers")
+    store = PlaybackStore(ScriptedTransport([]))
+    probe = store.ProbePlaylist("http://127.0.0.1:11470/abc/0/hls.m3u8")
+
+    Harness_Ok(not probe.ok, "probe not ok")
+    Harness_Equal(probe.status, 0, "no status invented")
+    Harness_Equal(probe.error, "no scripted response", "the reason is the silence, not a status")
+    Harness_Equal(store.transport.log.Count(), 1, "the attempt is on the record")
+end sub
+
+' A long manifest must not be allowed to fill a label and push the state
+' timeline — the part being diagnosed — out of its window.
+sub Test_Playback_ProbePlaylistTruncatesALongManifest()
+    Harness_Suite("PlaybackStore.ProbePlaylist keeps a long manifest to a readable head")
+    url = "http://127.0.0.1:11470/abc/0/hls.m3u8"
+    long = "#EXTM3U"
+    while Len(long) < 900
+        long = long + "#EXTINF:4.0,seg.ts" + Chr(10)
+    end while
+    store = PlaybackStore(ScriptedTransport([{ method: "GET", url: url, ok: true, status: 200, body: long, error: "" }]))
+
+    probe = store.ProbePlaylist(url)
+
+    Harness_Ok(probe.ok, "probe ok")
+    Harness_Equal(Len(probe.body), 400, "truncated to a readable head")
+    Harness_Equal(probe.body.Left(7), "#EXTM3U", "and it is the head, not the tail")
 end sub

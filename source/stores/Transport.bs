@@ -18,10 +18,9 @@
 
 const REQUEST_TIMEOUT_MS = 15000
 
-' The dedicated-request timeout ceiling for the streaming-server create call:
-' cold torrent engines fetch metadata from DHT/trackers first, which the service
-' lets take tens of seconds. A default-sized request would abort the session
-' mid-metadata, so create rides the long path.
+' The dedicated-request timeout ceiling for the one caller that can legitimately
+' take tens of seconds (a full addon-collection sync against a slow account). A
+' default-sized request would abort it partway, so it rides the long path.
 const LONG_REQUEST_TIMEOUT_MS = 120000
 
 ' The real client. Serializes a body assocarray to JSON and issues a blocking
@@ -87,13 +86,13 @@ function CreateSyncHttpClient() as object
         return result
     end function
 
-    client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
+    client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic, timeoutMs = REQUEST_TIMEOUT_MS as integer) as object
         return m._execute({
             method: method
             url: url
             headers: headers
             body: body
-            timeoutMs: REQUEST_TIMEOUT_MS
+            timeoutMs: timeoutMs
         })
     end function
     client.requestLong = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
@@ -108,6 +107,45 @@ function CreateSyncHttpClient() as object
     return client
 end function
 
+' Percent-encode a value for a URL path segment or query component. The
+' platform owns the real encoder: roUrlTransfer.Escape percent-encodes per
+' RFC 3986, including proper UTF-8 for accented characters, and every caller
+' runs inside a Task node where roUrlTransfer is available. The byte loop is
+' only the fallback for environments without the component (the brs interpreter
+' in `npm test`), where ASCII values encode identically.
+'
+' Named PercentEncode rather than UrlEncode so the Transport method below can
+' forward to it without the unqualified call resolving back to the method and
+' recursing forever.
+'
+' File-scope with that method forwarding to it, deliberately: stores must reach
+' user-defined helpers through m, but the scripted test transport is a plain
+' object and has no m.transport to call. Keeping the implementation here lets
+' that mock forward to THIS function rather than carry a second copy that could
+' drift from it and make the tests assert an encoding the device never
+' produces.
+function PercentEncode(value as string) as string
+    try
+        transfer = CreateObject("roUrlTransfer")
+        return transfer.Escape(value)
+    catch e
+    end try
+
+    result = ""
+    HEX = "0123456789ABCDEF"
+    i = 1
+    while i <= Len(value)
+        b = Asc(Mid(value, i, 1))
+        if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b = 45 or b = 95 or b = 46 or b = 126
+            result = result + Chr(b)
+        else
+            result = result + "%" + Mid(HEX, b \ 16 + 1, 1) + Mid(HEX, (b mod 16) + 1, 1)
+        end if
+        i = i + 1
+    end while
+    return result
+end function
+
 class Transport
     client as object
 
@@ -116,8 +154,30 @@ class Transport
         m.client = client
     end sub
 
+    ' Percent-encode a value destined for a URL. Stores that assemble a URL call
+    ' this through m rather than reaching for the file-scope function directly,
+    ' because a bare user-defined global is only resolvable within the component
+    ' that declares it.
+    function UrlEncode(value as string) as string
+        return PercentEncode(value)
+    end function
+
     function Get(url as string, headers = invalid as dynamic) as object
         return m.Result(m.client.request("GET", url, headers, invalid))
+    end function
+
+    ' A GET whose body comes back as text instead of being parsed as JSON.
+    '
+    ' Only for the streaming server's HLS manifest, which is not JSON. Through
+    ' Get a perfectly good playlist reads back as "invalid JSON response" — the
+    ' one response whose text is the entire diagnosis would be the one response
+    ' thrown away.
+    ' timeoutMs is a parameter because the one caller that polls — the playlist
+    ' readiness probe — wants a short one, and at the default 15s a dead server
+    ' would let its six attempts stretch the player's wait past a minute and a
+    ' half. The default keeps every other caller's behaviour untouched.
+    function GetRaw(url as string, timeoutMs = REQUEST_TIMEOUT_MS as integer) as object
+        return m.client.request("GET", url, invalid, invalid, timeoutMs)
     end function
 
     function Post(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
@@ -125,9 +185,9 @@ class Transport
     end function
 
     ' Long-window POST for requests that may legitimately run tens of seconds —
-    ' the streaming-server create call is the one caller today (cold torrent
-    ' engine setup). Uses requestLong so the default timeout is never stretched
-    ' for every caller.
+    ' today the Stremio API's addon-collection sync, which can sit behind a slow
+    ' account. Uses requestLong so the default timeout is never stretched for
+    ' every caller.
     function PostLong(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
         return m.Result(m.client.requestLong("POST", url, headers, body))
     end function
