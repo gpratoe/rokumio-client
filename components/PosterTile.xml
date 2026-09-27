@@ -22,8 +22,7 @@
              art (or whose art failed to load): hidden whenever a poster is
              showing. -->
         <Rectangle id="tileBorder" width="270" height="378">
-            <Rectangle id="tileBg" width="262" height="370" translation="[4, 4]" />
-            <Poster id="poster" width="262" height="370" translation="[4, 4]" />
+            <Poster id="poster" width="270" height="378" />
             <Label id="titleText" width="246" height="362" translation="[18, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" />
             <BusySpinner
                 id="loadSpinner"
@@ -36,8 +35,8 @@
                  track is the full tile width; the mint fill's width is scaled
                  in code from itemContent.progress (0..1). Both stay hidden
                  until a screen passes progress. -->
-            <Rectangle id="progressTrack" width="262" height="8" translation="[4, 366]" visible="false" />
-            <Rectangle id="progressFill" width="262" height="8" translation="[4, 366]" visible="false" />
+            <Rectangle id="progressTrack" width="270" height="8" translation="[4, 370]" visible="false" />
+            <Rectangle id="progressFill" width="270" height="8" translation="[4, 370]" visible="false" />
             <!-- Optional watched-state glyph (eye = done, clock = in
                  progress), ~48px top-right above the bar. The uri is set in
                  code from itemContent.watchedGlyph; hidden until a screen asks

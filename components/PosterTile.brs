@@ -14,7 +14,6 @@
 
 sub init()
     m.poster = m.top.FindNode("poster")
-    m.tileBg = m.top.FindNode("tileBg")
     m.tileBorder = m.top.FindNode("tileBorder")
     m.titleText = m.top.FindNode("titleText")
     m.loadSpinner = m.top.FindNode("loadSpinner")
@@ -43,12 +42,8 @@ sub UpdateLook()
     t = Theme()
     if m.top.itemHasFocus
         m.tileBorder.color = t.accentFocus
-        m.tileBg.color = t.tileFaceFocus
-        m.top.scale = [1.1, 1.1]
     else
         m.tileBorder.color = t.accentClear
-        m.tileBg.color = t.tileFace
-        m.top.scale = [1.0, 1.0]
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub

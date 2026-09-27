@@ -64,14 +64,14 @@
              library (and the rest of the state) stays put. -->
         <RowList
             id="libraryGrid"
-            translation="[150, 342]"
+            translation="[150, 352]"
             numRows="2"
             itemSize="[1780, 400]"
             itemSpacing="[0, 8]"
             rowItemSize="[[270, 378]]"
             rowItemSpacing="[[18, 0]]"
             showRowLabel="false"
-            drawFocusFeedback="false"
+            drawFocusFeedback="true"
             itemComponentName="PosterTile" />
 
         <!-- The filter chips + dropdown (FilterBar). The component owns the chip

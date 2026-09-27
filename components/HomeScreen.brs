@@ -35,6 +35,7 @@ sub init()
     m.homeSub.color = t.textSecondary
     m.top.FindNode("railBg").color = t.railTint
     m.catalog.rowLabelTextColor = t.textSecondary
+    m.catalog.rowLabelOffset = [0,10]
 
     m.catalogRowsBuilt = false
     m.catalogRows = []
