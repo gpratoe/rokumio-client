@@ -51,13 +51,13 @@
             translation="[150, 230]"
             numRows="2"
             itemSize="[1780, 400]"
-            itemSpacing="[0, 8]"
+            itemSpacing="[0, 46]"
             rowItemSize="[[270, 378]]"
             rowItemSpacing="[[18, 0]]"
             showRowLabel="[true]"
             rowLabelOffset="[0, 10]"
             rowLabelFont="font:MediumBoldSystemFont"
-            drawFocusFeedback="false"
+            drawFocusFeedback="true"
             itemComponentName="PosterTile" />
     </children>
 </component>
