@@ -194,10 +194,10 @@ class PlaybackStore
     function QueryString(filters as object, trackers as object) as string
         parts = []
         for each filter in m.TextList(filters)
-            parts.Push("f=" + m.transport.UrlEncode(filter))
+            parts.Push("f=" + m.transport.EncodeQueryValue(filter))
         end for
         for each tracker in m.TextList(trackers)
-            parts.Push("tr=" + m.transport.UrlEncode(tracker))
+            parts.Push("tr=" + m.transport.EncodeQueryValue(tracker))
         end for
         query = ""
         for each part in parts

@@ -94,7 +94,7 @@ class CatalogStore
     ' is percent-encoded before it becomes a URL path segment. Nothing is stored
     ' locally.
     function Search(addonAddress as string, metaType as string, query as string) as object
-        return m.Catalog(addonAddress, metaType, "top", "search=" + m.transport.UrlEncode(query))
+        return m.Catalog(addonAddress, metaType, "top", "search=" + m.transport.EncodeQueryValue(query))
     end function
 end class
 

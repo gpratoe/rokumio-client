@@ -114,9 +114,11 @@ end function
 ' only the fallback for environments without the component (the brs interpreter
 ' in `npm test`), where ASCII values encode identically.
 '
-' Named PercentEncode rather than UrlEncode so the Transport method below can
-' forward to it without the unqualified call resolving back to the method and
-' recursing forever.
+' Named PercentEncode while the Transport method below is EncodeQueryValue, so
+' the two never collide: one name for both would make the unqualified call
+' inside the method resolve back to the method. The method is deliberately not
+' UrlEncode either — that is the deprecated roUrlTransfer method, this already
+' calls its replacement, and a method of that name reads as a call to it.
 '
 ' File-scope with that method forwarding to it, deliberately: stores must reach
 ' user-defined helpers through m, but the scripted test transport is a plain
@@ -158,7 +160,13 @@ class Transport
     ' this through m rather than reaching for the file-scope function directly,
     ' because a bare user-defined global is only resolvable within the component
     ' that declares it.
-    function UrlEncode(value as string) as string
+    '
+    ' Renamed from UrlEncode, which was never a call to that method: the encoder
+    ' here has always been roUrlTransfer.Escape. The name was the only thing
+    ' wrong with it, and it is a name a static analyser reads as the deprecated
+    ' roUrlTransfer.UrlEncode — a deprecation this file does not have, reported
+    ' against a call nobody can find.
+    function EncodeQueryValue(value as string) as string
         return PercentEncode(value)
     end function
 

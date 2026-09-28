@@ -68,7 +68,7 @@ function ScriptedTransport(script as object) as object
     ' Forwards to the real implementation in Transport.bs rather than repeating
     ' it. A copy here would let the suite assert an encoding the device never
     ' produces, which is precisely the failure this file exists to prevent.
-    transport.UrlEncode = function(value as string) as string
+    transport.EncodeQueryValue = function(value as string) as string
         return PercentEncode(value)
     end function
     return transport
