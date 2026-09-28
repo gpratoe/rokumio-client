@@ -61,15 +61,57 @@ end function
 sub BlurFocus()
 end sub
 
-' The query prompt. Prefilled with the last query so a re-search is an edit.
+' The query prompt. Starts empty, so each search is a fresh prompt rather than an
+' edit of the last one.
 sub ShowSearchDialog()
-    dialog = CreateObject("roSGNode", "KeyboardDialog")
+    dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+    ' Palette and the array-shaped message are the two things that differ from
+    ' the legacy node. See the same block in SettingsScreen for why each one
+    ' fails quietly rather than loudly.
+    dialog.palette = AppPalette()
     dialog.title = "Search"
-    dialog.message = "Enter a movie or series title"
-    dialog.text = m.lastQuery
+    dialog.message = ["Enter a movie or series title"]
+    ' Starts empty. Each search is a fresh prompt rather than an edit of the last
+    ' one, so there is no stale query sitting in the box inviting a re-run of
+    ' what was searched before. m.lastQuery is still recorded below and is what
+    ' the "no results" message names.
+    dialog.text = ""
     dialog.buttons = ["Search", "Cancel"]
     dialog.observeField("buttonSelected", "onSearchChoice")
+    ' Before the dialog is shown, and that ordering is load bearing. The edit
+    ' box is built as soon as the node is created, so this is the earliest the
+    ' voice setting can land and the dictation UI is not listening yet. It was
+    ' an observer firing at registration that got there before; a direct call at
+    ' this point in the sequence is the same moment without the extra field.
+    ApplySearchKeyboard(dialog)
     m.top.getScene().dialog = dialog
+end sub
+
+' Configures the dialog's internal VoiceTextEditBox, which StandardKeyboardDialog
+' builds for itself and which is therefore reached through the dialog rather than
+' owned here. The box exists as soon as the node is created — confirmed on
+' device, where it is already a roSGNode:VoiceTextEditBox before the dialog is
+' ever displayed — so this is called inline and needs nothing to wait for.
+'
+' No try, deliberately. A throw here prints the offending field and line to the
+' device console, and the console is where this is read. The previous version
+' swallowed the error, which is how a caret fix that never took became
+' indistinguishable from one that did.
+sub ApplySearchKeyboard(dialog as object) as void
+    if dialog = invalid then return
+    editor = dialog.textEditBox
+    if editor = invalid then return
+
+    ' Full word input, and the reason voice stopped being letter-by-letter:
+    ' DynamicKeyboard builds its internal edit box with voiceEntryType
+    ' "alphanumeric", meant for street addresses, and that beats the node class
+    ' default of "generic". The dialog's own keyboardDomain defaults to
+    ' "generic" too but does not reach this field. VERIFIED WORKING on device.
+    editor.voiceEntryType = "generic"
+    ' Caret after the text rather than at 0. A caret parked at 0 makes backspace
+    ' and the left arrow no-ops by definition while typing still appends, which
+    ' from the outside is indistinguishable from a dead keyboard.
+    editor.cursorPosition = Len(dialog.text)
 end sub
 
 sub onSearchChoice()
@@ -77,7 +119,10 @@ sub onSearchChoice()
     if dialog <> invalid
         index = dialog.buttonSelected
         query = dialog.text
-        m.top.getScene().dialog = invalid
+        ' StandardDialog's own dismissal, and the one ConfirmExitDialog already
+        ' uses: setting close makes the scene drop the node from the dialog slot
+        ' by itself. Both values are read above before anything is torn down.
+        dialog.close = true
         if index = 0
             RunSearch(query.Trim())
         else if m.rows.Count() > 0

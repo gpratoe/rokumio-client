@@ -105,13 +105,50 @@ end sub
 
 ' Install flow: a KeyboardDialog whose OK kicks AddonsInstallTask.
 sub ShowAddDialog()
-    dialog = CreateObject("roSGNode", "KeyboardDialog")
+    dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+    ' Palette and the array-shaped message are the two things that differ from
+    ' the legacy node. See the same block in SettingsScreen for why each one
+    ' fails quietly rather than loudly.
+    dialog.palette = AppPalette()
     dialog.title = "Add add-on"
-    dialog.message = "Enter the add-on's manifest URL, e.g. https://example.com/manifest.json"
+    dialog.message = ["Enter the add-on's manifest URL, e.g. https://example.com/manifest.json"]
     dialog.text = ""
     dialog.buttons = ["OK", "Cancel"]
     dialog.observeField("buttonSelected", "onAddChoice")
+    ' Full word dictation, and the caret the dialog does not place for itself.
+    ' Before the dialog is shown: the internal edit box is built at CreateObject
+    ' time, so this is the earliest the setting can land. See ApplyAddKeyboard.
+    ApplyAddKeyboard(dialog)
     m.top.getScene().dialog = dialog
+end sub
+
+' Configures the dialog's internal VoiceTextEditBox, which StandardKeyboardDialog
+' builds for itself and which is therefore reached through the dialog rather than
+' owned here. The box exists as soon as the node is created — confirmed on
+' device — so this is called inline and needs nothing to wait for.
+'
+' No try, deliberately. A throw here prints the offending field and line to the
+' device console, and the console is where this is read. The previous version
+' swallowed the error, which is how a caret fix that never took became
+' indistinguishable from one that did.
+sub ApplyAddKeyboard(dialog as object) as void
+    if dialog = invalid then return
+    editor = dialog.textEditBox
+    if editor = invalid then return
+
+    ' Dictation mode, and the reason voice came out one letter at a time.
+    ' DynamicKeyboard builds its internal edit box with voiceEntryType
+    ' "alphanumeric" — letter-by-letter, meant for street addresses — which
+    ' beats the node class default of "generic". The dialog's own
+    ' keyboardDomain defaults to "generic" too but does not reach this field.
+    ' "generic" is full word input, which is what a text prompt wants. First, so
+    ' it lands even if the caret write below is the thing being rejected.
+    editor.voiceEntryType = "generic"
+    ' Caret after the text rather than at 0, so backspace and the left arrow have
+    ' something to act on: a caret parked at 0 makes both of them no-ops by
+    ' definition while typing still appends, which from the outside is
+    ' indistinguishable from a dead keyboard.
+    editor.cursorPosition = Len(dialog.text)
 end sub
 
 sub onAddChoice()
@@ -119,7 +156,10 @@ sub onAddChoice()
     if dialog <> invalid
         index = dialog.buttonSelected
         address = dialog.text
-        m.top.getScene().dialog = invalid
+        ' StandardDialog's own dismissal, and the one ConfirmExitDialog already
+        ' uses: setting close makes the scene drop the node from the dialog slot
+        ' by itself. Both values are read above before anything is torn down.
+        dialog.close = true
         if index = 0
             StartInstall(address.Trim())
         end if

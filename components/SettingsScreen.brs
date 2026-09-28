@@ -143,14 +143,57 @@ end sub
 ' Open the streaming server editor. Empty input clears the address (clearing is
 ' a deliberate action); anything else is validated by SettingsStore.
 sub EditServer()
-    dialog = CreateObject("roSGNode", "KeyboardDialog")
+    dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+    ' A StandardDialog takes its colours from its own palette field and, with
+    ' none set, from whatever is higher in the scene graph. Nothing in this app
+    ' sets one — the Scene included — so without this the prompt comes up in
+    ' Roku's default grey over a themed app. Same palette the exit and support
+    ' dialogs already ask for.
+    dialog.palette = AppPalette()
     dialog.title = "Streaming server address"
-    dialog.message = "e.g. http://192.168.1.5:4141 — leave empty and OK to clear"
+    ' message is an ARRAY of strings on StandardKeyboardDialog. A bare string is
+    ' a wrong-typed field set: discarded with a warning, leaving the prompt with
+    ' no help text under the title and nothing on screen to explain why.
+    dialog.message = ["e.g. http://192.168.1.5:4141 — leave empty and OK to clear"]
     dialog.text = ""
     if m.stores <> invalid then dialog.text = m.stores.settings.callFunc("SettingsGetServerAddress")
     dialog.buttons = ["OK", "Cancel"]
     dialog.observeField("buttonSelected", "onServerChoice")
+    ' Caret after the address rather than at 0, so editing it does not start by
+    ' arrowing past the whole value. Before the dialog is shown: the internal
+    ' edit box is built at CreateObject time, so this is the earliest the setting
+    ' can land. See ApplyServerKeyboard.
+    ApplyServerKeyboard(dialog)
     m.top.getScene().dialog = dialog
+end sub
+
+' Configures the dialog's internal VoiceTextEditBox, which StandardKeyboardDialog
+' builds for itself and which is therefore reached through the dialog rather than
+' owned here. The box exists as soon as the node is created — confirmed on
+' device — so this is called inline and needs nothing to wait for.
+'
+' No try, deliberately. A throw here prints the offending field and line to the
+' device console, and the console is where this is read. The previous version
+' swallowed the error, which is how a caret fix that never took became
+' indistinguishable from one that did.
+sub ApplyServerKeyboard(dialog as object) as void
+    if dialog = invalid then return
+    editor = dialog.textEditBox
+    if editor = invalid then return
+
+    ' Dictation mode, and the reason voice came out one letter at a time.
+    ' DynamicKeyboard builds its internal edit box with voiceEntryType
+    ' "alphanumeric" — letter-by-letter, meant for street addresses — which
+    ' beats the node class default of "generic". The dialog's own
+    ' keyboardDomain defaults to "generic" too but does not reach this field.
+    ' "generic" is full word input, which is what a text prompt wants. First, so
+    ' it lands even if the caret write below is the thing being rejected.
+    editor.voiceEntryType = "generic"
+    ' Caret after the text rather than at 0, so backspace and the left arrow have
+    ' something to act on: a caret parked at 0 makes both of them no-ops by
+    ' definition while typing still appends, which from the outside is
+    ' indistinguishable from a dead keyboard.
+    editor.cursorPosition = Len(dialog.text)
 end sub
 
 sub onServerChoice()
@@ -158,7 +201,10 @@ sub onServerChoice()
     if dialog <> invalid
         index = dialog.buttonSelected
         chosen = dialog.text
-        m.top.getScene().dialog = invalid
+        ' StandardDialog's own dismissal, and the one ConfirmExitDialog already
+        ' uses: setting close makes the scene drop the node from the dialog slot
+        ' by itself. Both values are read above before anything is torn down.
+        dialog.close = true
         if index = 0
             if chosen = invalid or chosen.Trim() = ""
                 m.stores.settings.callFunc("SettingsClearServerAddress")
