@@ -7,13 +7,19 @@
 ' every request made. Suites assert against the log and inject via the script.
 
 function MockRegistry() as object
-    registry = { values: {} }
+    registry = { values: {}, failWrites: false }
     registry.Read = function(key as string) as string
         if m.values[key] <> invalid then return m.values[key]
         return ""
     end function
-    registry.Write = function(key as string, value as string)
+    ' Returns a boolean and can be told to refuse, because roRegistrySection.Write
+    ' answers with one. A void stand-in would read as a failure to every caller
+    ' that checks, and a stand-in that always succeeded could not exercise the
+    ' path where the registry says no.
+    registry.Write = function(key as string, value as string) as boolean
+        if m.failWrites then return false
         m.values[key] = value
+        return true
     end function
     registry.Flush = function() as void
     end function

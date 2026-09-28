@@ -53,7 +53,7 @@
         <function name="SettingsClearServerAddress" />
         <function name="SettingsGetLanguage" />
         <function name="SettingsGetServerAddress" />
-        <function name="SettingsSave" />
+        <function name="SettingsSaveFailed" />
         <function name="SettingsSetLanguage" />
         <function name="SettingsSetServerAddress" />
         <function name="SwitchSession" />

@@ -306,9 +306,9 @@ function SettingsGetServerAddress() as string
     return m.stores.settings.GetServerAddress()
 end function
 
-' settings.Save
-function SettingsSave() as void
-    m.stores.settings.Save()
+' settings.SaveFailed
+function SettingsSaveFailed() as boolean
+    return m.stores.settings.SaveFailed()
 end function
 
 ' settings.SetLanguage

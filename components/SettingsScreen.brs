@@ -210,15 +210,33 @@ sub onServerChoice()
                 m.stores.settings.callFunc("SettingsClearServerAddress")
                 m.status.text = "Server address cleared."
             else if m.stores.settings.callFunc("SettingsSetServerAddress", chosen)
-                m.stores.settings.callFunc("SettingsSave")
                 m.status.text = "Server address updated."
             else
                 m.status.text = "Invalid address — use http://host[:port]"
             end if
+            ' Every branch above ends in a write, so the result is the same
+            ' question on all of them: did the registry take it? Asked here
+            ' rather than after each setter because the store saves itself now
+            ' and there is no per-setter answer to check.
+            if m.stores.settings.callFunc("SettingsSaveFailed") then m.status.text = m.status.text + " — not saved"
+            ReportSaveFault()
             BuildRows()
         end if
     end if
     m.list.SetFocus(true)
+end sub
+
+' Mirrors the store's last write result into the Scene's fault strip, clearing
+' it on the next success. The status line says what just happened on this
+' screen; the strip is what a refused write looks like from anywhere else in the
+' app, including after the user has navigated away — which is the only place a
+' setting that did not save can be noticed, since nothing about it is wrong
+' until the next launch.
+sub ReportSaveFault()
+    if m.stores = invalid then return
+    failed = m.stores.settings.callFunc("SettingsSaveFailed")
+    scene = m.top.getScene()
+    if scene <> invalid then scene.callFunc("ReportStoreFault", "settings could not be saved", failed)
 end sub
 
 ' Cycle the language row's options forward.
@@ -230,7 +248,7 @@ sub CycleLanguage() as void
     end for
     nextLanguage = m.languages[(index + 1) mod m.languages.Count()]
     if m.stores.settings.callFunc("SettingsSetLanguage", nextLanguage)
-        m.stores.settings.callFunc("SettingsSave")
+        ReportSaveFault()
         BuildRows()
     end if
 end sub

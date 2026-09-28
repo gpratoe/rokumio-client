@@ -2,18 +2,35 @@
 '
 ' A real store is constructed with an roRegistrySection (session scope) and
 ' Load()s its values on construction; tests pass a fake registry (or nothing,
-' which means in-memory only). Save() writes every field through the registry
-' so a second instance constructed with the same registry restores the state.
+' which means in-memory only).
+'
+' The setters persist themselves. That is not tidiness: the setters were once
+' memory-only and every caller was trusted to call Save() afterwards, and one of
+' them did not. The deep-link/import entry point set the streaming server
+' address and stopped there, so an address linked over ECP was used for the rest
+' of the session and then gone on the next launch — a wipe with nothing on screen
+' and nothing in the log, and the one report of it came long after the change
+' that caused it. A setting that forgets to save is indistinguishable from a
+' setting that was never set, so the saving is a property of the store rather
+' than a rule every call site has to remember.
+'
+' Save() reports whether the registry took the write (see SaveFailed), because
+' roRegistrySection.Write answers with a boolean that used to be discarded.
 
+' saveRefused, not saveFailed: BrightScript identifiers are case-insensitive, so
+' a field called saveFailed IS the SaveFailed() method below and the compiler
+' rejects the class with BS1026.
 class SettingsStore
     registry as dynamic
     serverAddress as string
     language as string
+    saveRefused as boolean
 
     sub new(registry = invalid as dynamic)
         m.registry = registry
         m.serverAddress = ""
         m.language = "en"
+        m.saveRefused = false
         m.Load()
     end sub
 
@@ -48,6 +65,7 @@ class SettingsStore
         if host = "" then return false
 
         m.serverAddress = candidate
+        m.Save()
         return true
     end function
 
@@ -68,6 +86,7 @@ class SettingsStore
     function SetLanguage(value as string) as boolean
         if value = "" then return false
         m.language = value
+        m.Save()
         return true
     end function
 
@@ -75,12 +94,31 @@ class SettingsStore
         return m.language
     end function
 
-    sub Save()
-        if m.registry = invalid then return
-        m.registry.Write("serverAddress", m.serverAddress)
-        m.registry.Write("language", m.language)
+    ' Writes every field through the registry and flushes. roRegistrySection.Write
+    ' answers with a boolean saying whether it took the value, and that answer
+    ' used to be thrown away: a write the registry refused then flushed nothing
+    ' and the setting quietly reverted on the next launch, with nothing anywhere
+    ' recording that it had ever been refused. Kept as a result instead of
+    ' dropped, so a caller with somewhere to show it can.
+    '
+    ' A missing registry is not a failure. There is nowhere to write to, which is
+    ' the in-memory-only mode the store tests exercise, not an error to report.
+    function Save() as boolean
+        if m.registry = invalid then return true
+        ok = m.registry.Write("serverAddress", m.serverAddress)
+        if not m.registry.Write("language", m.language) then ok = false
         m.registry.Flush()
-    end sub
+        m.saveRefused = not ok
+        return ok
+    end function
+
+    ' Whether the most recent Save() was refused by the registry. Reset by the
+    ' next successful save rather than latched, so a transient refusal does not
+    ' report itself for the rest of the session — the setting really is safe
+    ' again once a write lands.
+    function SaveFailed() as boolean
+        return m.saveRefused
+    end function
 
     sub Load()
         if m.registry = invalid then return

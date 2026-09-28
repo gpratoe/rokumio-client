@@ -1213,8 +1213,21 @@ sub FinishImport()
 
     if m.import.settings <> invalid and m.import.settings.serverAddress <> invalid
         if m.storeHost <> invalid
+            ' This is the ECP entry point for the streaming server, and it used
+            ' to set the address and stop there. The value was live for the rest
+            ' of the session and gone on the next launch, because nothing had
+            ' ever written it to the registry — a wipe with no symptom until the
+            ' relaunch, and no line anywhere saying the value was never saved.
+            ' The store saves itself now, so the only thing left to do here is
+            ' notice when it could not.
             if m.storeHost.callFunc("SettingsSetServerAddress", m.import.settings.serverAddress)
-                blocks.Push("Server linked.")
+                if m.storeHost.callFunc("SettingsSaveFailed") then
+                    blocks.Push("Server linked, but the address could not be saved.")
+                    ReportStoreFault("settings could not be saved", true)
+                else
+                    blocks.Push("Server linked.")
+                    ReportStoreFault("settings could not be saved", false)
+                end if
             else
                 blocks.Push("Invalid server address was ignored.")
             end if

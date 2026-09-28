@@ -42,6 +42,50 @@ sub Test_Settings_ClearServerAddress()
     Harness_Equal(reopened.GetServerAddress(), "", "blank persisted")
 end sub
 
+' The setters persist themselves, so no Save() call appears anywhere below. That
+' is the point of the suite: the ECP import path set the server address and
+' omitted the save, which no existing test could see, because the one test that
+' checked persistence made the Save() call itself.
+sub Test_Settings_SettersPersistWithoutAnExplicitSave()
+    Harness_Suite("SettingsStore setters persist on their own")
+    registry = MockRegistry()
+    settings = SettingsStore(registry)
+
+    Harness_Ok(settings.SetServerAddress("http://192.168.1.5:4141"), "address accepted")
+    Harness_Ok(settings.SetLanguage("es"), "language accepted")
+
+    reopened = SettingsStore(registry)
+    Harness_Equal(reopened.GetServerAddress(), "http://192.168.1.5:4141", "address reloaded with no Save() call")
+    Harness_Equal(reopened.GetLanguage(), "es", "language reloaded with no Save() call")
+end sub
+
+' roRegistrySection.Write answers with a boolean, and the answer used to be
+' discarded — so a refused write flushed nothing and reverted on the next
+' launch with nothing recording that it had been refused.
+sub Test_Settings_ReportsARefusedWrite()
+    Harness_Suite("SettingsStore reports a write the registry refuses")
+    registry = MockRegistry()
+    registry.failWrites = true
+    settings = SettingsStore(registry)
+
+    Harness_Ok(settings.SetServerAddress("http://192.168.1.5:4141"), "the value is still set in memory")
+    Harness_Ok(settings.SaveFailed(), "the refused write is reported")
+    Harness_Equal(SettingsStore(registry).GetServerAddress(), "", "and nothing reached the registry")
+
+    registry.failWrites = false
+    Harness_Ok(settings.SetServerAddress("http://192.168.1.5:4141"), "a retry still sets the value")
+    Harness_Ok(not settings.SaveFailed(), "and the failure clears itself once a write lands")
+    Harness_Equal(SettingsStore(registry).GetServerAddress(), "http://192.168.1.5:4141", "the retry persisted")
+end sub
+
+' A missing registry is the in-memory-only mode, not a write that failed.
+sub Test_Settings_NoRegistryIsNotAFailedWrite()
+    Harness_Suite("SettingsStore without a registry does not report a failure")
+    settings = SettingsStore(invalid)
+    settings.SetServerAddress("http://192.168.1.5:4141")
+    Harness_Ok(not settings.SaveFailed(), "nowhere to write is not the same as a refused write")
+end sub
+
 sub Test_Settings_PersistsViaRegistry()
     Harness_Suite("SettingsStore round-trips through the registry")
     registry = MockRegistry()
