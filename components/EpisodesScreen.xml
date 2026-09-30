@@ -31,12 +31,19 @@
             height="70"
             horizAlign="left"
             font="font:LargeBoldSystemFont" />
-        <Label
-            id="epTitle"
+        <!-- The focused episode's "S#E#  name" (green) with the air date hung
+             right off it. One MultiStyleLabel renders both as a single line:
+             the date span switches font + color via drawingStyles markup (aired
+             warm gold, not-yet-aired sky blue), so no part can desync from the
+             title's width. -->
+        <MultiStyleLabel
+            id="epHeaderLine"
             translation="[80, 128]"
             width="1760"
             height="40"
-            font="font:MediumBoldSystemFont" />
+            horizAlign="left"
+            vertAlign="center"
+            maxLines="1" />
         <Label
             id="epDesc"
             translation="[80, 172]"

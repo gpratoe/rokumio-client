@@ -17,6 +17,8 @@
         <field id="watchedGlyph" type="string" />
         <!-- EpisodeTile: per-episode watched flag. -->
         <field id="watched" type="boolean" />
+        <!-- EpisodeTile: per-episode air state; false dims the tile. -->
+        <field id="aired" type="boolean" />
         <!-- SearchScreen loading state consumed by PosterTile's spinner. -->
         <field id="loadState" type="string" />
     </interface>

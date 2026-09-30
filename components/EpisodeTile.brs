@@ -38,6 +38,10 @@ sub UpdateLook()
         m.tileBg.color = t.tileFace
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
+    ' Episodes that haven't aired yet are dimmed further (still visible, but
+    ' clearly not watchable). Missing aired is treated as aired so non-episode
+    ' screens keep their current look.
+    if m.top.itemContent <> invalid and m.top.itemContent.aired = false then m.top.opacity = 0.5 * m.top.opacity
 end sub
 
 sub onItemHasFocusChanged()

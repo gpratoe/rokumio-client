@@ -15,15 +15,22 @@
 sub init()
     m.epName = m.top.FindNode("epName")
     m.bgPoster = m.top.FindNode("bgPoster")
-    m.epTitle = m.top.FindNode("epTitle")
+    m.epHeaderLine = m.top.FindNode("epHeaderLine")
     m.epDesc = m.top.FindNode("epDesc")
     m.epList = m.top.FindNode("epList")
 
     t = Theme()
     m.top.FindNode("bgScrim").color = t.scrim
     m.epName.color = t.accent
-    m.epTitle.color = t.accent
     m.epDesc.color = t.textSecondary
+    ' The header line is one MultiStyleLabel: the untagged episode label uses
+    ' "default", the air date wraps in <aired> / <upcoming> for its own color.
+    ' System fonts carry their own size, so styles differ by face and color.
+    m.epHeaderLine.drawingStyles = {
+        default: { fontUri: "font:MediumBoldSystemFont", color: t.accent }
+        aired: { fontUri: "font:SmallSystemFont", color: t.accentWarm }
+        upcoming: { fontUri: "font:SmallSystemFont", color: t.accentInfo }
+    }
     m.epList.rowLabelTextColor = t.textSecondary
     m.epList.focusBitmapBlendColor = t.accent
     m.epList.rowLabelOffset = [0,10]
@@ -83,7 +90,7 @@ sub LoadSeries()
     m.seasons = []
     m.seasonEpisodes = []
     m.orderedVideoIds = []
-    m.epTitle.text = ""
+    m.epHeaderLine.text = ""
     m.epDesc.text = "Loading episodes…"
 
     CancelLoad()
@@ -117,7 +124,7 @@ sub onSeriesLoaded()
     AsyncTask_Reap(task, m.top, false)
 
     if result = invalid or not result.ok or result.meta = invalid
-        m.epTitle.text = ""
+        m.epHeaderLine.text = ""
         m.epDesc.text = "Series information could not be loaded."
         return
     end if
@@ -132,7 +139,7 @@ end sub
 sub BuildList(meta as object)
     allSeasons = m.stores.episodes.callFunc("EpisodesSeasons", meta)
     if allSeasons.Count() = 0
-        m.epTitle.text = ""
+        m.epHeaderLine.text = ""
         m.epDesc.text = "No episodes found for this series."
         return
     end if
@@ -160,6 +167,7 @@ sub BuildList(meta as object)
             if season <> 0
                 mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, season, ep, orderedEpisodes, nowIso)
                 item.watched = mark.watched
+                item.aired = mark.aired
                 if mark.aired
                     anyRegular = true
                     if not item.watched then allDone = false
@@ -200,6 +208,7 @@ sub RefreshWatchedMarks() as void
             if season <> 0
                 mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, season, ep, orderedEpisodes, nowIso)
                 item.watched = mark.watched
+                item.aired = mark.aired
                 if mark.aired
                     anyRegular = true
                     if not item.watched then allDone = false
@@ -401,12 +410,23 @@ sub UpdateHeader(position as object)
     if position = invalid or position.Count() < 2 then return
     entry = EntryAt(position[0], position[1])
     if entry = invalid
-        m.epTitle.text = ""
+        m.epHeaderLine.text = ""
         m.epDesc.text = ""
         return
     end if
 
-    m.epTitle.text = EpisodeLabel(entry.season, entry.ep)
+    text = EpisodeLabel(entry.season, entry.ep)
+    airDate = ""
+    if m.stores <> invalid and entry.ep <> invalid then airDate = m.stores.time.callFunc("TimeAirDateLabel", entry.ep)
+    if airDate <> ""
+        ' Not-yet-aired episodes flag their upcoming date via <upcoming> (sky
+        ' blue); aired ones keep <aired> (warm gold). Tags are our own two style
+        ' keys, never episode data.
+        style = "aired"
+        if airDate.InStr("Premieres ") = 0 then style = "upcoming"
+        text = text + "<" + style + "> - " + airDate + "</" + style + ">"
+    end if
+    m.epHeaderLine.text = text
 
     overview = "No synopsis available."
     ep = entry.ep

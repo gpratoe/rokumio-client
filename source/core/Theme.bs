@@ -23,6 +23,8 @@ function Theme() as object
             accentClear: "0x2BD67500"
             accentDim: "0x2BD6754D"
             accentFaint: "0x2BD67533"
+            accentWarm: "0xFFCE6BFF"
+            accentInfo: "0x5BCBF4FF"
             textPrimary: "0xE9F2ECFF"
             textSecondary: "0x8FA399FF"
             textWhite: "0xFFFFFFFF"

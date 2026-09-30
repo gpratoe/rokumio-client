@@ -64,4 +64,36 @@ class TimeUtil
         end for
         return true
     end function
+
+    ' One label line for an episode's air date: "Aired Aug 5, 2026" for dates up
+    ' to today, "Premieres Sep 30, 2026" for the future. Reads released, falling
+    ' back to firstAired, formats the leading YYYY-MM-DD through a month table —
+    ' no roDateTime, so the interpreter cannot diverge from a device. Missing or
+    ' malformed dates come back "" (no date line), and with no usable clock the
+    ' prefix is dropped (just "Sep 30, 2026"). nowIso is injectable for tests;
+    ' production passes the store's stamp.
+    function AirDateLabel(ep as object, nowIso = invalid as dynamic) as string
+        if ep = invalid then return ""
+        dateStr = ""
+        if ep.released <> invalid and ep.released <> "" then
+            dateStr = ep.released
+        else if ep.firstAired <> invalid and ep.firstAired <> "" then
+            dateStr = ep.firstAired
+        end if
+        if dateStr = "" then return ""
+        day = dateStr.Mid(0, 10)
+        if not m.IsCalendarDate(day) then return ""
+        if nowIso = invalid or nowIso = "" then nowIso = m.NowIso()
+
+        monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        year = day.Mid(0, 4)
+        monthVal = day.Mid(5, 2).ToInt()
+        dayVal = day.Mid(8, 2).ToInt()
+        if monthVal < 1 or monthVal > 12 or dayVal < 1 or dayVal > 31 then return ""
+        label = monthNames[monthVal - 1] + " " + dayVal.ToStr() + ", " + year
+
+        if nowIso = "" then return label
+        if day > nowIso.Mid(0, 10) then return "Premieres " + label
+        return "Aired " + label
+    end function
 end class

@@ -58,6 +58,7 @@
         <function name="SettingsSetServerAddress" />
         <function name="SwitchSession" />
         <function name="TimeNowIso" />
+        <function name="TimeAirDateLabel" />
         <function name="WatchLatest" />
         <function name="WatchRecord" />
     </interface>
