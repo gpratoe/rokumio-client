@@ -20,54 +20,54 @@
              real mint frame instead of painting over the card. -->
         <Rectangle id="tileBorder" width="1080" height="280">
             <Rectangle id="tileFace" width="1072" height="270" translation="[4, 4]" />
-            <Label
+            <ScrollingLabel
                 id="tileTitle"
-                width="1040"
+                maxWidth="1040"
                 height="40"
+                clippingRect="[0, 0, 1040, 40]"
                 translation="[18, 32]"
                 horizAlign="left"
-                vertAlign="center"
-                font="font:MediumBoldSystemFont" />
-            <Label
+                vertAlign="center" />
+            <ScrollingLabel
                 id="tileLine1"
-                width="1040"
+                maxWidth="1040"
                 height="34"
+                clippingRect="[0, 0, 1040, 34]"
                 translation="[18, 92]"
                 horizAlign="left"
-                vertAlign="center"
-                font="font:SmallSystemFont" />
-            <Label
+                vertAlign="center" />
+            <ScrollingLabel
                 id="tileLine2"
-                width="1040"
+                maxWidth="1040"
                 height="34"
+                clippingRect="[0, 0, 1040, 34]"
                 translation="[18, 130]"
                 horizAlign="left"
-                vertAlign="center"
-                font="font:SmallSystemFont" />
-            <Label
+                vertAlign="center" />
+            <ScrollingLabel
                 id="tileLine3"
-                width="1040"
+                maxWidth="1040"
                 height="34"
+                clippingRect="[0, 0, 1040, 34]"
                 translation="[18, 168]"
                 horizAlign="left"
-                vertAlign="center"
-                font="font:SmallSystemFont" />
-            <Label
+                vertAlign="center" />
+            <ScrollingLabel
                 id="tileLine4"
-                width="1040"
+                maxWidth="1040"
                 height="34"
+                clippingRect="[0, 0, 1040, 34]"
                 translation="[18, 206]"
                 horizAlign="left"
-                vertAlign="center"
-                font="font:SmallSystemFont" />
-            <Label
+                vertAlign="center" />
+            <ScrollingLabel
                 id="tileLine5"
-                width="1040"
+                maxWidth="1040"
                 height="34"
+                clippingRect="[0, 0, 1040, 34]"
                 translation="[18, 244]"
                 horizAlign="left"
-                vertAlign="center"
-                font="font:SmallSystemFont" />
+                vertAlign="center" />
         </Rectangle>
     </children>
 </component>
