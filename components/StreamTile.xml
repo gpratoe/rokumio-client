@@ -20,54 +20,61 @@
              real mint frame instead of painting over the card. -->
         <Rectangle id="tileBorder" width="1080" height="280">
             <Rectangle id="tileFace" width="1072" height="270" translation="[4, 4]" />
-            <ScrollingLabel
+            <!-- The title never scrolls, so it sits outside the clip and simply
+                 truncates with an ellipsis when it is too long (width lets
+                 EmojiLabel do the truncating). -->
+            <EmojiLabel
                 id="tileTitle"
-                maxWidth="1040"
+                width="1022"
                 height="40"
-                clippingRect="[0, 0, 1040, 40]"
                 translation="[18, 32]"
-                horizAlign="left"
                 vertAlign="center" />
-            <ScrollingLabel
-                id="tileLine1"
-                maxWidth="1040"
-                height="34"
-                clippingRect="[0, 0, 1040, 34]"
-                translation="[18, 92]"
-                horizAlign="left"
-                vertAlign="center" />
-            <ScrollingLabel
-                id="tileLine2"
-                maxWidth="1040"
-                height="34"
-                clippingRect="[0, 0, 1040, 34]"
-                translation="[18, 130]"
-                horizAlign="left"
-                vertAlign="center" />
-            <ScrollingLabel
-                id="tileLine3"
-                maxWidth="1040"
-                height="34"
-                clippingRect="[0, 0, 1040, 34]"
-                translation="[18, 168]"
-                horizAlign="left"
-                vertAlign="center" />
-            <ScrollingLabel
-                id="tileLine4"
-                maxWidth="1040"
-                height="34"
-                clippingRect="[0, 0, 1040, 34]"
-                translation="[18, 206]"
-                horizAlign="left"
-                vertAlign="center" />
-            <ScrollingLabel
-                id="tileLine5"
-                maxWidth="1040"
-                height="34"
-                clippingRect="[0, 0, 1040, 34]"
-                translation="[18, 244]"
-                horizAlign="left"
-                vertAlign="center" />
+            <!-- cardClip is the window and never moves. cardContent is the
+                 payload and is the only node that translates: sliding it is what
+                 brings the tail of an overflowing line into view. Clipping the
+                 payload itself would drag the window along with the text and
+                 show the same slice forever. -->
+            <Group id="cardClip" clippingRect="[0, 90, 1022, 190]">
+                <Group id="cardContent">
+                    <EmojiLabel
+                        id="tileLine1"
+                        height="34"
+                        translation="[18, 92]"
+                        vertAlign="center" />
+                    <EmojiLabel
+                        id="tileLine2"
+                        height="34"
+                        translation="[18, 130]"
+                        vertAlign="center" />
+                    <EmojiLabel
+                        id="tileLine3"
+                        height="34"
+                        translation="[18, 168]"
+                        vertAlign="center" />
+                    <EmojiLabel
+                        id="tileLine4"
+                        height="34"
+                        translation="[18, 206]"
+                        vertAlign="center" />
+                    <EmojiLabel
+                        id="tileLine5"
+                        height="34"
+                        translation="[18, 244]"
+                        vertAlign="center" />
+                </Group>
+            </Group>
+            <Timer
+                id="measureTimer"
+                duration="0.05"
+                repeat="false"
+                control="stop" />
+            <!-- The slide itself. duration must match m.interval in
+                 StreamTile.brs: the tick counter turns seconds into ticks. -->
+            <Timer
+                id="scrollTimer"
+                duration="0.03"
+                repeat="true"
+                control="stop" />
         </Rectangle>
     </children>
 </component>
