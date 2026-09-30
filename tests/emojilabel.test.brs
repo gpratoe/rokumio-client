@@ -1,9 +1,9 @@
 ' Vendored EmojiLabel utilities (Twemoji/EmojiOnRoku) unit tests.
 '
 ' toCodePoint / toURI are pure string and point-math helpers that run fully in
-' the interpreter: every CardMarquee line splits an emoji's code points apart
-' and builds the pinned CDN URI for its Twemoji art spot on. Regex matching and
-' the poster fetching itself stay a device concern.
+' the interpreter: every card line splits an emoji's code points apart and builds
+' the pinned CDN URI for its Twemoji art spot on. Regex matching and the poster
+' fetching itself stay a device concern.
 
 sub Test_EmojiUtil_ToCodePointAstral()
     Harness_Suite("toCodePoint combines an astral pair into one hex point")

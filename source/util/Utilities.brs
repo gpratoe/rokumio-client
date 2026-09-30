@@ -39,12 +39,15 @@ function emojiPointName(rawText as String) as String
     if foundZeroWidth
         codePoint = toCodePoint(unicodeSurrogates)
     else
-        ' Remove modifiers for FEOF since there is not a zero width modifier
+        ' Strip the variation selector: Twemoji names a standalone emoji's file
+        ' after the bare code point, so a surviving selector asks for a file that
+        ' does not exist and the poster silently never loads. ZWJ sequences keep
+        ' it, because their filenames genuinely carry it.
         removeModsRegex = createObject("roRegex", "\x{FE0F}", "")
         trimmedText = removeModsRegex.replace(rawText, "")
         unicodeSurrogates = []
-        for i = 0 to rawText.len() - 1
-            unicodeSurrogates.push(asc(rawText.mid(i, 1)))
+        for i = 0 to trimmedText.len() - 1
+            unicodeSurrogates.push(asc(trimmedText.mid(i, 1)))
         end for
 
         codePoint = toCodePoint(unicodeSurrogates)
