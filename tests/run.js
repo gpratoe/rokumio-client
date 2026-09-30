@@ -45,6 +45,7 @@ async function writeCombinedScript() {
         'tests/watchedcodec.test.brs',
         'tests/videoidcodec.test.brs',
         'tests/timeutil.test.brs',
+        'tests/emojilabel.test.brs',
         'tests/watchstatebuffer.test.brs',
         'tests/stremiolibrarycodec.test.brs',
         'tests/_run.brs'
@@ -71,7 +72,9 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'StremioApiStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'PlaybackStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'SubtitlesStore.brs'),
-    path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs')
+    path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs'),
+    path.join(stagingDir, 'source', 'util', 'Regex.brs'),
+    path.join(stagingDir, 'source', 'util', 'Utilities.brs')
 ];
 
 function checkDeferredVideoPlayContract() {
@@ -2154,7 +2157,7 @@ async function main() {
     await builder.run({
         project: null,
         rootDir: projectRoot,
-        files: ['source/**/*.bs', 'bslib'],
+        files: ['source/**/*.bs', 'source/**/*.brs', 'bslib'],
         stagingDir,
         createPackage: false,
         copyToStaging: true,
