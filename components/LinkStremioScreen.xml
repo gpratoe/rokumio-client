@@ -58,20 +58,9 @@
                 text="QR code unavailable — use the link below"
                 font="font:MediumSystemFont"
                 visible="false" />
-            <LayoutGroup
-                id="pairStep1"
-                layoutDirection="horiz"
-                horizAlignment="center"
-                itemSpacings="[0]">
-                <Label
-                    id="pairStep1Prefix"
-                    text="1 - Scan the QR above or go to "
-                    font="font:MediumSystemFont" />
-                <Label
-                    id="pairLink"
-                    text=""
-                    font="font:MediumSystemFont" />
-            </LayoutGroup>
+            <MultiStyleLabel
+                id="pairStep1Line"
+                font="font:MediumSystemFont" />
             <Label
                 id="pairStep2"
                 text="2 - Log in to your Stremio account"

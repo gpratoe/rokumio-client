@@ -14,12 +14,13 @@
 
 sub init()
     m.PAIR_LIFETIME_SECONDS = 300
+    m.STEP1_PREFIX = "1 - Scan the QR above or go to "
     m.titleLabel = m.top.FindNode("pairTitle")
     m.qrPoster = m.top.FindNode("pairQr")
     m.qrFallback = m.top.FindNode("pairQrFallback")
     m.column = m.top.FindNode("pairColumn")
     m.spinner = m.top.FindNode("pairSpinner")
-    m.linkLabel = m.top.FindNode("pairLink")
+    m.step1Label = m.top.FindNode("pairStep1Line")
     m.timerLabel = m.top.FindNode("pairTimer")
     m.statusLabel = m.top.FindNode("pairStatus")
     m.ticker = m.top.FindNode("pairTicker")
@@ -27,8 +28,10 @@ sub init()
     t = Theme()
     m.titleLabel.color = t.accent
     m.qrFallback.color = t.textSecondary
-    m.top.FindNode("pairStep1Prefix").color = t.textWhite
-    m.linkLabel.color = t.accent
+    m.step1Label.drawingStyles = {
+        default: { fontUri: "font:MediumSystemFont", color: t.textWhite }
+        link: { fontUri: "font:MediumSystemFont", color: t.accent }
+    }
     m.top.FindNode("pairStep2").color = t.textWhite
     m.timerLabel.color = t.textSecondary
     m.top.FindNode("pairRefreshHint").color = t.accent
@@ -41,6 +44,7 @@ sub init()
     m.top.focusable = true
 
     m.taskNode = invalid
+    m.currentLink = invalid
     m.countdownSeconds = 0
     m.refreshing = false
 
@@ -80,7 +84,7 @@ sub BindTask(task as object)
     m.taskNode.ObserveField("result", "onTaskResult")
 
 
-    if m.taskNode.link <> invalid and m.taskNode.link <> "" and m.linkLabel.text <> m.taskNode.link
+    if m.taskNode.link <> invalid and m.taskNode.link <> "" and m.currentLink <> m.taskNode.link
         ShowLink(m.taskNode.link)
     end if
     if m.taskNode.qrcode <> invalid and m.taskNode.qrcode <> "" and m.qrPoster.uri <> m.taskNode.qrcode
@@ -117,7 +121,8 @@ sub ResetUI()
     ' fallback text stayed up permanently even once a good code arrived.
     m.qrPoster.visible = true
     m.qrFallback.visible = false
-    m.linkLabel.text = ""
+    m.currentLink = invalid
+    m.step1Label.text = m.STEP1_PREFIX
     m.statusLabel.text = "..."
     m.timerLabel.visible = true
     StopCountdown()
@@ -131,7 +136,11 @@ sub onTaskLink()
 end sub
 
 sub ShowLink(link as string)
-    m.linkLabel.text = link
+    if m.currentLink = link then return
+    m.currentLink = link
+    ' The scan URL tags <link> (accent green) inside the white step1 prefix; the
+    ' two are one MultiStyleLabel line, so they stay glued as the URL changes.
+    m.step1Label.text = m.STEP1_PREFIX + "<link>" + link + "</link>"
     ' The link is what the user needs; the QR is an enhancement on top of it.
     ' Reveal on the link and start the pairing clock here, NOT when the PNG
     ' lands: the whole screen used to stay behind a spinner until a network
