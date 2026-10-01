@@ -49,7 +49,7 @@
             rowItemSize="[[260, 56]]"
             rowItemSpacing="[[12, 0]]"
             showRowLabel="false"
-            drawFocusFeedback="false"
+            drawFocusFeedback="true"
             itemComponentName="ChipTile" />
 
         <!-- The dropdown: a panel below the chips listing one chip's options in
@@ -58,16 +58,16 @@
              whatever sits under it (the screen declares FilterBar after its own
              grid for that reason). -->
         <Group id="menuGroup" visible="false">
-            <Rectangle id="menuBackdrop" width="252" height="62" />
+            <Rectangle id="menuBackdrop" width="260" height="56" />
             <RowList
                 id="menu"
                 numRows="1"
-                itemSize="[248, 56]"
+                itemSize="[260, 56]"
                 itemSpacing="[0, 6]"
-                rowItemSize="[[240, 56]]"
+                rowItemSize="[[260, 56]]"
                 rowItemSpacing="[[4, 0]]"
                 showRowLabel="false"
-                drawFocusFeedback="false"
+                drawFocusFeedback="true"
                 itemComponentName="ChipTile"
                 vertFocusAnimationStyle="floatingFocus"/>
         </Group>

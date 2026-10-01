@@ -35,6 +35,7 @@ sub init()
     m.detailName.color = t.textPrimary
     m.detailType.color = t.accent
     m.detailDesc.color = t.textSecondary
+    m.chipsRow.focusBitmapBlendColor = t.accent
 
     m.chipsRow.ObserveField("rowItemSelected", "onChipSelected")
 end sub
@@ -211,8 +212,10 @@ sub ShowChips(actions as object)
     root = CreateObject("roSGNode", "ContentNode")
     row = root.CreateChild("ContentNode")
     for each chip in actions
-        item = row.CreateChild("ContentNode")
+        item = row.CreateChild("ChipContent")
         item.title = chip.title
+        item.width = m.chipsRow.rowItemSize[0][0]
+        item.height = m.chipsRow.rowItemSize[0][1]
     end for
     m.chipsRow.content = root
     m.chipsRow.jumpToRowItem = [0, 0]

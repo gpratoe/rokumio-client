@@ -20,6 +20,7 @@
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/ChevronList.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
         <RowList
@@ -29,7 +30,7 @@
             itemSpacing="[0, 8]"
             rowItemSize="[[1000, 110]]"
             showRowLabel="[false]"
-            drawFocusFeedback="false"
+            drawFocusFeedback="true"
             itemComponentName="PrefRow"
             vertFocusAnimationStyle="floatingFocus" />
         <Poster

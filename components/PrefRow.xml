@@ -15,24 +15,22 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <Rectangle id="rowBorder" width="1000" height="110">
-            <Rectangle id="rowFace" width="992" height="102" translation="[4, 4]" />
-            <Label
-                id="rowTitle"
-                width="600"
-                height="110"
-                translation="[24, 0]"
-                horizAlign="left"
-                vertAlign="center"
-                font="font:MediumBoldSystemFont" />
-            <Label
-                id="rowValue"
-                width="336"
-                height="110"
-                translation="[640, 0]"
-                horizAlign="right"
-                vertAlign="center"
-                font="font:MediumSystemFont" />
-        </Rectangle>
+        <Rectangle id="rowFace" width="992" height="102" translation="[4, 4]" />
+        <Label
+            id="rowTitle"
+            width="600"
+            height="110"
+            translation="[24, 0]"
+            horizAlign="left"
+            vertAlign="center"
+            font="font:MediumBoldSystemFont" />
+        <Label
+            id="rowValue"
+            width="336"
+            height="110"
+            translation="[640, 0]"
+            horizAlign="right"
+            vertAlign="center"
+            font="font:MediumSystemFont" />
     </children>
 </component>

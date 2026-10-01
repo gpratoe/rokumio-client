@@ -16,6 +16,7 @@ sub init()
     m.title.color = t.accent
     m.sub.color = t.textSecondary
     m.status.color = t.accent
+    m.list.focusBitmapBlendColor = t.accent
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
 

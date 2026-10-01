@@ -4,7 +4,6 @@
 ' right/muted value come from itemContent.title / itemContent.description.
 
 sub init()
-    m.border = m.top.FindNode("rowBorder")
     m.face = m.top.FindNode("rowFace")
     m.title = m.top.FindNode("rowTitle")
     m.value = m.top.FindNode("rowValue")
@@ -25,15 +24,11 @@ end sub
 sub UpdateLook()
     t = Theme()
     if m.top.itemHasFocus
-        m.border.color = t.accentFocus
         m.face.color = t.itemFace
         m.value.color = t.textPrimary
-        m.top.scale = [1.02, 1.02]
     else
-        m.border.color = t.accentClear
         m.face.color = t.tileFace
         m.value.color = t.textSecondary
-        m.top.scale = [1.0, 1.0]
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub

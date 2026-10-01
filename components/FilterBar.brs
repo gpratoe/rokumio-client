@@ -9,7 +9,10 @@ sub init()
     m.menuBackdrop = m.top.FindNode("menuBackdrop")
     m.menu = m.top.FindNode("menu")
 
-    m.menuBackdrop.color = Theme().dropdownBg
+    t = Theme()
+    m.menuBackdrop.color = t.dropdownBg
+    m.menu.focusBitmapBlendColor = t.accent
+    m.chips.focusBitmapBlendColor = t.accent
 
     m.chips.ObserveField("rowItemSelected", "onChipPressed")
     m.menu.ObserveField("rowItemSelected", "onMenuPressed")
@@ -29,8 +32,10 @@ sub SetChips(entries as object)
     content = CreateObject("roSGNode", "ContentNode")
     row = content.CreateChild("ContentNode")
     for each entry in entries
-        item = row.CreateChild("ContentNode")
+        item = row.CreateChild("ChipContent")
         item.title = entry.label
+        item.width = m.chips.rowItemSize[0][0]
+        item.height = m.chips.rowItemSize[0][1]
     end for
     m.chips.content = content
     m.chips.jumpToRowItem = [0, m.activeChip]
@@ -53,15 +58,16 @@ sub ShowMenu(options as object, currentIndex as integer)
     content = CreateObject("roSGNode", "ContentNode")
     for each option in options
         row = content.CreateChild("ContentNode")
-        item = row.CreateChild("ContentNode")
+        item = row.CreateChild("ChipContent")
         item.title = option.label
+        item.width = m.menu.rowItemSize[0][0]
+        item.height = m.menu.rowItemSize[0][1]
     end for
     m.menu.content = content
 
     shown = options.Count()
     if shown > 9 then shown = 9
     m.menu.numRows = shown
-    m.menuBackdrop.width = 252
     m.menuBackdrop.height = shown * 56 + (shown - 1) * 6 + 4
 
     ' Hang the menu under the activating chip, not always the first one.

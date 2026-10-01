@@ -4,7 +4,6 @@
 ' rowHasFocus. Text is read from itemContent.title.
 
 sub init()
-    m.border = m.top.FindNode("chipBorder")
     m.face = m.top.FindNode("chipFace")
     m.text = m.top.FindNode("chipText")
 
@@ -25,22 +24,29 @@ end sub
 sub UpdateLook()
     t = Theme()
     if m.top.itemHasFocus
-        m.border.color = t.accentFocus
         m.face.color = t.itemFace
         m.text.color = t.textPrimary
-        m.top.scale = [1.05, 1.05]
     else
-        m.border.color = t.accentClear
         m.face.color = t.tileFace
         m.text.color = t.textSecondary
-        m.top.scale = [1.0, 1.0]
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub
 
 sub onItemContentChanged()
-    if m.top.itemContent = invalid then return
-    m.text.text = m.top.itemContent.title
+    content = m.top.itemContent
+    if content = invalid then return
+    m.text.text = content.title
+
+    if content.width <> invalid
+        m.face.width = content.width
+        m.text.width = content.width - 8
+    end if
+
+    if content.chipHeight <> invalid
+        m.face.height = content.height
+        m.text.height = content.height - 8
+    end if
     UpdateLook()
 end sub
 

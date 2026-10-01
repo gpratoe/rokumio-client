@@ -65,7 +65,7 @@
             rowItemSize="[[260, 56]]"
             rowItemSpacing="[[12, 0]]"
             showRowLabel="false"
-            drawFocusFeedback="false"
+            drawFocusFeedback="true"
             itemComponentName="ChipTile" />
     </children>
 </component>

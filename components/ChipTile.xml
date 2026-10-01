@@ -16,16 +16,14 @@
     <children>
         <!-- chipBorder is the frame, chipFace the inset face so focus draws a
              border instead of painting over the chip. -->
-        <Rectangle id="chipBorder" width="240" height="56">
-            <Rectangle id="chipFace" width="232" height="48" translation="[4, 4]" />
-            <Label
-                id="chipText"
-                width="224"
-                height="40"
-                translation="[8, 8]"
-                horizAlign="center"
-                vertAlign="middle"
-                font="font:MediumSystemFont" />
-        </Rectangle>
+        <Rectangle id="chipFace" width="232" height="48" translation="[4, 4]" />
+        <Label
+            id="chipText"
+            width="224"
+            height="40"
+            translation="[8, 8]"
+            horizAlign="center"
+            vertAlign="middle"
+            font="font:MediumSystemFont" />
     </children>
 </component>

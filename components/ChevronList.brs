@@ -24,6 +24,9 @@ sub init()
     m.chevronDown.width = 48
     m.chevronDown.height = 28
 
+    t = Theme()
+    m.rowlist.focusBitmapBlendColor = t.accent
+
     m.rowList.ObserveField("rowItemFocused", "onRowItemFocused")
     m.rowList.ObserveField("rowItemSelected", "onRowItemSelected")
     m.top.ObserveField("content", "onContent")
