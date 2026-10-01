@@ -28,7 +28,7 @@
 
     <children>
         <Rectangle id="streamBg" width="1920" height="1080" />
-        <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToCrop" />
+        <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToZoom" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
 
         <!-- Left: title + optional episode line + synopsis. No poster. -->
