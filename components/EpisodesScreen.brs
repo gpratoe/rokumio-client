@@ -31,7 +31,7 @@ sub init()
         aired: { fontUri: "font:SmallSystemFont", color: t.accentWarm }
         upcoming: { fontUri: "font:SmallSystemFont", color: t.accentInfo }
     }
-    m.epList.focusBitmapBlendColor = t.accent
+    m.epList.focusBitmapBlendColor = t.accentFocus
     m.epList.rowLabelOffset = [0,10]
 
     m.epList.ObserveField("rowItemFocused", "onItemFocused")

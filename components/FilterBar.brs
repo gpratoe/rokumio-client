@@ -11,8 +11,8 @@ sub init()
 
     t = Theme()
     m.menuBackdrop.color = t.dropdownBg
-    m.menu.focusBitmapBlendColor = t.accent
-    m.chips.focusBitmapBlendColor = t.accent
+    m.menu.focusBitmapBlendColor = t.accentFocus
+    m.chips.focusBitmapBlendColor = t.accentFocus
 
     m.chips.ObserveField("rowItemSelected", "onChipPressed")
     m.menu.ObserveField("rowItemSelected", "onMenuPressed")

@@ -11,7 +11,7 @@ sub init()
     t = Theme()
     m.top.FindNode("authTitle").color = t.accent
     m.top.FindNode("authSub").color = t.textSecondary
-    m.list.focusBitmapBlendColor = t.accent
+    m.list.focusBitmapBlendColor = t.accentFocus
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
     m.rows = []

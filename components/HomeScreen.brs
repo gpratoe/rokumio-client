@@ -35,7 +35,7 @@ sub init()
     m.homeSub.color = t.textSecondary
     m.top.FindNode("railBg").color = t.railTint
     m.catalog.rowLabelOffset = [0,10]
-    m.catalog.focusBitmapBlendColor = t.accent
+    m.catalog.focusBitmapBlendColor = t.accentFocus
 
     m.catalogRowsBuilt = false
     m.catalogRows = []

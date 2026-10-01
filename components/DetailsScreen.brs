@@ -35,7 +35,7 @@ sub init()
     m.detailName.color = t.textPrimary
     m.detailType.color = t.accent
     m.detailDesc.color = t.textSecondary
-    m.chipsRow.focusBitmapBlendColor = t.accent
+    m.chipsRow.focusBitmapBlendColor = t.accentFocus
 
     m.chipsRow.ObserveField("rowItemSelected", "onChipSelected")
 end sub
