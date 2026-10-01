@@ -39,6 +39,7 @@ function Theme() as object
             scrim: "0x00000099"
             progressTrack: "0x00000073"
             progressFill: "0x46E0A3FF"
+            glyphPlate: "0x000000A6"
             segmentIdle: "0x2A3530FF"
         }
     end if

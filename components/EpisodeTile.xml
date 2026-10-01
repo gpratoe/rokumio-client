@@ -24,9 +24,13 @@
             <Rectangle id="tileBg" width="320" height="180"/>
             <Poster id="poster" width="320" height="180"/>
             <Label id="titleText" width="296" height="164" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" />
-            <!-- Optional watched badge (40px check, top-right). Hidden until a
-                 screen passes itemContent.watched. -->
-            <Poster id="watchedBadge" width="40" height="40" translation="[272, 8]" visible="false" />
+            <!-- Optional watched badge (40px check on a translucent round
+                 plate, top-right) so the white glyph reads against any
+                 thumbnail. Hidden until a screen passes itemContent.watched. -->
+            <Group id="watchedBadgeGroup" translation="[266, 4]" visible="false">
+                <Rectangle id="watchedPlate" width="52" height="52" cornerRadius="26" />
+                <Poster id="watchedBadge" width="40" height="40" translation="[6, 6]" />
+            </Group>
         </Rectangle>
     </children>
 </component>

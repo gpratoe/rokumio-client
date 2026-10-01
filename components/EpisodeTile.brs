@@ -11,10 +11,13 @@ sub init()
     m.tileBg = m.top.FindNode("tileBg")
     m.tileBorder = m.top.FindNode("tileBorder")
     m.titleText = m.top.FindNode("titleText")
+    m.watchedBadgeGroup = m.top.FindNode("watchedBadgeGroup")
+    m.watchedPlate = m.top.FindNode("watchedPlate")
     m.watchedBadge = m.top.FindNode("watchedBadge")
 
     t = Theme()
     m.titleText.color = t.textPrimary
+    m.watchedPlate.color = t.glyphPlate
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
@@ -61,9 +64,9 @@ sub onItemContentChanged()
     m.titleText.text = m.top.itemContent.title
     if m.top.itemContent.watched = true
         m.watchedBadge.uri = "pkg:/images/eye.png"
-        m.watchedBadge.visible = true
+        m.watchedBadgeGroup.visible = true
     else
-        m.watchedBadge.visible = false
+        m.watchedBadgeGroup.visible = false
     end if
     UpdateFallback()
     UpdateLook()

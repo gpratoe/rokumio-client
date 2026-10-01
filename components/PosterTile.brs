@@ -19,12 +19,15 @@ sub init()
     m.loadSpinner = m.top.FindNode("loadSpinner")
     m.progressTrack = m.top.FindNode("progressTrack")
     m.progressFill = m.top.FindNode("progressFill")
+    m.watchedBadge = m.top.FindNode("watchedBadge")
+    m.watchedPlate = m.top.FindNode("watchedPlate")
     m.watchedGlyph = m.top.FindNode("watchedGlyph")
 
     t = Theme()
     m.titleText.color = t.textPrimary
     m.progressTrack.color = t.progressTrack
     m.progressFill.color = t.progressFill
+    m.watchedPlate.color = t.glyphPlate
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
@@ -105,9 +108,9 @@ sub UpdateOverlays()
     glyph = m.top.itemContent.watchedGlyph
     if glyph = "eye" or glyph = "clock"
         m.watchedGlyph.uri = "pkg:/images/" + glyph + ".png"
-        m.watchedGlyph.visible = true
+        m.watchedBadge.visible = true
     else
-        m.watchedGlyph.visible = false
+        m.watchedBadge.visible = false
     end if
 end sub
 
