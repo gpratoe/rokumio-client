@@ -14,7 +14,6 @@
 
 sub init()
     m.poster = m.top.FindNode("poster")
-    m.tileBorder = m.top.FindNode("tileBorder")
     m.titleText = m.top.FindNode("titleText")
     m.loadSpinner = m.top.FindNode("loadSpinner")
     m.progressTrack = m.top.FindNode("progressTrack")
@@ -42,11 +41,6 @@ end sub
 ' dimming (opacity 0.55) into a fresh row on another screen/media.
 sub UpdateLook()
     t = Theme()
-    if m.top.itemHasFocus
-        m.tileBorder.color = t.accentFocus
-    else
-        m.tileBorder.color = t.accentClear
-    end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub
 
