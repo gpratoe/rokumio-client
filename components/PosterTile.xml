@@ -36,13 +36,13 @@
             <Rectangle id="progressTrack" width="270" height="8" translation="[4, 370]" visible="false" />
             <Rectangle id="progressFill" width="270" height="8" translation="[4, 370]" visible="false" />
             <!-- Optional watched-state glyph (eye = done, clock = in
-                 progress) on a translucent round plate, ~60px top-right above
-                 the bar. The plate gives the white glyph something to sit on
+                 progress) on a translucent plate, ~60px top-right above the
+                 bar. The plate gives the white glyph something to sit on
                  whatever the artwork under it happens to be. The uri is set in
                  code from itemContent.watchedGlyph; hidden until a screen asks
                  for a badge. -->
             <Group id="watchedBadge" translation="[208, 8]" visible="false">
-                <Rectangle id="watchedPlate" width="60" height="60" cornerRadius="30" />
+                <Rectangle id="watchedPlate" width="60" height="60" />
                 <Poster id="watchedGlyph" width="48" height="48" translation="[6, 6]" />
             </Group>
         </Rectangle>
