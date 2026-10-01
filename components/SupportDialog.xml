@@ -21,7 +21,7 @@
         <StdDlgSideCardArea id="sideCard" horizAlign="right" width="450" extendToDialogEdge="false" showDivider="true" >
             <Label text="Scan the QR Code to buy me a coffee!"
                 horizAlign="center" wrap="true" width="450"
-                translation="[50, 0]" fontSize="36" />
+                translation="[50, 0]"/>
 
             <Poster
                 id="qrPoster"

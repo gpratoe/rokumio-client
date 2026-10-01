@@ -27,9 +27,7 @@
             <BusySpinner
                 id="loadSpinner"
                 translation="[113, 163]"
-                width="44"
-                height="44"
-                spinning="false" />
+                control="stop" />
             <!-- Optional continue-watching progress bar, painted on top of the
                  poster's bottom edge (6px strip spanning the tile). The dark
                  track is the full tile width; the mint fill's width is scaled

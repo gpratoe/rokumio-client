@@ -59,8 +59,7 @@
                 font="font:MediumSystemFont"
                 visible="false" />
             <MultiStyleLabel
-                id="pairStep1Line"
-                font="font:MediumSystemFont" />
+                id="pairStep1Line" />
             <Label
                 id="pairStep2"
                 text="2 - Log in to your Stremio account"

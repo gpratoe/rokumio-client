@@ -15,7 +15,6 @@ sub init()
 
     t = Theme()
     m.titleText.color = t.textPrimary
-    m.poster.failBackgroundColor = t.tileFace
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")

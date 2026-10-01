@@ -17,7 +17,6 @@ sub init()
     m.top.FindNode("searchTitle").color = t.accent
     m.top.FindNode("searchSub").color = t.textSecondary
     m.status.color = t.accent
-    m.results.rowLabelTextColor = t.textSecondary
     m.results.rowLabelOffset = [0,10]
     m.results.focusBitmapBlendColor = t.accent
 

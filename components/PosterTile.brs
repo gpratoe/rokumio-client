@@ -23,7 +23,6 @@ sub init()
 
     t = Theme()
     m.titleText.color = t.textPrimary
-    m.poster.failBackgroundColor = t.tileFace
     m.progressTrack.color = t.progressTrack
     m.progressFill.color = t.progressFill
 
@@ -63,7 +62,7 @@ sub onItemContentChanged()
     loading = m.top.itemContent.loadState = "loading"
     if loading
         m.loadSpinner.visible = true
-        m.loadSpinner.spinning = true
+        m.loadSpinner.control = "start"
         m.poster.uri = ""
         m.titleText.text = m.top.itemContent.title
         m.titleText.visible = false
@@ -76,7 +75,7 @@ sub onItemContentChanged()
     ' that reuses PosterTile is unaffected. A recycled tile must not carry a
     ' spinning-but-hidden spinner into its next cell, so always stop it when not
     ' loading.
-    m.loadSpinner.spinning = false
+    m.loadSpinner.control = "stop"
     m.loadSpinner.visible = false
 
     poster = m.top.itemContent.hdPosterUrl
