@@ -8,7 +8,6 @@
 ' closes the dialog through the standard close field.
 
 sub init()
-    m.top.palette = AppPalette()
     m.top.observeFieldScoped("buttonSelected", "onButtonSelected")
 end sub
 

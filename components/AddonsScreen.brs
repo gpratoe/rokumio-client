@@ -109,7 +109,6 @@ sub ShowAddDialog()
     ' Palette and the array-shaped message are the two things that differ from
     ' the legacy node. See the same block in SettingsScreen for why each one
     ' fails quietly rather than loudly.
-    dialog.palette = AppPalette()
     dialog.title = "Add add-on"
     dialog.message = ["Enter the add-on's manifest URL, e.g. https://example.com/manifest.json"]
     dialog.text = ""

@@ -149,7 +149,6 @@ sub EditServer()
     ' sets one — the Scene included — so without this the prompt comes up in
     ' Roku's default grey over a themed app. Same palette the exit and support
     ' dialogs already ask for.
-    dialog.palette = AppPalette()
     dialog.title = "Streaming server address"
     ' message is an ARRAY of strings on StandardKeyboardDialog. A bare string is
     ' a wrong-typed field set: discarded with a warning, leaving the prompt with

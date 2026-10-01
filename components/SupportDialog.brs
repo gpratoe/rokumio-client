@@ -8,7 +8,6 @@
 
 sub init()
     m.top.width = "1380"
-    m.top.palette = AppPalette()
     m.qrPoster = m.top.FindNode("qrPoster")
     m.top.observeFieldScoped("buttonSelected", "onButtonSelected")
 end sub

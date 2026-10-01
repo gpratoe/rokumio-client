@@ -8,6 +8,8 @@
 ' Zero business logic lives here. Everything else is in a screen or a store.
 sub init()
     m.stack = ScreenStack(m.top)
+    m.top.palette = AppPalette()
+
     m.homeScreen = m.top.FindNode("homeScreen")
     m.homeScreen.ObserveField("pushRequest", "onHomeAction")
 

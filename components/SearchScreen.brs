@@ -67,7 +67,6 @@ sub ShowSearchDialog()
     ' Palette and the array-shaped message are the two things that differ from
     ' the legacy node. See the same block in SettingsScreen for why each one
     ' fails quietly rather than loudly.
-    dialog.palette = AppPalette()
     dialog.title = "Search"
     dialog.message = ["Enter a movie or series title"]
     ' Starts empty. Each search is a fresh prompt rather than an edit of the last
