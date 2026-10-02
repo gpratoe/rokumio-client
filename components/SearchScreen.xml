@@ -51,7 +51,7 @@
             translation="[150, 230]"
             numRows="2"
             itemSize="[1780, 405]"
-            itemSpacing="[0, 38]"
+            itemSpacing="[0, 66]"
             rowItemSize="[[270, 405]]"
             rowItemSpacing="[[18, 0]]"
             showRowLabel="[true]"
