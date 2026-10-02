@@ -3,9 +3,14 @@
 ' MarkupGrid/RowList feed each item its ContentNode through the interface field
 ' `itemContent` and drive focus through `itemHasFocus`/`rowHasFocus` (they never
 ' touch `content` or `focused`). The artwork comes from the item's
-' hdPosterUrl (mapped from the addon meta's poster). Tiles without art — no
-' poster URL, or one that failed to load — fall back to the title text so the
-' tile is never a blank face. A tile with art shows the poster only.
+' hdPosterUrl (mapped from the addon meta's poster). A tile is either artwork or
+' the artless unit (a flat face plus the title), never a blend of the two:
+' ShowArtless/ShowPoster swap them as a unit on the poster's own loadStatus, so
+' the face stops rendering entirely once artwork paints instead of lingering
+' behind it where it still showed through on unfocused rows. No URL, a URL still
+' downloading, and a URL that failed all show the title. Poster.loadStatus is
+' none / loading / ready / failed — "ready" is the success value, and there is no
+' "loaded"; see the Poster field reference.
 '
 ' Two optional overlays ride on itemContent and render nothing until a screen
 ' provides them: `progress` (0..1) draws the bottom continue-watching bar, and
@@ -13,7 +18,9 @@
 ' set neither are pixel-identical to before.
 
 sub init()
+    m.artless = m.top.FindNode("artless")
     m.poster = m.top.FindNode("poster")
+    m.tileBg = m.top.FindNode("tileBg")
     m.titleText = m.top.FindNode("titleText")
     m.loadSpinner = m.top.FindNode("loadSpinner")
     m.progressTrack = m.top.FindNode("progressTrack")
@@ -23,6 +30,7 @@ sub init()
     m.watchedGlyph = m.top.FindNode("watchedGlyph")
 
     t = Theme()
+    m.tileBg.color = t.tileFace
     m.titleText.color = t.textPrimary
     m.progressTrack.color = t.progressTrack
     m.progressFill.color = t.progressFill
@@ -62,7 +70,7 @@ sub onItemContentChanged()
         m.loadSpinner.control = "start"
         m.poster.uri = ""
         m.titleText.text = m.top.itemContent.title
-        m.titleText.visible = false
+        ShowArtless()
         UpdateOverlays()
         UpdateLook()
         return
@@ -80,8 +88,33 @@ sub onItemContentChanged()
     m.poster.uri = poster
     m.titleText.text = m.top.itemContent.title
     UpdateOverlays()
-    UpdateFallback()
+    ' Forced rather than read back from loadStatus: the uri was just set, so
+    ' this cell is artless whatever the status field still reports from the
+    ' previous one.
+    ShowArtless()
+    ' A uri that resolves from cache can settle before the observer ever fires,
+    ' so re-read the status now instead of trusting the callback alone.
+    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed" then onPosterLoadStatus()
     UpdateLook()
+end sub
+
+sub onPosterLoadStatus()
+    if m.poster.loadStatus = "ready" then ShowPoster() else ShowArtless()
+end sub
+
+' The artless unit: the face plus the title. The poster is left alone on purpose
+' — it is visible from the start and paints nothing until it has a bitmap, so
+' there is nothing to hide here.
+sub ShowArtless()
+    m.artless.visible = true
+end sub
+
+' The artwork has painted, so the face must stop rendering rather than sit
+' behind the artwork where it still shows through on unfocused rows. Only this
+' group is hidden; hiding the poster itself would deadlock the load against the
+' gate waiting on it.
+sub ShowPoster()
+    m.artless.visible = false
 end sub
 
 ' The progress bar and watched glyph are driven entirely by optional
@@ -106,16 +139,4 @@ sub UpdateOverlays()
     else
         m.watchedBadge.visible = false
     end if
-end sub
-
-sub onPosterLoadStatus()
-    UpdateFallback()
-end sub
-
-' The fallback text is shown only while no workable art is available: no URL,
-' or a URL whose load errored out.
-sub UpdateFallback()
-    status = m.poster.loadStatus
-    hasArt = m.poster.uri <> invalid and m.poster.uri <> "" and status <> "failed"
-    m.titleText.visible = not hasArt
 end sub

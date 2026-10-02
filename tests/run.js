@@ -724,16 +724,28 @@ function checkMainSceneContract() {
     return ok;
 }
 
-// Poster.loadStatus is a string with four legal values: notLoaded, loading,
-// loaded, failed. Two guesses were shipped against it and both are invisible at
-// build time: "ready" on the pairing screen's SUCCESS path, so a QR that loaded
-// perfectly matched nothing and the column was never revealed; and "<> error"
-// in both tiles, which is always true, so a poster whose image failed was
-// treated as having art and its title fallback was suppressed. The literals are
-// strings, so nothing but a static check stands between a guess and the device.
+// Poster.loadStatus is a string with four legal values. Guesses against it are
+// invisible at build time and fail silently on the device, and three shipped:
+// "ready" on the pairing screen's SUCCESS path, "<> error" in both tiles (always
+// true, so a failed image was treated as having art), and then "loaded" in both
+// tiles plus the pairing screen — a string that is not documented at all, which
+// made every gate a no-op and left the artless face rendering behind its own
+// artwork on every row. The literals are plain strings, so nothing but a static
+// check stands between a guess and a device. That check used to carry the same
+// wrong list it was meant to police, so it agreed with the bug; the set is now
+// derived once, below, and the fallback contract asserts the tiles' gate matches.
+const POSTER_LOAD_STATUS = {
+    none: 'No loading or decoding taking place (the default)',
+    loading: 'Being fetched and decoded',
+    ready: 'Fetched and decoded, ready to be drawn',
+    failed: 'Could not be loaded',
+};
+const POSTER_LOAD_STATUS_LEGAL = Object.keys(POSTER_LOAD_STATUS);
+const POSTER_LOAD_STATUS_READY = 'ready';
+
 function checkPosterStatusContract() {
     const fs = require('fs');
-    const LEGAL = ['notLoaded', 'loading', 'loaded', 'failed'];
+    const LEGAL = POSTER_LOAD_STATUS_LEGAL;
     let ok = true;
     for (const name of fs.readdirSync(path.join(projectRoot, 'components')).filter(f => f.endsWith('.brs'))) {
         const src = fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8')
@@ -751,6 +763,242 @@ function checkPosterStatusContract() {
             }
         }
     }
+
+    // Police the police. The list above is the one thing standing between a
+    // mistyped literal and a device, so it must be exactly the documented set:
+    // admitting an invented value (it once admitted "loaded") silently restores
+    // the class of bug this whole check exists to catch.
+    const expected = ['none', 'loading', 'ready', 'failed'];
+    if (LEGAL.length !== expected.length || expected.some((v, i) => LEGAL[i] !== v)) {
+        console.error(`the Poster loadStatus allowlist is [${LEGAL.join(', ')}], but the documented set is [${expected.join(', ')}]. An allowlist that admits a value the OS never reports makes every comparison against it dead code`);
+        ok = false;
+    }
+
+    // A success path must be reachable. Every surface that hides something
+    // behind a poster needs the one value that means "a bitmap exists"; if that
+    // literal is wrong the branch never runs and the fallback never goes away.
+    // Both spellings count: the tiles compare m.poster.loadStatus directly, the
+    // pairing screen copies it into a local first.
+    for (const name of ['PosterTile.brs', 'EpisodeTile.brs', 'LinkStremioScreen.brs']) {
+        const src = fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8')
+            .split('\n').map(line => line.split("'")[0]).join('\n');
+        const held = [...new Set([...src.matchAll(/(\w+)\s*=\s*[\w.]+\.loadStatus\b/g)].map(m => m[1]))];
+        const subjects = ['loadStatus', ...held].join('|');
+        const compared = [...src.matchAll(new RegExp('\\b(?:' + subjects + ')\\s*(?:<>|<|>|=)\\s*"([^"]+)"', 'g'))].map(m => m[1]);
+        if (!compared.includes(POSTER_LOAD_STATUS_READY)) {
+            console.error(`${name} never tests a Poster loadStatus against "${POSTER_LOAD_STATUS_READY}" (${POSTER_LOAD_STATUS.ready}). Without the success value its load handling cannot tell artwork from no artwork, so the fallback renders over the image forever`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+// A tile is one of two states and only ever one at a time: the artless unit (a
+// face plus the title) or the poster. Four separate bugs came out of looser
+// versions of this rule, so pin the shape it settled on:
+//
+//   * The gate must be loadStatus = "ready" — the documented success value, and
+//     the only one that proves a bitmap exists. Treating any non-failed URL as
+//     art left the tile a blank face for the whole download, and this file once
+//     itself compared against a non-existent "loaded", which made the branch
+//     dead on every row: the face kept rendering behind its own artwork. The
+//     literal comes from POSTER_LOAD_STATUS_READY above, not a second guess.
+//   * The two states swap as a unit. Gating the *title* alone let it paint over
+//     artwork, and declaration order was the only thing hiding that — a recycled
+//     tile reports "loading" for the uri it is being handed while still holding
+//     the previous cell's bitmap, so the text went visible on top of it.
+//   * The status is re-read where the uri is set, because an image that resolves
+//     from cache can settle without the observer ever firing.
+//   * The poster must never be hidden. Declaring it visible="false" and
+//     unhiding it once the artwork arrived deadlocked the load against the gate
+//     waiting on it — loadStatus never arrived, so every tile stayed artless. A
+//     Poster with no bitmap paints nothing, so there is nothing to hide.
+//   * The face is never painted with an accent color. An accent-filled full-tile
+//     rect behind the poster showed as a solid mint slab on a focused tile whose
+//     art had not rendered yet — that is why the rect left the component.
+function checkPosterFallbackContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, 'components', f), 'utf8');
+    const body = (src, sig) => {
+        const start = src.indexOf(sig);
+        if (start === -1) return null;
+        const next = src.indexOf('\nsub ', start + 1);
+        return next === -1 ? src.slice(start) : src.slice(start, next);
+    };
+    let ok = true;
+
+    // Group is a RenderableNode and has NO width/height fields. Roku warns and
+    // discards them. A bogus extent on a container is what silently broke the
+    // LayoutGroup on LinkStremioScreen, so pin it repo-wide rather than only on
+    // the two tiles: this is a markup mistake anyone can repeat.
+    const dir = path.join(projectRoot, 'components');
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.xml'))) {
+        const xml = fs.readFileSync(path.join(dir, file), 'utf8');
+        for (const m of xml.matchAll(/<Group\b([^>]*)>/g)) {
+            if (/\bwidth="|\bheight="/.test(m[1])) {
+                const id = (/\bid="([^"]*)"/.exec(m[1]) || [, '(anonymous)'])[1];
+                console.error(`${file}: <Group id="${id}"> sets width/height, which Group does not have (it is a RenderableNode). Roku warns "Tried to set nonexistent field" and discards them, leaving the container with a bogus extent`);
+                ok = false;
+            }
+        }
+    }
+
+    for (const [name, expectW, expectH] of [['PosterTile', 270, 405], ['EpisodeTile', 320, 180]]) {
+        const xml = read(`${name}.xml`);
+        const src = read(`${name}.brs`).split('\n').map(line => line.split("'")[0]).join('\n');
+
+        const open = xml.indexOf('<Group id="artless"');
+        if (open === -1) {
+            console.error(`${name}.xml has no <Group id="artless"> — the face and the title must be one unit that hides as one`);
+            ok = false;
+            continue;
+        }
+        const close = xml.indexOf('</Group>', open);
+        const inner = close === -1 ? '' : xml.slice(open, close);
+        if (!inner.includes('id="tileBg"') || !inner.includes('id="titleText"')) {
+            console.error(`${name}.xml the artless group must contain both tileBg and titleText`);
+            ok = false;
+        }
+
+        const art = xml.match(/<Poster\s+id="poster"[^>]*>/);
+        if (art === null) {
+            console.error(`${name}.xml has no <Poster id="poster">`);
+            ok = false;
+        } else {
+            // Liveness, and the reason the deadlock happened: a Poster that is
+            // not visible never loads, so gating its visibility on loadStatus
+            // made the gate wait on the thing the gate prevented.
+            if (/visible="false"/.test(art[0])) {
+                console.error(`${name}.xml declares the poster visible="false" — it must be visible in order to load at all. Gating its visibility on loadStatus deadlocks the load against the gate waiting on it, leaving every tile artless`);
+                ok = false;
+            }
+            // Covers the node instead of letterboxing inside it. Artwork is 2:3
+            // and the tile is 2:3, so this crops nothing in practice; it is here
+            // so an off-ratio image can never leave an uncovered strip with the
+            // face showing through it.
+            if (!/loadDisplayMode="scaleToFill"/.test(art[0])) {
+                console.error(`${name}.xml poster does not set loadDisplayMode="scaleToFill" — scaleToFit letterboxes inside the node, so any image whose ratio is not exactly the tile's leaves an uncovered strip where the artless face shows through`);
+                ok = false;
+            }
+            const dim = art[0].match(/width="(\d+)" height="(\d+)"/);
+            if (dim === null || Number(dim[1]) !== expectW || Number(dim[2]) !== expectH) {
+                console.error(`${name}.xml poster is not ${expectW}x${expectH} — it must match the tileBg it covers`);
+                ok = false;
+            }
+        }
+
+        // The face must actually STOP rendering. Relying on the poster painting
+        // over it left the face visible behind artwork on unfocused rows.
+        for (const [sig, want] of [['sub ShowArtless()', 'true'], ['sub ShowPoster()', 'false']]) {
+            const b = body(src, sig);
+            if (b === null) {
+                console.error(`${name}.brs has no ${sig} — the artless unit must be hidden once artwork paints, or the face renders behind the poster`);
+                ok = false;
+                continue;
+            }
+            if (!new RegExp(`m\\.artless\\.visible\\s*=\\s*${want}\\b`).test(b)) {
+                console.error(`${name}.brs ${sig} must set m.artless.visible = ${want}`);
+                ok = false;
+            }
+        }
+
+        const handler = body(src, 'sub onPosterLoadStatus()');
+        if (handler === null) {
+            console.error(`${name}.brs has no onPosterLoadStatus() — nothing would ever hide the face once artwork lands`);
+            ok = false;
+        } else {
+            // One shared source of truth for the success value, and one whole
+            // shape rather than three loose greps: this file once hardcoded the
+            // wrong literal in two places and agreed with itself, and a handler
+            // that merely *mentions* the right status is not enough — "= ready
+            // and false" or an inverted branch keeps the face on screen while
+            // passing a substring check. The two states are mutually exclusive
+            // by construction: exactly one of them, decided by exactly that
+            // comparison.
+            const shape = new RegExp(
+                `if\\s+m\\.poster\\.loadStatus\\s*=\\s*"${POSTER_LOAD_STATUS_READY}"\\s+then\\s+ShowPoster\\(\\)\\s+else\\s+ShowArtless\\(\\)`,
+            );
+            if (!shape.test(handler)) {
+                console.error(`${name}.brs onPosterLoadStatus() must be exactly 'if m.poster.loadStatus = "${POSTER_LOAD_STATUS_READY}" then ShowPoster() else ShowArtless()'. "${POSTER_LOAD_STATUS_READY}" is the documented success value (${POSTER_LOAD_STATUS.ready}); the full set is ${POSTER_LOAD_STATUS_LEGAL.join(' / ')} and there is no "loaded". Anything that merely mentions the right status can still leave the face rendering over the artwork, so pin the whole conditional`);
+                ok = false;
+            }
+        }
+
+        if (!/m\.poster\.ObserveField\("loadStatus"/.test(src)) {
+            console.error(`${name}.brs never observes poster.loadStatus, so the face is never hidden when artwork lands`);
+            ok = false;
+        }
+        // A uri can resolve from cache and settle before the observer fires, so
+        // the status has to be re-read where the uri is set.
+        if (!new RegExp(`m\\.poster\\.loadStatus\\s*=\\s*"${POSTER_LOAD_STATUS_READY}"[\\s\\S]{0,80}onPosterLoadStatus\\(\\)`).test(src)) {
+            console.error(`${name}.brs does not re-read loadStatus after setting the uri — a cached image can settle before the observer fires, leaving the face showing over real artwork`);
+            ok = false;
+        }
+
+        // Never hide the poster from code either: same deadlock, one layer down.
+        if (/m\.poster\.visible\s*=/.test(src)) {
+            console.error(`${name}.brs assigns poster.visible — the poster must stay visible to load. Only the artless unit is toggled`);
+            ok = false;
+        }
+        if (/titleText\.visible/.test(src)) {
+            console.error(`${name}.brs sets titleText.visible directly — visibility belongs to the artless Group, which hides as one unit with the face`);
+            ok = false;
+        }
+
+        // Paint order still matters: the poster must be able to cover the face.
+        if (xml.indexOf('<Group id="artless"') > xml.indexOf('<Poster id="poster"')) {
+            console.error(`${name}.xml declares the poster BEFORE the artless group — the poster would paint under the face and title`);
+            ok = false;
+        }
+    }
+
+    const posterBrs = read('PosterTile.brs');
+    if (/\.tileBg\.color\s*=\s*t\.accent/.test(posterBrs)) {
+        console.error('PosterTile.brs paints tileBg with an accent color — an accent-filled full-tile rect sits behind the poster, so a focused tile showed a solid mint slab before its art rendered');
+        ok = false;
+    }
+    if (!/\.tileBg\.color\s*=\s*t\.tileFace\b/.test(posterBrs)) {
+        console.error('PosterTile.brs no longer colors tileBg from the theme tileFace — the artless face would be Roku\'s default white');
+        ok = false;
+    }
+    if (/<Rectangle id="tileBorder"/.test(read('EpisodeTile.xml'))) {
+        console.error('EpisodeTile.xml declares a tileBorder — it is the same size as the tileBg directly above it, so it has been completely invisible while costing a rect per cell');
+        ok = false;
+    }
+
+    // The grid slot must be at least as tall as the tile or RowList clips the
+    // poster's bottom edge.
+    for (const screen of ['HomeScreen', 'DiscoverScreen', 'LibraryScreen', 'SearchScreen']) {
+        const src = read(`${screen}.xml`);
+        // Several screens own more than one RowList (HomeScreen has the left nav
+        // rail), so locate the element that actually uses PosterTile instead of
+        // taking the first itemSize/rowItemSize pair in the file.
+        const lists = src.match(/<RowList\b(?:(?!\/>)[\s\S])*?\/>/g) || [];
+        const grid = lists.find(el => el.includes('itemComponentName="PosterTile"'));
+        if (grid === undefined) {
+            console.error(`${screen}.xml has no RowList using itemComponentName="PosterTile"`);
+            ok = false;
+            continue;
+        }
+        const slot = grid.match(/itemSize="\[1780, (\d+)\]"/);
+        const row = grid.match(/rowItemSize="\[\[(\d+), (\d+)\]\]"/);
+        if (slot === null || row === null) {
+            console.error(`${screen}.xml poster grid has no itemSize/rowItemSize pair`);
+            ok = false;
+            continue;
+        }
+        const slotH = Number(slot[1]);
+        const rh = Number(row[2]);
+        if (Number(row[1]) !== 270 || rh !== 405) {
+            console.error(`${screen}.xml rowItemSize is ${row[1]}x${rh}, expected 270x405`);
+            ok = false;
+        }
+        if (slotH < rh) {
+            console.error(`${screen}.xml itemSize height ${slotH} is shorter than the ${rh}px tile — RowList will clip the poster's bottom edge`);
+            ok = false;
+        }
+    }
+
     return ok;
 }
 
@@ -1688,6 +1936,86 @@ function checkLibraryScreenContract() {
     return ok;
 }
 
+// Two Poster/manifest facts that are invisible in review and produce a warning
+// on the device console instead of a build error.
+//
+// 1. loadDisplayMode is an option string with a CLOSED set of values. An
+//    unrecognised one is not ignored politely; it is undefined behaviour, and
+//    the Poster docs warn that an oversized texture "may fail to load". Four
+//    full-screen backgrounds shipped with loadDisplayMode="scaleToCrop" —
+//    which reads like a real mode and is not one of the five legal values
+//    (limitSize, noScale, scaleToFit, scaleToFill, scaleToZoom). Nothing in the
+//    diff looked wrong, and no test failed; the only symptom was a device-console
+//    warning nobody reads.
+//
+// 2. ui_resolutions must name EXACTLY ONE resolution. Declaring several makes
+//    Roku treat each as a distinct design target and draw it natively instead of
+//    scaling, so every coordinate has to be authored for each one. This app's
+//    layout is entirely hardcoded 1920x1080 (43 width/height attributes, and no
+//    GetUIResolution/GetDisplaySize anywhere), so the single-canvas
+//    auto-scaling in ui_resolutions=fhd is the ONLY thing making it display
+//    correctly on the 720p-UI devices that are most of the range. Adding "hd"
+//    renders those same 1920x1080 coordinates 1:1 on a 1280x720 canvas and every
+//    element comes out 1.5x oversized — a silent, total layout failure.
+//
+// Deliberately NOT checked: whether a Poster's bitmap is larger than the device's
+// UI resolution. That produces a real warning ("Loaded texture (1920 x 1080)
+// larger than the UI resolution (1280 x 720)") but the correct fix is a legal
+// non-noScale scaling option, NOT a smaller bitmap. Capping loadWidth/loadHeight
+// silences the identical warning while visibly degrading the artwork, which is
+// strictly worse. Nothing here should ever push toward downscaling.
+function checkPosterScalingContract() {
+    const fs = require('fs');
+    let ok = true;
+    const LEGAL = ['limitSize', 'noScale', 'scaleToFit', 'scaleToFill', 'scaleToZoom'];
+    const dir = path.join(projectRoot, 'components');
+
+    for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.xml'))) {
+        const xml = fs.readFileSync(path.join(dir, name), 'utf8');
+        for (const m of xml.matchAll(/<Poster\b([^>]*)>/g)) {
+            const mode = /\bloadDisplayMode="([^"]*)"/.exec(m[1]);
+            if (mode && !LEGAL.includes(mode[1])) {
+                const id = (/\bid="([^"]*)"/.exec(m[1]) || [, '(anonymous)'])[1];
+                console.error(`${name}: Poster "${id}" sets loadDisplayMode="${mode[1]}", which is not one of ${LEGAL.join(' / ')}. An unrecognised scaling option is undefined behaviour, and the Poster docs warn the image may then fail to load outright`);
+                ok = false;
+            }
+        }
+    }
+
+    // Single-canvas only, for the reason in the comment above.
+    const manifest = fs.readFileSync(path.join(projectRoot, 'manifest'), 'utf8');
+    const ui = /^ui_resolutions=(.*)$/m.exec(manifest);
+    if (!ui) {
+        console.error('manifest: no ui_resolutions. Roku then assumes the default sd,hd, which declares TWO design targets — and this app\'s layout is hardcoded 1920x1080. Set ui_resolutions=fhd explicitly');
+        ok = false;
+    } else {
+        const declared = ui[1].split(',').map(r => r.trim().toLowerCase()).filter(r => r);
+        if (declared.length !== 1) {
+            console.error(`manifest: ui_resolutions=${ui[1].trim()} declares ${declared.length} design targets (${declared.join(', ')}). Roku draws each natively rather than scaling, so all of this app's hardcoded 1920x1080 coordinates would render 1:1 on a 1280x720 UI and come out 1.5x oversized. Declare exactly one (fhd)`);
+            ok = false;
+        } else if (!['fhd', 'hd', 'sd'].includes(declared[0])) {
+            console.error(`manifest: ui_resolutions=${ui[1].trim()} — "${declared[0]}" is not one of fhd / hd / sd`);
+            ok = false;
+        }
+    }
+
+    // The single declared resolution is only safe while the layout agrees with
+    // it, so state the coupling instead of trusting it.
+    if (ui && /^\s*fhd\s*$/i.test(ui[1].trim())) {
+        for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.xml'))) {
+            const xml = fs.readFileSync(path.join(dir, name), 'utf8');
+            const brsPath = path.join(projectRoot, 'components', name.replace(/\.xml$/, '.brs'));
+            const brs = fs.existsSync(brsPath) ? fs.readFileSync(brsPath, 'utf8') : '';
+            if (/\bwidth="1920"/.test(xml) && /GetUIResolution|GetDisplaySize/.test(brs)) {
+                console.error(`${name}: mixes hardcoded 1920-width markup with GetUIResolution/GetDisplaySize. ui_resolutions=fhd is single-canvas, so resolution-adaptive code here would compute sizes for a canvas Roku never gives you — pick one approach`);
+                ok = false;
+            }
+        }
+    }
+
+    return ok;
+}
+
 // The theme migration moved every painted color into theme.reads in init()
 // plus script includes, because XML color attributes cannot call code. Two
 // failure modes would slip past the interpreter: a component calling
@@ -2175,7 +2503,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract()) {
         process.exit(1);
     }
 

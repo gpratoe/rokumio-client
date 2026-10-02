@@ -164,12 +164,13 @@ sub ShowQr(url as string)
     m.qrPoster.ObserveField("loadStatus", "onQrLoadStatus")
     ' A task that settled before this screen started observing will not fire the
     ' observer again, so read the current status too.
-    ' Poster.loadStatus is one of notLoaded / loading / loaded / failed. There is
-    ' no "ready" and no "error": this screen shipped testing for "ready" on the
-    ' success path, so a QR that loaded perfectly matched neither branch and the
-    ' poster was never even asked to paint.
+    ' Poster.loadStatus is none / loading / ready / failed, per the Poster field
+    ' reference. "ready" is the success value. This screen used to compare
+    ' against "loaded", which is not one of the documented values, so neither
+    ' branch ever matched and the QR only ever appeared because the poster is
+    ' visible by default — the failure path below had never actually run.
     status = m.qrPoster.loadStatus
-    if status = "loaded" or status = "failed" then onQrLoadStatus()
+    if status = "ready" or status = "failed" then onQrLoadStatus()
 end sub
 
 ' The QR image finished loading or failing — swap the poster for the fallback
@@ -181,7 +182,7 @@ sub onQrLoadStatus()
     if status = "failed"
         m.qrPoster.visible = false
         m.qrFallback.visible = true
-    else if status = "loaded"
+    else if status = "ready"
         m.qrPoster.visible = true
         m.qrFallback.visible = false
     end if
