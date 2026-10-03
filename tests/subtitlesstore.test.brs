@@ -64,6 +64,36 @@ sub Test_Subtitles_TypeIdMissing()
     Harness_Equal(result.error, "type or video id missing", "error names the missing type")
 end sub
 
+sub Test_Subtitles_IssuedFlag()
+    Harness_Suite("SubtitlesStore.Subtitles separates never-asked from asked-and-failed")
+    ' `issued` exists because `status` cannot carry both questions. Transport reports
+    ' a NEGATIVE status for every transport failure (its _execute reaches for
+    ' GetFailureReason precisely when status < 0), so a -1 sentinel for the
+    ' pre-request case was indistinguishable from a real one. These three pin the
+    ' distinction: the flag has to be false when we never made the request, and true
+    ' even when the transport came back with a negative code.
+    store = SubtitlesStore(ScriptedTransport([]))
+    result = store.Subtitles("", "movie", "tt0133093")
+    Harness_Equal(result.issued, false, "blank address was never issued")
+
+    store = SubtitlesStore(ScriptedTransport([]))
+    result = store.Subtitles("https://addon.example.com", "", "tt0133093")
+    Harness_Equal(result.issued, false, "blank type was never issued")
+
+    script = [{
+        method: "GET"
+        url: "https://addon.example.com/subtitles/movie/tt0133093.json"
+        ok: false
+        status: -7
+        json: invalid
+        error: "Failed to connect to addon.example.com port 443: Could not connect to server"
+    }]
+    store = SubtitlesStore(ScriptedTransport(script))
+    result = store.Subtitles("https://addon.example.com", "movie", "tt0133093")
+    Harness_Equal(result.issued, true, "a refused connection WAS issued")
+    Harness_Equal(result.status, -7, "the negative transport status is passed through, not normalised away")
+end sub
+
 sub Test_Subtitles_LocalePicksMatch()
     Harness_Suite("SubtitlesStore.PickTrack prefers the device locale language")
     store = SubtitlesStore(ScriptedTransport([]))

@@ -57,9 +57,10 @@
 ' to the Scene, which owns the one painted strip that shows it. An empty reason
 ' clears this screen's fault.
 '
-' BrightScript print cannot be that channel: Roku routes print to the Dev
-' Console, not to the device console this app is debugged from, so a print-based
-' diagnostic is invisible exactly where these bugs were found. Hence the strip.
+' BrightScript print is that channel, but it is not the only one: the strip is
+' also where a fault outlives the screen that produced it. A print line is only
+' read by whoever is attached to the console at the time; the strip stays on the
+' device, so it is what survives a bug found after the fact. Hence both.
 '
 ' The reason strings name the hop, because the three causes need different
 ' fixes: no host node reached this screen, the host did not answer, or the store

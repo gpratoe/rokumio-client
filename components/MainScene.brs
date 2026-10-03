@@ -42,11 +42,13 @@ sub init()
     m.episodesScreen.ObserveField("watchedChange", "onWatchedChange")
 
     ' StreamsScreen reports the player push after a stream is resolved; the
-    ' player itself never pushes — Back pops it. The player is NOT a static child
-    ' anymore: it is built from scratch per play and destroyed on pop (see
-    ' onStreamsAction), so this Scene only needs StreamsScreen here.
+    ' player itself never pushes — Back pops it. The player reports the positions
+    ' it reaches through watchStateUpdate, so the Scene watches that one field;
+    ' its own pushes are its business (it declines and the stack pops).
     m.streamsScreen = m.top.FindNode("streamsScreen")
     m.streamsScreen.ObserveField("pushRequest", "onStreamsAction")
+    m.playerScreen = m.top.FindNode("playerScreen")
+    m.playerScreen.ObserveField("watchStateUpdate", "onWatchStateUpdate")
 
     ' SettingsScreen, AddonsScreen and SearchScreen are content-focused (no
     ' pushes of their own; Search pushes Details like the others). SearchScreen
@@ -192,6 +194,7 @@ sub init()
     m.searchScreen.callFunc("SetStores", m.storeHost, m.top)
     m.discoverScreen.callFunc("SetStores", m.storeHost, m.top)
     m.libraryScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.playerScreen.callFunc("SetStores", m.storeHost, m.top)
 end sub
 
 ' A screen whose store bind came up short reports it here, and the Scene paints
@@ -315,44 +318,11 @@ sub onSettingsAction()
     end if
 end sub
 
-' StreamsScreen's action channel; same one-action routing. The player is special:
-' it is created here, per play, instead of being a declared child — a component
-' that survives pop keeps its Video node (and the audio it is decoding) alive on
-' this device no matter how thoroughly the node itself is torn down. Removing the
-' whole component from the tree and dropping the reference is what actually lets
-' SceneGraph destroy it. The stack teardown calls OnExit first, so the resume
-' position is saved before the component dies.
+' StreamsScreen's action channel; same one-action routing as every other screen.
 sub onStreamsAction()
     request = m.streamsScreen.pushRequest
     if request = invalid or request.screen = invalid then return
-    if request.screen <> "playerScreen" then
-        m.stack.push(request.screen, request.params)
-        return
-    end if
-
-    player = CreateObject("roSGNode", "PlayerScreen")
-    player.id = "playerScreen"
-    m.uiRoot.AppendChild(player)
-    player.callFunc("SetStores", m.storeHost, m.top)
-    player.ObserveField("closeRequest", "onPlayerClose")
-    player.ObserveField("watchStateUpdate", "onWatchStateUpdate")
-    m.activePlayer = player
-    m.stack.pushNode(player, request.params)
-end sub
-
-' The player requests its own pop once teardown is genuinely complete (a stop
-' can be asynchronous while buffering — the leave is held open until the OS
-' reports "stopped"). Only pop when it is still the top screen, so a stale
-' closeRequest can never pop anything else.
-sub onPlayerClose()
-    if m.stack.top() <> invalid and m.stack.top().id = "playerScreen"
-        m.stack.pop()
-    end if
-    ' Drop the node reference so SceneGraph can destroy the whole component (and
-    ' release the platform media player) — the last watch-state packet is safe
-    ' because the player also records it in the watch-state buffer, which lives
-    ' on past the player node.
-    m.activePlayer = invalid
+    m.stack.push(request.screen, request.params)
 end sub
 
 ' The player published a position update (pause or leave) through
@@ -361,7 +331,7 @@ end sub
 ' update (same video, same position — nothing new), and coalesce the rest so at
 ' most one WatchStatePushTask runs at a time. The packet is read from the shared
 ' watch-state buffer, not the player node, so the async callback can land even
-' after onPlayerClose released the component.
+' after the player has been popped.
 sub onWatchStateUpdate()
     if m.storeHost = invalid then return
     if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
@@ -942,6 +912,7 @@ sub onAddonSyncResult()
             end if
         end for
     end if
+    print "[addons] sync landed — registered " ; added ; ", already had " ; skipped ; ", rejected " ; failed
     ' Unconditional, and the condition is deliberately NOT "did this sync install
     ' anything new". A re-sync of an unchanged account installs nothing, so that
     ' predicate was false on every run after the first and Home kept the catalog
@@ -950,6 +921,12 @@ sub onAddonSyncResult()
     ' moved, so the common case costs one in-memory set comparison and no catalog
     ' walk. See HomeScreen.EnsureCurrentRows.
     if m.homeScreen <> invalid then m.homeScreen.callFunc("EnsureCurrentRows")
+    ' The player snapshotted its subtitle providers when it was entered, which on
+    ' a cold launch is before this loop has run. Same predicate, same reason: tell
+    ' whichever player is up to re-derive, so an account add-on that is only now in
+    ' the registry is still asked for captions. Inert when no play is in progress —
+    ' the player's own m.subtitleParams guard makes it return.
+    if m.playerScreen <> invalid then m.playerScreen.callFunc("EnsureSubtitleProviders")
     if failed > 0
         AddAddonSyncFault("addon sync: " + failed.ToStr() + " of " + result.descriptors.Count().ToStr() + " add-ons were rejected")
     end if
@@ -987,9 +964,9 @@ end sub
 ' stopped at is the diagnosis: "request-started" means the worker is genuinely
 ' still in the request or was killed mid-request; "entered-sync" or "init" means
 ' sync() effectively did not run; "threw" means the catch path ran but even its
-' error packet never landed. Written into the fault text rather than logged,
-' because print goes to the Dev Console, not to the telnet console a device owner
-' is actually reading.
+' error packet never landed. It is written into the fault text AND printed,
+' because the strip is what a fault found later is read from while the print is
+' what a fault being watched for is caught by.
 sub onAddonSyncFinished()
     task = m.addonSyncTask
     if task = invalid then return
@@ -1006,6 +983,7 @@ sub onAddonSyncFinished()
     AsyncTask_Reap(task, m.top, false)
 
     ClearAddonSyncFaults()
+    print "[addons] sync worker finished with NO result (stage: " ; stage ; ")"
     AddAddonSyncFault("addon sync: the worker finished with no result (stage: " + stage + ")")
 end sub
 
@@ -1248,6 +1226,7 @@ sub FinishImport()
     ' whatever it walked before. The fill happens off the UI thread behind the
     ' summary dialog; nothing to block on here.
     if m.homeScreen <> invalid then m.homeScreen.callFunc("EnsureCurrentRows")
+    if m.playerScreen <> invalid then m.playerScreen.callFunc("EnsureSubtitleProviders")
 
     m.import = invalid
 end sub

@@ -41,14 +41,29 @@ sub init()
     m.logoBack = m.top.FindNode("logoBack")
     m.logoFront = m.top.FindNode("logoFront")
     m.resolvePulse = m.top.FindNode("resolvePulse")
+    m.toastGroup = m.top.FindNode("toastGroup")
+    m.toastPlate = m.top.FindNode("toastPlate")
+    m.toastLabel = m.top.FindNode("toastLabel")
+    m.toastFade = m.top.FindNode("toastFade")
 
     t = Theme()
     m.top.FindNode("playerBg").color = t.playerBg
     m.status.color = t.textPrimary
+    if m.toastPlate <> invalid then m.toastPlate.color = t.scrim
+    if m.toastLabel <> invalid then m.toastLabel.color = t.textPrimary
 
-    m.stopWatchdog = m.top.FindNode("stopWatchdog")
-    m.stopWatchdog.ObserveField("fire", "onStopWatchdogFire")
-    m.pendingStop = false
+    ' Two of these, both observed here rather than armed at the call site: the
+    ' Animation is what actually fades the toast, the Timer is what guarantees it
+    ' is gone even if the Animation is a silent no-op on this OS.
+    m.toastHideTimer = m.top.FindNode("toastHideTimer")
+    if m.toastHideTimer <> invalid then m.toastHideTimer.ObserveField("fire", "onToastHideFire")
+
+    ' Observed here rather than in CreateVideo: this screen is a static child
+    ' that survives every pop, so CreateVideo runs once per play and observing
+    ' there would re-observe the same two fields on each one.
+    m.video.ObserveField("state", "onVideoStateChanged")
+    m.video.ObserveField("bufferingStatus", "onBufferingStatusChanged")
+
     m.resolveTask = invalid
     m.subtitleTask = invalid
     m.subtitleParams = invalid
@@ -57,6 +72,9 @@ sub init()
     m.subtitleTracks = invalid
     m.subtitleIndex = -1
     m.subtitleNodesApplied = false
+    m.subtitleAsked = ""
+    m.subtitleReached = 0
+    m.subtitleTried = 0
     m.subtitlePicker = SubtitlesStore(invalid)
 
     ' The tick boundary StartPlayback defers `control = "play"` across. Observed
@@ -171,6 +189,28 @@ sub onResolveResult()
         StopResolvePulse()
 
         if result = invalid or not result.ok or result.url = invalid or result.url = ""
+            ' A torrent resolve is not one request. StreamResolveTask probes the
+            ' stream up to six times with a four second gap and, on exhausting that,
+            ' records what happened in `result.probe`. That record used to be
+            ' dropped here: the screen only ever asked "did result.ok arrive", so a
+            ' source that answered six times and never produced a byte looked
+            ' identical to one that was never asked. This prints the probe's own
+            ' account — final HTTP status, how many attempts it took to give that
+            ' up, and the first error rather than only the last — so the trace says
+            ' which of the two happened.
+            '
+            ' Read only on this branch, where result is known valid: a field read on
+            ' invalid throws &h18 (the trap MainScene.onAddonSyncResult documents),
+            ' and a probe that gave up is always an unsuccessful resolve anyway, so
+            ' there is nothing to report in the success path.
+            if result <> invalid and result.probe <> invalid and result.probe.gaveUp = true then
+                probeStatus = -1
+                if result.probe.status <> invalid then probeStatus = result.probe.status
+                probeAttempts = 0
+                if result.probe.attempts <> invalid then probeAttempts = result.probe.attempts
+                print "[resolve] probe gave up after " ; probeAttempts ; " attempt(s) — status=" ; probeStatus ; " firstError=[" ; result.probe.firstError ; "] body=" ; Left(result.probe.body, 200)
+            end if
+
             m.status.text = "This source is poorly available or your internet connection is not fast enough."
             return
         end if
@@ -219,6 +259,103 @@ sub StartSubtitles(params as object)
     m.subtitleParams = { metaType: params.metaType, videoId: params.videoId }
     m.subtitleCandidates = SubtitlesAddresses(m.stores.addons.callFunc("AddonsGetAll"))
     m.subtitleCursor = 0
+    ' What this play's drain is able to report when it ends. `reached` counts the
+    ' providers that actually produced an HTTP response; `tried` counts every
+    ' provider asked. The pair is what separates "nobody has captions for this
+    ' title" (tried > 0, reached > 0) from "we could not get to anyone" (tried >
+    ' 0, reached = 0) — the two are the same empty list to the player and only one
+    ' of them is worth telling the user about.
+    m.subtitleReached = 0
+    m.subtitleTried = 0
+    print "[subs] enter " ; params.metaType ; "/" ; params.videoId ; " — registry has " ; AddonsCount() ; " addon(s), " ; m.subtitleCandidates.Count() ; " offer subtitles"
+    LaunchSubtitleFetch()
+end sub
+
+' Put a message over the video for two seconds and fade it out. Armed through
+' `control` rather than Start()/Stop(): an roSGNode Timer and Animation have no
+' such methods and calling one is a runtime &hf4 "Member function not found" —
+' the same trap playKick below documents.
+'
+' Opacity is forced back to 1 first because the fade leaves it at 0, and a second
+' toast inside that window would otherwise be born invisible.
+sub ShowToast(message as string)
+    if m.toastGroup = invalid or m.toastLabel = invalid then return
+    m.toastLabel.text = message
+    m.toastGroup.opacity = 1
+    m.toastGroup.visible = true
+    if m.toastFade <> invalid
+        m.toastFade.control = "stop"
+        m.toastFade.control = "start"
+    end if
+    if m.toastHideTimer <> invalid
+        m.toastHideTimer.control = "stop"
+        m.toastHideTimer.control = "start"
+    end if
+end sub
+
+sub onToastHideFire()
+    if m.toastGroup <> invalid
+        m.toastGroup.visible = false
+        m.toastGroup.opacity = 1
+    end if
+end sub
+
+' How many add-ons the registry holds right now. Reporting it separately from the
+' subtitle count is the whole diagnostic: a provider list of 0 against a registry
+' of 12 means the ranking found nothing to ask, and a registry of 0 means the
+' snapshot was taken before the sync registered anything (see
+' EnsureSubtitleProviders). Print, because this app is debugged over telnet.
+function AddonsCount() as integer
+    addons = m.stores.addons.callFunc("AddonsGetAll")
+    if addons = invalid then return 0
+    return addons.Count()
+end function
+
+' The provider list was snapshotted once, at OnEnter — during the stream resolve,
+' which is the busiest moment in the app's startup. When the add-on sync has not
+' registered its descriptors by then, SubtitlesAddresses returns an empty list,
+' LaunchSubtitleFetch has nothing to ask, MoreSubtitleCandidates is false, and
+' SubtitlesAddresses has no other caller: the caption search is over for that
+' play and the Options dialog lists nothing, permanently. Nothing had failed, so
+' nothing said so — it only ever showed on a stremio session whose subtitle
+' provider is an account add-on, because the built-in seeds cover every other case.
+'
+' MainScene calls this from the two points the registry actually moves (the sync
+' install loop, and a Rokumio import), next to its own HomeScreen call. Re-derive
+' the list and append whatever is new, so a provider that arrived mid-play is
+' asked then and its tracks land on the live node through the existing late-arrival
+' path (onSubtitleResult -> ApplySubtitleIndex(invalid)).
+'
+' Appending, not re-queuing: the cursor only moves forward, so pushing onto the
+' tail asks the new provider without re-asking one already tried, and AddressIn
+' keeps a provider that merely appears twice from being fetched twice. m.subtitleIndex
+' is untouched — onSubtitleResult picks the default once, on the first provider
+' that yields tracks, so a list that grows later cannot renumber a selection the
+' user has already made.
+sub EnsureSubtitleProviders()
+    if m.stores = invalid then return
+    ' Not a play, or the play is over: OnExit's CancelSubtitles blanked the
+    ' params, and there is nothing left to attach captions to.
+    if m.subtitleParams = invalid then return
+    ' One request in flight at a time. The drain resumes from onSubtitleResult
+    ' when this one settles, against a candidate list this call has already
+    ' extended, so there is nothing to do but wait.
+    if m.subtitleTask <> invalid then return
+
+    fresh = SubtitlesAddresses(m.stores.addons.callFunc("AddonsGetAll"))
+    added = 0
+    for each address in fresh
+        if not AddressIn(m.subtitleCandidates, address)
+            m.subtitleCandidates.Push(address)
+            added = added + 1
+            print "[subs] new provider joined the queue: " ; RedactUrl(address)
+        end if
+    next
+    if added = 0
+        print "[subs] registry moved but offered nothing new"
+        return
+    end if
+    print "[subs] resuming: " ; added ; " new provider(s), queue now " ; m.subtitleCandidates.Count() ; " at cursor " ; m.subtitleCursor
     LaunchSubtitleFetch()
 end sub
 
@@ -245,6 +382,9 @@ sub LaunchSubtitleFetch()
         LaunchSubtitleFetch()
         return
     end if
+    m.subtitleAsked = address
+    m.subtitleTried = m.subtitleTried + 1
+    print "[subs] asking #" ; m.subtitleCursor ; "/" ; m.subtitleCandidates.Count() ; " -> " ; RedactUrl(address)
 
     task = AsyncTask_Launch(m.top, "SubtitleLoaderTask", "onSubtitleResult", {
         addonAddress: address
@@ -357,7 +497,40 @@ sub onSubtitleResult()
     if result = invalid then return
     AsyncTask_Reap(task, m.top, false)
 
+    raw = 0
+    if result.subtitles <> invalid then raw = result.subtitles.Count()
+    have = 0
+    if m.subtitleTracks <> invalid then have = m.subtitleTracks.Count()
+
+    ' Every outcome is reported with its classification, its attempt count and the
+    ' transport's own error string. Those three together are what makes this
+    ' diagnosable from a telnet trace: `kind` says whether the request could have
+    ' been retried, `attempts` says whether it was, and `error` says what actually
+    ' happened at the socket — none of which reached the screen before, because the
+    ' only test on this branch was `not result.ok`, which cannot tell a timeout
+    ' from a 404 from a malformed body.
+    kind = "?"
+    if result.kind <> invalid then kind = result.kind
+    attempts = 0
+    if result.attempts <> invalid then attempts = result.attempts
+    reached = false
+    if result.reached = true then reached = true
+    status = -1
+    if result.status <> invalid then status = result.status
+    if result.reached = true then m.subtitleReached = m.subtitleReached + 1
+
     if not result.ok or result.subtitles = invalid or result.subtitles.Count() = 0
+        print "[subs] " ; RedactUrl(m.subtitleAsked) ; " gave nothing — kind=" ; kind ; " status=" ; status ; " attempts=" ; attempts ; " reached=" ; reached ; " raw=" ; raw ; " error=[" ; result.error ; "] merged so far: " ; have
+
+        ' An empty list from a provider that DID answer is not a fault and gets no
+        ' toast: the add-on was asked a well-formed question about this title and
+        ' reported it holds no captions, which is an answer, not a failure. Only a
+        ' provider that never got to answer is worth apologising for, and by this
+        ' point it has already been retried.
+        if not result.ok and (kind = "retry" or kind = "server") then
+            ShowToast("Could not fetch subtitles")
+        end if
+
         ' This provider had nothing to give. Another candidate still queued means
         ' the search is not over: choosing the wrong provider must not read the
         ' same as owning no subtitles at all, which is exactly what made an
@@ -369,6 +542,20 @@ sub onSubtitleResult()
             LaunchSubtitleFetch()
             return
         end if
+
+        print "[subs] drain exhausted after " ; m.subtitleTried ; " provider(s), " ; m.subtitleReached ; " reached, " ; have ; " track(s)"
+
+        ' The end of the drain is the only place a verdict is possible, and it needs
+        ' both counts: tried = 0 means this play never had a provider to ask at
+        ' all (nothing to apologise for — EnsureSubtitleProviders will resume the
+        ' search if the registry is still filling), and tried > 0 with reached = 0
+        ' means every provider was asked and not one of them could be reached. That
+        ' last case is worth a word on screen, because the list the Options dialog
+        ' shows is empty and otherwise says nothing about why.
+        if m.subtitleTried > 0 and m.subtitleReached = 0 then
+            ShowToast("Some subtitle add-ons could not be loaded")
+        end if
+
         if m.subtitleTracks = invalid or m.subtitleTracks.Count() = 0 then ClearSubtitles()
         return
     end if
@@ -393,12 +580,17 @@ sub onSubtitleResult()
     ' the live content node (and writes video.subtitleTrack) mid-play; the
     ' native Options dialog picks the tracks up from the updated SubtitleTracks.
     ApplySubtitleIndex(invalid)
+    picked = SelectedSubtitleTrack()
+    usable = "none"
+    if picked <> "" then usable = "ok"
+    print "[subs] LANDED " ; raw ; " from " ; RedactUrl(m.subtitleAsked) ; " on attempt " ; attempts ; "/3 — merged " ; have ; " + " ; raw ; " = " ; m.subtitleTracks.Count() ; ", picked index " ; m.subtitleIndex ; " (url " ; usable ; ")"
 end sub
 
 sub CancelSubtitles()
     m.subtitleCandidates = []
     m.subtitleCursor = 0
     m.subtitleParams = invalid
+    m.subtitleAsked = ""
     if m.subtitleTask <> invalid
         task = m.subtitleTask
         m.subtitleTask = invalid
@@ -580,10 +772,10 @@ sub CustomizeVideoNode()
     ' "finished"/"stopped" state handler, and direct streams and torrents fail
     ' identically because neither ever reached the player.
     '
-    ' Guarded the way globalCaptionMode and asyncStopSemantics already are below,
-    ' and additionally wrapped, because a trick-play bar tint is decoration and
-    ' decoration is not allowed to be the reason a video does not start. On a
-    ' Roku OS that does have trickPlayBar this changes nothing.
+    ' Guarded the way globalCaptionMode already is below, and additionally
+    ' wrapped, because a trick-play bar tint is decoration and decoration is not
+    ' allowed to be the reason a video does not start. On a Roku OS that does have
+    ' trickPlayBar this changes nothing.
     if not m.video.HasField("trickPlayBar") then return
     try
         m.video.trickPlayBar.filledBarBlendColor = Theme().accent
@@ -593,15 +785,13 @@ sub CustomizeVideoNode()
     end try
 end sub
 
-' The Video node is declared in XML so Roku owns its native UI lifecycle. Each
-' player screen is a fresh component instance; the node is reused only for the
-' single stream played by that screen and is cleared during teardown.
+' The Video node is declared in XML so Roku owns its native UI lifecycle. The
+' screen is a static child reused across plays, so the node outlives a pop and is
+' re-armed here on every play.
 sub CreateVideo()
     if m.video = invalid then return
     m.video.visible = true
     CustomizeVideoNode()
-    m.video.ObserveField("state", "onVideoStateChanged")
-    m.video.ObserveField("bufferingStatus", "onBufferingStatusChanged")
 end sub
 
 ' The resolved URL is the only thing that ever touches the Video node: build the
@@ -645,8 +835,7 @@ sub StartPlayback(url as string)
     ' Armed through `control`, not Start()/Stop(): an roSGNode Timer has no such
     ' methods and calling one is a runtime &hf4 "Member function not found",
     ' which is what the first version of this did — thrown inside StartPlayback,
-    ' so the player died on the one function that must never throw. Same as
-    ' stopWatchdog above, which has always been armed this way.
+    ' so the player died on the one function that must never throw.
     m.playArmed = true
     if m.playTimer <> invalid
         m.playTimer.control = "stop"
@@ -687,19 +876,6 @@ sub onVideoStateChanged()
     if m.video = invalid then return
     state = m.video.state
     if state = invalid then return
-    if m.pendingStop
-        ' Waiting on an asynchronous stop (see RequestStopAndWait): the player is
-        ' only released once the OS reports a terminal state — Roku runs the
-        ' media player outside the node, so tearing the node down mid-stop lets
-        ' the buffered stream start outputting audio anyway. "stopping" (OS 12.5+
-        ' while asyncStopSemantics is on) still counts as in-progress.
-        if state = "stopped" or state = "finished" or state = "error"
-            m.pendingStop = false
-            TeardownVideo()
-            FireCloseRequest()
-        end if
-        return
-    end if
     if state = "playing"
         m.hasPlayed = true
         m.status.text = ""
@@ -732,9 +908,6 @@ function OnKeyEvent(key as string, press as boolean) as boolean
         if key = "back" then return false
         return true
     end if
-    ' Mid-teardown: every key is swallowed until the player actually reports
-    ' "stopped" (see RequestStopAndWait) so nothing can interrupt the stop.
-    if m.pendingStop then return true
     return false
 end function
 
@@ -767,88 +940,69 @@ sub HideBuffering()
     if m.bufferingGroup <> invalid then m.bufferingGroup.visible = false
 end sub
 
-' Back records the position first (while the node can still report one), then
-' starts the teardown. When the player is mid-buffer the stop is asynchronous:
-' we swallow Back until the OS confirms "stopped" (or the watchdog gives up),
-' then the stack pops. Either way this never pops itself — closeRequest is how
-' the real pop is asked for, so the pop lands only after playback truly ended.
-' Before the stream resolves there is no video to save or stop: just let the
-' stack pop (the resolve task is cancelled by OnExit).
+' Back records the position (while the node can still report one) and declines,
+' so the stack pops. The stop itself is OnExit's business, which runs before the
+' screen is hidden.
 function OnBackPressed() as boolean
     if m.video = invalid then return false
     SavePosition()
-    return RequestStopAndWait()
+    return false
 end function
 
+' Leaving cancels the resolve, records where we got to, and resets the Video
+' node. Nothing is reaped: this screen and its node are static children of the
+' Scene and survive the pop, so the next play re-arms them in CreateVideo.
 function OnExit() as void
     CancelResolve()
     CancelSubtitles()
     SavePosition()
-    if not m.pendingStop then TeardownVideo()
+    ResetVideoNode()
 end function
 
-' Request the stop and tell the caller whether it must hold the screen open.
+' Leave the node as the next play expects to find it: stopped, and carrying
+' nothing of the play that just ended.
 '
-' A synchronous `control = "stop"` is dropped while the player is mid-async-op
-' (the buffering that follows a play command), and destroying the Video node /
-' whole component during that op does NOT stop the platform media player — it
-' keeps decoding, then starts outputting audio the moment the buffer fills. So
-' a leave is two-phase: ask for an asynchronous stop (asyncStopSemantics, the
-' documented OS 12.5+ field; sync stop by default), wait for the real "stopped"
-' state, and only then tear down. onVideoStateChanged completes the leave.
-function RequestStopAndWait() as boolean
-    if m.video = invalid then return false
-    state = m.video.state
-    if state = "stopped" or state = "finished" or state = "error"
-        TeardownVideo()
-        return false
-    end if
-    if m.video.HasField("asyncStopSemantics") and not m.video.asyncStopSemantics
-        m.video.asyncStopSemantics = true
-    end if
-    m.pendingStop = true
-    m.status.text = "Stopping…"
-    m.video.control = "stop"
-    if m.stopWatchdog <> invalid
-        m.stopWatchdog.control = "stop"
-        m.stopWatchdog.control = "start"
-    end if
-    return true
-end function
-
-' Last resort: the stop never landed (a stalled buffer, an old OS without
-' asyncStopSemantics). Mute + detach the stream before the teardown so whatever
-' survives the destroy cannot start playing audio, then leave anyway.
-sub onStopWatchdogFire()
-    if not m.pendingStop then return
-    if m.video <> invalid
-        if m.video.HasField("asyncStopSemantics") then m.video.asyncStopSemantics = true
-        m.video.mute = true
-        m.video.content = invalid
-    end if
-    m.pendingStop = false
-    TeardownVideo()
-    FireCloseRequest()
-end sub
-
-' Immediate teardown. Only runs once the player has actually stopped (or was
-' already terminal); destroying a live player session is exactly how the audio
-' leaked. Unobserve, detach the in-flight stream, remove the node and drop the
-' reference so the stack's whole-component destroy has nothing left to hold.
-sub TeardownVideo()
+' Blanking the content is the whole point. The node survives the pop, so whatever
+' is still on it is what the NEXT entry starts from — and the screen becomes
+' visible again before anything has been resolved, with the native chrome
+' (enableUI) painting content.title off whatever ContentNode is attached. That is
+' why the prebuffer showed the PREVIOUS title, correcting itself only once
+' StartPlayback replaced the content. Clear it here, on the way out, where the
+' screen is already hidden: ScreenStack.pop sets visible = false before it calls
+' OnExit, so this cannot flicker.
+'
+' Order matters twice over: SavePosition has already read position and duration
+' off the node by the time this runs, and the stop goes before the blank so the
+' node is not still holding a stream when we detach from it.
+sub ResetVideoNode()
     if m.video = invalid then return
-    m.video.UnobserveField("state")
-    m.video.UnobserveField("bufferingStatus")
     m.video.control = "stop"
     m.video.content = invalid
-    m.video.visible = false
+    ClearSubtitleTrack()
     HideBuffering()
+    ' The fade leaves toastGroup at opacity 0 with its Animation still counting.
+    ' Stopped and re-opened so the next play cannot come back to a label frozen
+    ' mid-fade, or worse, be born invisible because a previous toast already drove
+    ' the opacity down and this play's ShowToast lands before the timer clears it.
+    if m.toastFade <> invalid then m.toastFade.control = "stop"
+    if m.toastHideTimer <> invalid then m.toastHideTimer.control = "stop"
+    if m.toastGroup <> invalid
+        m.toastGroup.visible = false
+        m.toastGroup.opacity = 1
+    end if
 end sub
 
-' Ask MainScene to pop this screen. The pop runs OnExit (guarded, nothing left to
-' do) and tears the whole component out of the tree — the true release.
-sub FireCloseRequest()
-    m.top.closeRequest = { requested: true }
+' video.subtitleTrack is a write-only selector on the LIVE node, so unlike
+' SubtitleTracks (which lives on the ContentNode and goes with it) its value
+' outlives the play that set it. It is inert while the next play has no tracks at
+' all — the native dialog has nothing to list — but the one place it could bite
+' is a play that DOES get tracks: the stale name is not among them, so it
+' selects nothing at best. Cleared with the rest of the node so every play
+' starts at the platform default.
+sub ClearSubtitleTrack()
+    if m.video = invalid then return
+    if not m.video.HasField("subtitleTrack") then return
+    m.video.subtitleTrack = ""
 end sub
 
 sub BlurFocus()

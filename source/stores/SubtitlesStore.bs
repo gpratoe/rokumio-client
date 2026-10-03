@@ -11,6 +11,27 @@
 ' Stateless like CatalogStore/PlaybackStore: every call passes the addresses
 ' in, nothing is persisted here.
 
+' Strip an add-on address down to something safe to write to the console log.
+'
+' A stored add-on address routinely carries the user's credential in its query
+' string — Transport.EndpointUrl exists precisely to keep a "?token=..." intact
+' through request assembly — so printing one in full puts a live API key into the
+' device log, and from there into any log pasted into a bug report. Every trace in
+' this feature names the provider, so this is what they name it as.
+'
+' Declared at file scope, beside the store rather than inside it: both callers that
+' need it are components which already include this file (PlayerScreen.xml and
+' SubtitleLoaderTask.xml), so it resolves in their scope. Transport.bs redacts its
+' own URLs for the same reason and cannot be reached from a component — a
+' user-defined global resolves to invalid when invoked from another component's
+' code, which is why PercentEncode there is reached through the class.
+function RedactUrl(url as string) as string
+    if url = invalid then return ""
+    at = url.InStr("?")
+    if at > 0 then return url.Left(at - 1)
+    return url
+end function
+
 class SubtitlesStore
     transport as object
 
@@ -20,19 +41,50 @@ class SubtitlesStore
 
     ' GET {address}/subtitles/{type}/{videoId}.json — the caption candidates for
     ' a movie or episode. The response must carry a subtitles array.
+    '
+    ' The result carries `issued` alongside `status`, and the two together are what
+    ' let the caller tell "we never asked" from "we asked and it refused", which
+    ' call for opposite behaviour and cannot both be expressed by one number:
+    '
+    '   issued = false  rejected before any request — our own bad input. The next
+    '                   request would be byte-identical, so it is never retried.
+    '   issued = true, status < 0
+    '                   the transfer never completed: DNS failure, refused
+    '                   connection, TLS failure. Nothing was heard back, so asking
+    '                   again is worth it.
+    '   issued = true, status = 0
+    '                   handed to roUrlTransfer and never came back: timed out, or
+    '                   the transfer would not start. Also worth another go.
+    '   issued = true, 2xx
+    '                   it answered. ok is false past that point only if the body
+    '                   would not parse, which on a degraded link is as likely to be
+    '                   a truncated or gateway-wrapped response as anything else.
+    '   issued = true, 4xx  it answered "no". Asking again changes nothing.
+    '
+    ' `issued` used to be a `status = -1` sentinel for the pre-request case, and
+    ' that was unsound: Transport reports a NEGATIVE status for every transport
+    ' failure — see its _execute, which reaches for GetFailureReason precisely
+    ' when status < 0 — so -1 could not be told apart from a real error. A caller
+    ' keying on the sign of status then sent genuine connect failures down its
+    ' non-retryable path, and a refused connection never got a second try.
+    '
+    ' The error string alone cannot carry this either: Transport reports a timeout,
+    ' a connect failure, a malformed body and an HTTP 404 all as free text.
     function Subtitles(addonAddress as string, metaType as string, videoId as string) as object
-        result = { ok: false, subtitles: invalid, error: "" }
+        result = { ok: false, subtitles: invalid, error: "", status: 0, issued: false }
         if addonAddress = ""
             result.error = "no addon address"
             return result
         end if
-        if metaType = "" or videoId = ""
+        if metaType = "" or videoId = "" then
             result.error = "type or video id missing"
             return result
         end if
 
         url = m.transport.EndpointUrl(addonAddress, "/subtitles/" + metaType + "/" + videoId + ".json")
         response = m.transport.Get(url)
+        result.issued = true
+        result.status = response.status
         if not response.ok or response.json = invalid
             result.error = response.error
             return result
