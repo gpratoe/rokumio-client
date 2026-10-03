@@ -1582,6 +1582,143 @@ function checkAddonSyncTaskContract() {
 // The brs interpreter can drive HomeScreen's subs, but it cannot run a
 // HomeCatalogsTask worker, and the whole failure is about which predicate gates a
 // call site. So the invariant is pinned structurally.
+function checkTaskTeardownContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const body = (src, name) => {
+        const start = new RegExp(`^[ \\t]*(?:public\\s+|private\\s+|override\\s+)*(?:sub|function)\\s+${name}\\s*\\(`, 'm').exec(src);
+        if (!start) return null;
+        const rest = src.slice(start.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+(?:sub|function)\b/m);
+        return end === -1 ? rest : rest.slice(0, end + 1);
+    };
+
+    // AsyncTask.bs states the contract both screens below used to break: removing
+    // a running Task node frees the node WITHOUT killing the worker thread. So a
+    // teardown that is only a RemoveChild leaves a thread running that can still
+    // write its result into state the screen has already discarded.
+    //
+    // HomeScreen.RebuildRows did exactly that, unobserving the field and removing
+    // the node while HomeCatalogsTask could still be walking the registry. It is
+    // reached from a deep-link import, so the sequence is: a walk is in flight, an
+    // import lands, RebuildRows throws the grid away and starts a second walk, and
+    // the first one finishes and pushes its descriptors at the grid anyway — two
+    // workers interleaving rows into one live grid.
+    //
+    // It had to be STOP-then-remove, not merely AsyncTask_Reap(.., true): the
+    // reaper sends STOP to the task NODE, and the loop that reads that flag lives
+    // on the task's own worker thread. A bare RemoveChild never reaches either.
+    const home = code(read('components/HomeScreen.brs'));
+    const rebuild = body(home, 'RebuildRows');
+    if (!rebuild) {
+        err('HomeScreen.brs has no RebuildRows() — the add-on-import rebuild path cannot be checked at all');
+    } else {
+        const reap = body(rebuild, 'AsyncTask_Reap') || rebuild;
+        const stops = /(AsyncTask_Reap\s*\([^)]*,\s*[^,)]+,\s*true\s*\))|(task\.control\s*=\s*"STOP")/.test(reap);
+        const removes = /RemoveChild\s*\(/.test(reap);
+        if (!stops && removes) {
+            err('HomeScreen.brs RebuildRows() removes m.catalogTask without sending STOP first. Removing a running Task node does not kill its worker thread (AsyncTask.bs says so explicitly), so a catalog walk already in flight finishes and applies its rows to a grid that was just discarded and rebuilt — two workers interleaving descriptors into one grid. Reap with doStop = true, as AsyncTask.bs prescribes for a possibly-still-running task.');
+        }
+    }
+
+    // StreamsScreen is a static child that survives every pop, so CancelStreamsLoad
+    // runs on the way out of an episode whose batch may still be fetching. STOP
+    // does not reach an in-flight roUrlTransfer, so those workers keep their
+    // sockets open and keep fetching after the screen has disowned them.
+    //
+    // onStreamsLoaded therefore has to tell "the task I launched is reporting" from
+    // "an abandoned task of the same batch shape is reporting". providerIndex is
+    // unique only WITHIN a batch: once a new episode launches its own batch, an
+    // old worker whose index falls inside the new list would otherwise be
+    // accepted, consume a live task's slot, and push the PREVIOUS episode's
+    // streams into this episode's provider. The reporting node has to be the node
+    // still being waited on.
+    const streams = code(read('components/StreamsScreen.brs'));
+    const loaded = body(streams, 'onStreamsLoaded');
+    if (!loaded) {
+        err('StreamsScreen.brs has no onStreamsLoaded() — a cancelled batch cannot be distinguished from the live one without it');
+    } else {
+        const identity = /task\.loadToken\s*<>\s*m\.loadToken/.test(loaded);
+        const slot = /m\.loadTasks\[index\]\s*=\s*invalid/.test(loaded);
+        if (slot && !identity) {
+            err('StreamsScreen.brs onStreamsLoaded() clears m.loadTasks[index] on providerIndex alone. providerIndex is unique only within a batch, so a worker from a batch CancelStreamsLoad already STOPped can land here after the next episode has launched its own, take a live task\'s slot, and push the previous episode\'s streams into this one. Check the batch token first (`if m.loadToken = "" or task.loadToken <> m.loadToken then return`).');
+        }
+        // Neither of these node comparisons exists in BrightScript, and both were
+        // written here and rejected by the device before the token replaced them:
+        // `<>` between two roSGNodes is &h18 (Type Mismatch), and `.IsSame()` is
+        // &hf4 — the roSGNode reference lists ifAssociativeArray, ifSGNodeChildren,
+        // ifSGNodeField, ifSGNodeDict, ifSGNodeFocus, ifSGNodeBoundingRect and
+        // ifSGNodeHttpAgentAccess, and no identity member among them. No static
+        // check can catch either, because the brs interpreter has no node objects.
+        if (/m\.loadTasks\[index\]\s*<>\s*task/.test(loaded)) {
+            err('StreamsScreen.brs onStreamsLoaded() compares two roSGNodes with `<>`. BrightScript\'s comparison operators cannot be applied to node references — that is a runtime &h18 "Type Mismatch. Operator \\"<\\>" can\'t be applied to \\"roSGNode\\" and \\"roSGNode\\"" and it aborts the whole notification handler, so a provider that lands never renders. Compare the scalar loadToken instead.');
+        }
+        if (/m\.loadTasks\[index\]\s*\.\s*IsSame\s*\(/.test(loaded) || /\btask\s*\.\s*IsSame\s*\(/.test(loaded)) {
+            err('StreamsScreen.brs onStreamsLoaded() calls IsSame() on a node. roSGNode has no such member — the documented interfaces are ifAssociativeArray, ifSGNodeChildren, ifSGNodeField, ifSGNodeDict, ifSGNodeFocus, ifSGNodeBoundingRect and ifSGNodeHttpAgentAccess — so this is a runtime &hf4 "Member function not found" that kills the handler. Compare the scalar loadToken instead.');
+        }
+        if (identity && /m\.loadTasks\[index\]\s*=\s*invalid\s+then\s+return/.test(loaded) === false) {
+            err('StreamsScreen.brs onStreamsLoaded() never returns on an already-claimed `m.loadTasks[index] = invalid` slot. Without it a duplicate notification from the same provider re-applies its streams and decrements pendingCount a second time, so the count reaches zero early and the status line misreports while providers are still loading.');
+        }
+        // The token only separates batches if it is actually minted per batch and
+        // stamped onto every task. Either half missing silently disables it.
+        if (identity) {
+            const launch = /loadToken\s*:\s*m\.loadToken/.test(streams);
+            const mint = /m\.loadToken\s*=\s*m\.loadSeq\.ToStr\(\)/.test(streams);
+            if (!launch) {
+                err('StreamsScreen.brs LoadStreams() does not pass loadToken to AsyncTask_Launch — every task would carry the default "" from StreamsLoaderTask.xml, so the token in onStreamsLoaded compares equal for a stale batch and for the live one, which is exactly the collision it was added to prevent.');
+            }
+            if (!mint) {
+                err('StreamsScreen.brs never mints a fresh m.loadToken per batch (m.loadToken = m.loadSeq.ToStr()) — a token that does not change between passes lets two passes over the same episode accept each other\'s reports.');
+            }
+        }
+        // pendingCount is what OnEnter\'s same-episode guard reads to decide a
+        // batch is genuinely in flight. Every terminal path must decrement it or
+        // the count sticks above zero and the guard blocks a legitimate reload
+        // forever, leaving an episode\'s stream list permanently empty.
+        if (identity && slot) {
+            const tail = loaded.slice(loaded.indexOf('m.loadTasks[index] = invalid'));
+            const guard = /if\s+m\.providers\s*=\s*invalid\s+or\s+index\s*>=\s*m\.providers\.Count\(\)\s+then\s*\n\s*if\s+m\.pendingCount\s*>\s*0\s+then\s+m\.pendingCount\s*=\s*m\.pendingCount\s*-\s*1/.test(tail);
+            if (!guard) {
+                err('StreamsScreen.brs onStreamsLoaded() can return between claiming m.loadTasks[index] and writing into m.providers without decrementing m.pendingCount. OnEnter guards the same-episode reload on that count, so a stranded non-zero value makes the guard block every later visit and the list never fills. Count the task as landed on that path too.');
+            }
+        }
+    }
+
+    // The guard is only as good as the key it compares and the invalidation it
+    // relies on. CancelStreamsLoad must clear BOTH, or a cancelled batch stays
+    // "owned": pendingCount keeps its old value and loadKey keeps naming an
+    // episode whose tasks were just reaped, so OnEnter matches, skips the reload,
+    // and the list stays empty with the fetch that would fill it already cancelled.
+    const cancel = body(streams, 'CancelStreamsLoad');
+    if (cancel) {
+        if (/m\.loadKey\s*=\s*""/.test(cancel) === false) {
+            err('StreamsScreen.brs CancelStreamsLoad() does not clear m.loadKey — a reaped batch stays distinguishable from a live one, so OnEnter can treat a cancelled episode as still in flight and skip the reload that would refill the list');
+        }
+        if (/m\.pendingCount\s*=\s*0/.test(cancel) === false) {
+            err('StreamsScreen.brs CancelStreamsLoad() does not zero m.pendingCount — OnEnter reads that count to decide a batch is in flight, so a stale non-zero value makes it skip the reload and the stream list stays empty');
+        }
+    }
+
+    // The same-episode guard, and the reason it exists: OnEnter used to cancel
+    // and re-launch the whole provider batch on every entry, so re-entering an
+    // episode while its batch was still fetching sent a second identical request
+    // per add-on. Four copies of one manifest in a single device log is this.
+    const enter = body(streams, 'OnEnter');
+    if (enter) {
+        const guardAt = /EpisodeKey\(params\)\s*=\s*m\.loadKey/.exec(enter);
+        const cancelAt = /CancelStreamsLoad\(\)/.exec(enter);
+        if (guardAt && cancelAt && guardAt.index > cancelAt.index) {
+            err('StreamsScreen.brs OnEnter() compares EpisodeKey only AFTER CancelStreamsLoad() — by then m.loadKey and m.pendingCount have been cleared by the cancel, so the guard can never match and every entry re-fans out the whole batch again');
+        }
+    }
+
+    return ok;
+}
+
 function checkHomeCatalogStalenessContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
@@ -2548,7 +2685,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract()) {
         process.exit(1);
     }
 
