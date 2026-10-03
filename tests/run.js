@@ -244,10 +244,10 @@ function checkScreenContract() {
 // The interpreter models one flat scope and cannot catch any of this, so pin it
 // statically — and pin the reporting, too: every way the hand-off fails looks
 // the same from outside (empty grid, "0 add-ons", no crash, nothing in the log),
-// so SetStores has to name the failure on screen. `print` cannot do that job:
-// Roku routes BrightScript print to the Dev Console, not to the device console
-// the app is debugged from, which is how a broken build looked like a rendering
-// bug for two rounds.
+// so SetStores has to name the failure on screen. `print` cannot do that job, not
+    // because it is invisible to an engineering session but because it is not
+    // painting anything: it only reaches whoever is attached to the console at the
+    // time, and by the time a bug is investigated that session is long gone.
 function checkStoreHandoffContract() {
     const fs = require('fs');
     let ok = true;
@@ -459,10 +459,27 @@ function checkStoreHandoffContract() {
         if (/CreateObject\(\s*"roGlobal"/i.test(src) || /GetGlobalAA\(\)/.test(src)) {
             err(`${name} reaches for a global singleton (roGlobal / GetGlobalAA) — neither is shared across components on this device; use the StoreHost node`);
         }
-        if (/^\s*print\s/m.test(src)) {
-            err(`${name} uses print as a diagnostic — Roku routes BrightScript print to the Dev Console, not to the device console, so it is invisible where these bugs were debugged; make the failure visible in the UI instead`);
-        }
     }
+
+    // --- print is a tracing tool here, not a reporting channel ----------------
+    // There used to be a blanket ban on `print` in every component, on the stated
+    // grounds that "Roku routes BrightScript print to the Dev Console, not to the
+    // device console". That premise is wrong: telnet 8085 IS the device console
+    // log, so a print is read live by whoever has an engineering session
+    // attached — which is exactly how the [subs]/[addons]/[resolve] traces were
+    // read to diagnose the caption failures. Screen.brs says as much in its own
+    // header, and a lint that contradicts the file it guards is worse than no
+    // lint, because it teaches you to distrust the comment.
+    //
+    // What the ban was really proxying — do not use print INSTEAD OF painting a
+    // fault — is already pinned, and better, by the checks on SetStores above
+    // (probe the host, report the fault) and on the strip below (declared, built
+    // in init, attached, written through its own fields, sets m.faultText.text).
+    // Those say what a short bind has to produce; a print cannot produce any of
+    // it, so banning print never added coverage — it only cost us the traces.
+    //
+    // print stays legal in components/*.brs. Following a worker across a task
+    // boundary, or a three-state status down a retry loop, is what it is for.
     // The abandoned carrier, in any file. The host included: a StoreHost that
     // published a facade would be the same split-brain one layer down.
     for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.brs'))) {
