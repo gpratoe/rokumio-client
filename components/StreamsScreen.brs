@@ -54,6 +54,9 @@ sub init()
 
     m.streams = []
     m.loadTasks = invalid
+    m.loadKey = ""
+    m.loadSeq = 0
+    m.loadToken = ""
     m.providers = invalid
     m.providersTotal = 0
     m.pendingCount = 0
@@ -67,6 +70,23 @@ function OnEnter(params as object) as void
     ' Re-entry after the player pops: params is invalid and the Group was given
     ' focus by the stack. The stream list must take it back.
     if params = invalid
+        RestoreFocus()
+        return
+    end if
+
+    ' Same episode, batch still in flight: let it finish instead of restarting
+    ' it. This screen is not reaped between visits, and StopStreamsLoad below
+    ' would re-fetch every provider from scratch — but STOP does not interrupt an
+    ' roUrlTransfer, so the batch being abandoned keeps its sockets open and
+    ' keeps fetching after this screen has forgotten it. The cost is not a wrong
+    ' list, it is a second identical request per add-on: four copies of the same
+    ' torrentio manifest inside one device log is exactly this.
+    '
+    ' m.loadTasks is emptied as providers land (see onStreamsLoaded), so this
+    ' only ever holds while there is genuinely something in flight to wait for.
+    ' A different episode, or a revisit to a batch that already reported in, falls
+    ' through and rebuilds as before.
+    if m.pendingCount > 0 and m.loadKey <> "" and EpisodeKey(params) = m.loadKey
         RestoreFocus()
         return
     end if
@@ -164,6 +184,16 @@ sub LoadStreams(params as object)
     m.pendingCount = providers.Count()
     m.loadError = ""
     m.loadTasks = []
+    m.loadKey = EpisodeKey(params)
+    ' A token per batch, not per episode. Two passes over the SAME episode (the
+    ' user backing out and re-entering) must not be able to accept each other's
+    ' reports, so the token cannot be the key — it counts passes instead.
+    ' Monotonic rather than a random or blank-able value: only this screen
+    ' writes it, and a task can outlive a hundred navigations, so the value has
+    ' to keep differing for as long as the component lives. A counter toStr()'d
+    ' is the cheapest thing that cannot repeat.
+    m.loadSeq = m.loadSeq + 1
+    m.loadToken = m.loadSeq.ToStr()
 
     for i = 0 to providers.Count() - 1
         task = AsyncTask_Launch(m.top, "StreamsLoaderTask", "onStreamsLoaded", {
@@ -172,6 +202,7 @@ sub LoadStreams(params as object)
             addonAddress: providers[i].address
             providerIndex: i
             providerName: providers[i].name
+            loadToken: m.loadToken
         }, "streamsLoader" + i.ToStr())
         m.loadTasks.Push(task)
     end for
@@ -188,11 +219,38 @@ sub onStreamsLoaded(event as object)
     if m.loadTasks = invalid then return
     task = event.GetRoSGNode()
     if task = invalid then return
+    ' Which batch this report belongs to, before anything else. A cancelled batch
+    ' cannot be interrupted mid-transfer — STOP does not reach an roUrlTransfer —
+    ' so its workers can still report in after a later episode has launched a new
+    ' batch, and providerIndex alone cannot tell the two apart: the index is only
+    ' unique WITHIN a batch, so an old worker's index can land squarely inside the
+    ' new list. Accepted blindly, it would take a live task's slot, push the
+    ' previous episode's streams into this episode's provider, and never decrement
+    ' pendingCount.
+    '
+    ' Compared as a scalar, not as nodes. roSGNode offers no identity test — the
+    ' reference lists ifAssociativeArray, ifSGNodeChildren, ifSGNodeField,
+    ' ifSGNodeDict, ifSGNodeFocus, ifSGNodeBoundingRect and
+    ' ifSGNodeHttpAgentAccess, with no IsSame, and `m.loadTasks[index] <> task`
+    ' between two nodes is a runtime &h18 Type Mismatch. The device rejected both
+    ' attempts at this comparison before the token was introduced. Stamping the
+    ' batch onto each task at launch (see loadToken) is the way that is actually
+    ' expressible.
+    if m.loadToken = "" or task.loadToken <> m.loadToken then return
     index = task.providerIndex
     if index < 0 or index >= m.loadTasks.Count() then return
+    ' Already claimed by whichever task actually owned this slot: a provider
+    ' reports once, and a duplicate notification for it has nothing to add. This
+    ' also has to precede m.loadTasks[index] = invalid, because an empty slot is
+    ' what tells a repeat apart from a first arrival.
     if m.loadTasks[index] = invalid then return
     m.loadTasks[index] = invalid
-    if m.providers = invalid or index >= m.providers.Count() then return
+    if m.providers = invalid or index >= m.providers.Count() then
+        ' Counted as landed above, so the count stays honest even though there is
+        ' no longer a provider slot to write into.
+        if m.pendingCount > 0 then m.pendingCount = m.pendingCount - 1
+        return
+    end if
 
     result = task.result
     provider = m.providers[index]
@@ -327,6 +385,18 @@ sub CancelStreamsLoad()
         end for
     end if
     m.loadTasks = invalid
+    ' Cancelling disowns the batch. Without this, pendingCount keeps its old value
+    ' and loadKey keeps naming an episode whose tasks have just been reaped, so
+    ' OnEnter's same-episode guard would match it and skip the reload — leaving the
+    ' list permanently empty, because the fetch that would fill it was the one
+    ' just cancelled. Guard on "a batch this screen still owns", not on the last
+    ' key it happened to write.
+    m.pendingCount = 0
+    m.loadKey = ""
+    ' The token is NOT cleared. Clearing it would make every abandoned worker
+    ' match the next batch's empty token, which is the collision this token
+    ' exists to prevent. LoadStreams mints the next one instead.
+    m.loadToken = ""
 end sub
 
 ' Series opened straight from Details carry no episode name/overview in their
@@ -593,6 +663,38 @@ end sub
 function ParamString(value as dynamic) as string
     if value = invalid then return ""
     return value.ToStr()
+end function
+
+' Identity of the episode this list is being built for, as one comparable
+' string. metaType/metaId plus videoId is the play; season and episode pin down
+' which one of a series, and addonAddress scopes it to the add-on the list was
+' reached through, so the same title offered by two providers is two lists and
+' must not be mistaken for a revisit.
+'
+' Ordinals go through Int() in a try, because a series opened from a deep link
+' can carry them as strings ("3") and Int("3") is the only thing that compares
+' equal to the integer the Episodes screen passed — without that, a revisit with
+' "3" where the first visit had 3 reads as a different episode and rebuilds the
+' list every time.
+function EpisodeKey(params as object) as string
+    if params = invalid then return ""
+    season = 0
+    if params.season <> invalid
+        try
+            season = Int(params.season)
+        catch notAnOrdinal
+            season = 0
+        end try
+    end if
+    episode = 0
+    if params.episode <> invalid
+        try
+            episode = Int(params.episode)
+        catch notAnOrdinal
+            episode = 0
+        end try
+    end if
+    return ParamString(params.metaType) + "|" + ParamString(params.metaId) + "|" + ParamString(params.videoId) + "|" + season.toStr() + "|" + episode.toStr() + "|" + ParamString(params.addonAddress)
 end function
 
 sub RestoreFocus()

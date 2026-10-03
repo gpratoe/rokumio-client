@@ -215,8 +215,18 @@ end sub
 ' catalogRowsBuilt / catalogTask) keep later OnEnter visits consistent.
 function RebuildRows() as void
     if m.catalogTask <> invalid
-        m.catalogTask.UnobserveField("result")
-        m.top.RemoveChild(m.catalogTask)
+        ' STOP, and not a bare RemoveChild. The walk is a Task on its own thread,
+        ' so removing a running Task node frees the node WITHOUT killing the
+        ' worker — the trap AsyncTask.bs opens by spelling out. This walk can
+        ' still be fetching when a deep-link import calls RebuildRows, so
+        ' unobserved it runs to completion and lands its descriptors through
+        ' onCatalogState anyway: two walks interleaving rows into a grid that has
+        ' already been thrown away and rebuilt, with StartCatalogLoad below
+        ' having launched a third. Reap with doStop = true, as AsyncTask.bs
+        ' prescribes for a possibly-still-running task, and let the helper do the
+        ' unobserving too. (FinishCatalogLoad reaps with false on purpose — by
+        ' then that task has already reported in.)
+        AsyncTask_Reap(m.catalogTask, m.top, true)
         m.catalogTask = invalid
     end if
     m.catalogRows = []
