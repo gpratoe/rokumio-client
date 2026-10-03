@@ -181,6 +181,34 @@ function checkScreenRuntimeHazards() {
                 ok = false;
             }
         }
+
+        // PlayerScreen is a STATIC child of MainScene, so its nodes outlive a
+        // pop and every piece of per-play UI state has to be swept on the way
+        // out by hand. playerStatus was the one that got missed: the only place
+        // that cleared m.status.text was onVideoStateChanged's "playing" branch,
+        // which a source that never resolves never reaches — so a dead stream's
+        // "poorly available" message survived into the next play and sat there
+        // for the whole resolve. ResetVideoNode already sweeps content, the
+        // subtitle track and the toast nodes for exactly this reason.
+        if (file === 'PlayerScreen.brs') {
+            const reset = code.match(/sub\s+ResetVideoNode\s*\(\s*\)([\s\S]*?)\nend\s+sub/);
+            if (!reset) {
+                console.error('PlayerScreen.brs has no ResetVideoNode() — OnExit must reset the reused Video node somewhere, and it cannot also be clearing playerStatus there');
+                ok = false;
+            } else if (!/m\.status\.text\s*=\s*""/.test(reset[1])) {
+                console.error('PlayerScreen.brs ResetVideoNode() never clears m.status.text — the status line is a static node, so a stream that failed to resolve leaves its message on screen through the next play. Clear it alongside content and the subtitle track.');
+                ok = false;
+            }
+            // The same leak one step earlier, for a play that is entered
+            // directly. OnExit does not run on the very first play, so the
+            // invariant "a play never opens showing the last one's verdict"
+            // needs the clear on both sides of the transition.
+            const enter = code.match(/function\s+OnEnter\s*\([^)]*\)([\s\S]*?)\nend\s+function/);
+            if (enter && !/m\.status\.text\s*=\s*""/.test(enter[1])) {
+                console.error('PlayerScreen.brs OnEnter() never clears m.status.text — a stream that resolves while the node still holds the previous play\'s error will show that error until "playing" arrives. Clear it when the play starts, not only when it succeeds.');
+                ok = false;
+            }
+        }
     }
     return ok;
 }

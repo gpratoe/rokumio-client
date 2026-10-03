@@ -90,6 +90,14 @@ function OnEnter(params as object) as void
     m.playParams = params
     m.saved = false
     m.hasPlayed = false
+    ' The status line is cleared here, not left to the first onVideoStateChanged.
+    ' "playing" is the only branch that clears it (see below), and a stream that
+    ' cannot resolve never reaches it — so without this, a dead source's message
+    ' outlives the pop and is still on screen for the WHOLE of the next play's
+    ' resolve, which for a torrent is up to the long timeout. ResetVideoNode
+    ' clears it too; this is the belt to that braces, since a play entered
+    ' without a preceding OnExit (the very first one) still starts clean.
+    m.status.text = ""
 
     ' The pre-buffer pulse (logo beating transparent to solid, Stremio-style)
     ' only has something to show when a logo URL is available; otherwise the
@@ -975,6 +983,20 @@ end function
 ' off the node by the time this runs, and the stop goes before the blank so the
 ' node is not still holding a stream when we detach from it.
 sub ResetVideoNode()
+    ' Same cross-play leak the toast nodes below are swept for: playerStatus is a
+    ' static child too, and onVideoStateChanged only ever blanks it on "playing".
+    ' A source that failed to resolve — or a video that reached "error" — leaves
+    ' its message behind, so the next entry would open already showing the last
+    ' play's verdict while the new resolve is still running. The screen is
+    ' already hidden here (ScreenStack.pop sets visible = false before OnExit),
+    ' so clearing it cannot flicker.
+    '
+    ' Before the m.video guard, not after it: this is a Label, so it exists
+    ' whether or not the Video node did, and a label left holding the previous
+    ' play's verdict is exactly the bug. A missing Video would fail the play
+    ' anyway — that is onVideoStateChanged's "The player could not start." — but
+    ' it must not also inherit stale text on the way there.
+    m.status.text = ""
     if m.video = invalid then return
     m.video.control = "stop"
     m.video.content = invalid
