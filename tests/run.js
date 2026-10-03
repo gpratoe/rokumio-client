@@ -2146,6 +2146,136 @@ function checkLibraryScreenContract() {
 // non-noScale scaling option, NOT a smaller bitmap. Capping loadWidth/loadHeight
 // silences the identical warning while visibly degrading the artwork, which is
 // strictly worse. Nothing here should ever push toward downscaling.
+// The companion-app QR on AddonsScreen. Three things are invisible until someone
+// looks at the TV, which is exactly why they are pinned here:
+//   1. The Poster's uri must name a file that exists. A typo'd or missing pkg path
+//      simply paints nothing — the same silent failure that made the QR vanish on
+//      LinkStremioScreen.
+//   2. loadSync must be set. It is a bundled image with no network to wait on, so
+//      there is no reason to render a frame with a hole in it.
+//   3. The image must still decode to the URL the panel copy claims it offers.
+//      The encoder in scripts/gen-companion-qr.js is a hand-rolled QR
+//      implementation, and a QR that looks right but will not scan is worse than
+//      none at all — the version/EC table is easy to get subtly wrong in a way
+//      that renders plausibly. Rather than re-implement a decoder here, the
+//      encoder round-trips through a reference implementation when one is
+//      available (see verify-companion-qr.js), so this check covers what is
+//      cheaply checkable and points at the rest.
+function checkCompanionQrContract() {
+    const fs = require('fs');
+    let ok = true;
+    const dir = path.join(projectRoot, 'components');
+    const xml = fs.readFileSync(path.join(dir, 'AddonsScreen.xml'), 'utf8');
+
+    const posters = [...xml.matchAll(/<Poster\b([^>]*)>/g)];
+    if (posters.length === 0) {
+        console.error('AddonsScreen.xml: no <Poster /> — the companion-app QR is missing entirely');
+        return false;
+    }
+    for (const m of posters) {
+        const attrs = m[1];
+        const id = (/\bid="([^"]*)"/.exec(attrs) || [, '(anonymous)'])[1];
+        const uri = /\buri="([^"]*)"/.exec(attrs);
+        if (!uri || !uri[1].trim()) {
+            console.error(`AddonsScreen.xml: Poster "${id}" has no uri — it would paint nothing`);
+            ok = false;
+            continue;
+        }
+        if (!/\bpkg:\/images\//.test(uri[1])) {
+            console.error(`AddonsScreen.xml: Poster "${id}" uri is not a bundled pkg:/images/ path (got "${uri[1]}"). The companion QR must ship with the app, not be fetched at runtime`);
+            ok = false;
+        }
+        const rel = uri[1].replace(/^pkg:\//, '');
+        if (!fs.existsSync(path.join(projectRoot, rel))) {
+            console.error(`AddonsScreen.xml: Poster "${id}" uri "${uri[1]}" does not resolve to ${rel} on disk`);
+            ok = false;
+        }
+        if (!/\bloadSync="true"/.test(attrs)) {
+            console.error(`AddonsScreen.xml: Poster "${id}" must set loadSync="true". It is a bundled asset with no network wait, so there is no reason to paint a frame without it`);
+            ok = false;
+        }
+    }
+
+    // The generator has to keep existing alongside the image, or the asset becomes
+    // an untraceable blob — the state the two donation QRs in SupportDialog are in.
+    const genPath = path.join(projectRoot, 'scripts', 'gen-companion-qr.js');
+    if (!fs.existsSync(genPath)) {
+        console.error('scripts/gen-companion-qr.js is missing. It records what the QR encodes and regenerates it; without it images/qr-companion.png is an untraceable blob');
+        ok = false;
+    } else {
+        const gen = fs.readFileSync(genPath, 'utf8');
+        if (!/const URL\s*=\s*'https?:\/\//.test(gen)) {
+            console.error('scripts/gen-companion-qr.js: expected a `const URL = \'https://...\'` holding the encoded target, so the encoded value stays greppable');
+            ok = false;
+        }
+    }
+
+    // The panel is decorative. If anything in it ever becomes focusable it stops
+    // being an OK/Back no-op, which is the property AddonsScreen's key handling
+    // depends on — so assert there is nothing there to focus.
+    for (const bad of ['Button', 'RowList', 'PosterGrid', 'CheckBox', 'RadioButton', 'EditText']) {
+        if (new RegExp(`<${bad}\\b`).test(xml)) {
+            console.error(`AddonsScreen.xml: <${bad} /> inside the companion panel. The panel is decorative and must not add a focus stop to a screen that has exactly one (addonsList)`);
+            ok = false;
+        }
+    }
+
+    // Geometry: the panel lives in the gap to the right of the list, and must not
+    // run off the canvas or overlap the status line at y=1000.
+    const panel = /<Group\b[^>]*id="companionPanel"[^>]*>/.exec(xml);
+    if (!panel) {
+        console.error('AddonsScreen.xml: no <Group id="companionPanel" /> wrapper for the companion QR');
+        return false;
+    }
+    const tx = /\btranslation="\[(-?\d+),\s*(-?\d+)\]"/.exec(panel[0]);
+    if (!tx) {
+        console.error('AddonsScreen.xml: companionPanel has no translation="[x, y]"');
+        ok = false;
+    } else {
+        const x = parseInt(tx[1], 10);
+        const y = parseInt(tx[2], 10);
+        // The list's own extent, so "to the right of the list" is checked against
+        // the real numbers rather than a hardcoded x. Index [0] on both: these
+        // patterns have no capture group, and reading [1] yields undefined, which
+        // regex.exec then happily coerces to the string "undefined" and returns
+        // null for — silently skipping the comparison.
+        const list = /<ChevronList\b[^>]*>/.exec(xml);
+        const listTx = list && /\btranslation="\[(-?\d+),\s*(-?\d+)\]"/.exec(list[0]);
+        const listW = list && /\bitemWidth="(\d+)"/.exec(list[0]);
+        if (!listTx || !listW) {
+            console.error('AddonsScreen.xml: could not read addonsList translation/itemWidth, so the companion panel position cannot be checked against it');
+            ok = false;
+        } else {
+            const listRight = parseInt(listTx[1], 10) + parseInt(listW[1], 10);
+            if (x < listRight) {
+                console.error(`AddonsScreen.xml: companionPanel starts at x=${x} but addonsList ends at x=${listRight} — the panel overlaps the list`);
+                ok = false;
+            }
+        }
+        const plate = /id="companionPlate"[^>]*width="(\d+)"[^>]*height="(\d+)"/.exec(xml);
+        if (!plate) {
+            console.error('AddonsScreen.xml: no companionPlate Rectangle with width/height. The Group has no extent of its own, so without it the panel is unsized');
+            ok = false;
+        } else {
+            const pw = parseInt(plate[1], 10);
+            const ph = parseInt(plate[2], 10);
+            if (x + pw > 1920) {
+                console.error(`AddonsScreen.xml: companion panel runs to x=${x + pw}, past the 1920 canvas`);
+                ok = false;
+            }
+            if (y + ph > 1000) {
+                console.error(`AddonsScreen.xml: companion panel runs to y=${y + ph}, past the addonsStatus line at y=1000`);
+                ok = false;
+            }
+        }
+    }
+
+    // No width/height check on the Group here: checkPosterFallbackContract
+    // already rejects those repo-wide, with the reason.
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -2685,7 +2815,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkCompanionQrContract()) {
         process.exit(1);
     }
 
