@@ -32,6 +32,40 @@ const LONG_REQUEST_TIMEOUT_MS = 120000
 function CreateSyncHttpClient() as object
     client = {}
 
+    ' One line per failed fetch, from the one place in the app that fetches bytes.
+    '
+    ' Every store in the app reaches the network through this client — catalog,
+    ' meta, streams, subtitles, library, auth, the streaming server — and before
+    ' this, each of them reported failure its own way, or not at all. Transport
+    ' itself had no retry and no trace, so a request that died at the socket left
+    ' nothing anywhere to say so. One line here covers all sixteen call sites at
+    ' once, which is the only practical way to answer "did this fetch work".
+    '
+    ' Query string stripped before printing. Addon addresses routinely carry
+    ' credentials — EndpointUrl exists specifically to keep a "?token=..." intact
+    ' through request assembly — and a raw URL would put those tokens into the
+    ' console log, and from there into any log pasted into a bug report.
+    '
+    ' Every non-2xx is logged, not just transport failures, so an HTTP 404 shows up
+    ' alongside the connect errors. That means legitimately-missing responses are
+    ' logged too (a subtitle provider 404s a language it does not carry), so some
+    ' noise is expected; narrowing to `status < 200 or status >= 500` is a one-line
+    ' change if that drowns out the real faults.
+    '
+    ' Wrapped in try/catch: a diagnostic that raised would be caught by the caller's
+    ' own catch and reported as a fetch failure, turning the trace into the fault.
+    client._trace = function(request as object, result as object) as object
+        if result.status >= 200 and result.status < 300 then return result
+        url = request.url
+        at = url.InStr("?")
+        if at > 0 then url = url.Left(at - 1)
+        try
+            print "[http] " + request.method + " " + url + " -> status=" + result.status.ToStr() + " error=[" + result.error + "]"
+        catch ignored
+        end try
+        return result
+    end function
+
     ' Shared roUrlTransfer round-trip for both timeouts. roUrlTransfer is not
     ' re-entrant, so each request builds its own transfer + port; the two
     ' request flavors only differ in how long Wait parks before cancelling.
@@ -57,24 +91,30 @@ function CreateSyncHttpClient() as object
         end if
         if not issued
             result.error = "request could not be issued"
-            return result
+            return m._trace(request, result)
         end if
 
         event = Wait(request.timeoutMs, port)
         if event = invalid
             transfer.AsyncCancel()
             result.error = "request timed out"
-            return result
+            return m._trace(request, result)
         end if
         if Type(event) <> "roUrlEvent"
             result.error = "unexpected port message"
-            return result
+            return m._trace(request, result)
         end if
 
         result.body = event.GetString()
         result.status = event.GetResponseCode()
         result.ok = result.status >= 200 and result.status < 300
         if not result.ok
+            ' A negative status is the transfer never completing — refused
+            ' connection, DNS failure, TLS failure — and is the case GetFailureReason
+            ' exists to explain. This is also why the sign of status alone cannot be
+            ' used to reason about a failure: negative means transport-level, and
+            ' SubtitlesStore.Subtitles therefore reports `issued` separately instead
+            ' of reserving a sentinel inside the same negative range.
             if result.status < 0
                 reason = event.GetFailureReason()
                 if reason = invalid or reason = "" then reason = "transfer failed"
@@ -83,7 +123,7 @@ function CreateSyncHttpClient() as object
                 result.error = "HTTP " + result.status.ToStr()
             end if
         end if
-        return result
+        return m._trace(request, result)
     end function
 
     client.request = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic, timeoutMs = REQUEST_TIMEOUT_MS as integer) as object
