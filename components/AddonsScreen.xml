@@ -40,6 +40,34 @@
             itemWidth="1000"
             rowHeight="110" />
 
+       <Group id="companionPanel" translation="[1140, 140]">
+            <Rectangle id="companionPlate" width="700" height="720" />
+            <Label
+                id="companionTitle"
+                translation="[40, 36]"
+                width="620"
+                height="80"
+                text="Add add-ons faster"
+                horizAlign="center"
+                font="font:MediumBoldSystemFont" />
+            <Poster
+                id="companionQr"
+                translation="[185, 140]"
+                width="330"
+                height="330"
+                loadSync="true"
+                uri="pkg:/images/qr-companion.png" />
+            <Label
+                id="companionCaption"
+                translation="[40, 500]"
+                width="620"
+                height="210"
+                horizAlign="center"
+                wrap="true"
+                text="Use our Android app to add add-ons faster — no need to type a manifest URL by hand."
+                font="font:SmallSystemFont" />
+        </Group>
+
         <Label
             id="addonsStatus"
             translation="[80, 1000]"

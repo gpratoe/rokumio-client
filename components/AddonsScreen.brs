@@ -22,10 +22,19 @@ sub init()
     m.status = m.top.FindNode("addonsStatus")
     m.list = m.top.FindNode("addonsList")
 
+    ' Decorative companion-app panel (see the XML comment). Coloured here rather
+    ' than in markup so it follows Theme() like every other screen does.
+    m.companionPlate = m.top.FindNode("companionPlate")
+    m.companionTitle = m.top.FindNode("companionTitle")
+    m.companionCaption = m.top.FindNode("companionCaption")
+
     t = Theme()
     m.title.color = t.accent
     m.sub.color = t.textSecondary
     m.status.color = t.accent
+    m.companionPlate.color = t.screenBg
+    m.companionTitle.color = t.accent
+    m.companionCaption.color = t.textSecondary
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
 

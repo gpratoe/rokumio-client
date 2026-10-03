@@ -181,6 +181,34 @@ function checkScreenRuntimeHazards() {
                 ok = false;
             }
         }
+
+        // PlayerScreen is a STATIC child of MainScene, so its nodes outlive a
+        // pop and every piece of per-play UI state has to be swept on the way
+        // out by hand. playerStatus was the one that got missed: the only place
+        // that cleared m.status.text was onVideoStateChanged's "playing" branch,
+        // which a source that never resolves never reaches — so a dead stream's
+        // "poorly available" message survived into the next play and sat there
+        // for the whole resolve. ResetVideoNode already sweeps content, the
+        // subtitle track and the toast nodes for exactly this reason.
+        if (file === 'PlayerScreen.brs') {
+            const reset = code.match(/sub\s+ResetVideoNode\s*\(\s*\)([\s\S]*?)\nend\s+sub/);
+            if (!reset) {
+                console.error('PlayerScreen.brs has no ResetVideoNode() — OnExit must reset the reused Video node somewhere, and it cannot also be clearing playerStatus there');
+                ok = false;
+            } else if (!/m\.status\.text\s*=\s*""/.test(reset[1])) {
+                console.error('PlayerScreen.brs ResetVideoNode() never clears m.status.text — the status line is a static node, so a stream that failed to resolve leaves its message on screen through the next play. Clear it alongside content and the subtitle track.');
+                ok = false;
+            }
+            // The same leak one step earlier, for a play that is entered
+            // directly. OnExit does not run on the very first play, so the
+            // invariant "a play never opens showing the last one's verdict"
+            // needs the clear on both sides of the transition.
+            const enter = code.match(/function\s+OnEnter\s*\([^)]*\)([\s\S]*?)\nend\s+function/);
+            if (enter && !/m\.status\.text\s*=\s*""/.test(enter[1])) {
+                console.error('PlayerScreen.brs OnEnter() never clears m.status.text — a stream that resolves while the node still holds the previous play\'s error will show that error until "playing" arrives. Clear it when the play starts, not only when it succeeds.');
+                ok = false;
+            }
+        }
     }
     return ok;
 }
@@ -244,10 +272,10 @@ function checkScreenContract() {
 // The interpreter models one flat scope and cannot catch any of this, so pin it
 // statically — and pin the reporting, too: every way the hand-off fails looks
 // the same from outside (empty grid, "0 add-ons", no crash, nothing in the log),
-// so SetStores has to name the failure on screen. `print` cannot do that job:
-// Roku routes BrightScript print to the Dev Console, not to the device console
-// the app is debugged from, which is how a broken build looked like a rendering
-// bug for two rounds.
+// so SetStores has to name the failure on screen. `print` cannot do that job, not
+    // because it is invisible to an engineering session but because it is not
+    // painting anything: it only reaches whoever is attached to the console at the
+    // time, and by the time a bug is investigated that session is long gone.
 function checkStoreHandoffContract() {
     const fs = require('fs');
     let ok = true;
@@ -459,10 +487,27 @@ function checkStoreHandoffContract() {
         if (/CreateObject\(\s*"roGlobal"/i.test(src) || /GetGlobalAA\(\)/.test(src)) {
             err(`${name} reaches for a global singleton (roGlobal / GetGlobalAA) — neither is shared across components on this device; use the StoreHost node`);
         }
-        if (/^\s*print\s/m.test(src)) {
-            err(`${name} uses print as a diagnostic — Roku routes BrightScript print to the Dev Console, not to the device console, so it is invisible where these bugs were debugged; make the failure visible in the UI instead`);
-        }
     }
+
+    // --- print is a tracing tool here, not a reporting channel ----------------
+    // There used to be a blanket ban on `print` in every component, on the stated
+    // grounds that "Roku routes BrightScript print to the Dev Console, not to the
+    // device console". That premise is wrong: telnet 8085 IS the device console
+    // log, so a print is read live by whoever has an engineering session
+    // attached — which is exactly how the [subs]/[addons]/[resolve] traces were
+    // read to diagnose the caption failures. Screen.brs says as much in its own
+    // header, and a lint that contradicts the file it guards is worse than no
+    // lint, because it teaches you to distrust the comment.
+    //
+    // What the ban was really proxying — do not use print INSTEAD OF painting a
+    // fault — is already pinned, and better, by the checks on SetStores above
+    // (probe the host, report the fault) and on the strip below (declared, built
+    // in init, attached, written through its own fields, sets m.faultText.text).
+    // Those say what a short bind has to produce; a print cannot produce any of
+    // it, so banning print never added coverage — it only cost us the traces.
+    //
+    // print stays legal in components/*.brs. Following a worker across a task
+    // boundary, or a three-state status down a retry loop, is what it is for.
     // The abandoned carrier, in any file. The host included: a StoreHost that
     // published a facade would be the same split-brain one layer down.
     for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.brs'))) {
@@ -1537,6 +1582,143 @@ function checkAddonSyncTaskContract() {
 // The brs interpreter can drive HomeScreen's subs, but it cannot run a
 // HomeCatalogsTask worker, and the whole failure is about which predicate gates a
 // call site. So the invariant is pinned structurally.
+function checkTaskTeardownContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const body = (src, name) => {
+        const start = new RegExp(`^[ \\t]*(?:public\\s+|private\\s+|override\\s+)*(?:sub|function)\\s+${name}\\s*\\(`, 'm').exec(src);
+        if (!start) return null;
+        const rest = src.slice(start.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+(?:sub|function)\b/m);
+        return end === -1 ? rest : rest.slice(0, end + 1);
+    };
+
+    // AsyncTask.bs states the contract both screens below used to break: removing
+    // a running Task node frees the node WITHOUT killing the worker thread. So a
+    // teardown that is only a RemoveChild leaves a thread running that can still
+    // write its result into state the screen has already discarded.
+    //
+    // HomeScreen.RebuildRows did exactly that, unobserving the field and removing
+    // the node while HomeCatalogsTask could still be walking the registry. It is
+    // reached from a deep-link import, so the sequence is: a walk is in flight, an
+    // import lands, RebuildRows throws the grid away and starts a second walk, and
+    // the first one finishes and pushes its descriptors at the grid anyway — two
+    // workers interleaving rows into one live grid.
+    //
+    // It had to be STOP-then-remove, not merely AsyncTask_Reap(.., true): the
+    // reaper sends STOP to the task NODE, and the loop that reads that flag lives
+    // on the task's own worker thread. A bare RemoveChild never reaches either.
+    const home = code(read('components/HomeScreen.brs'));
+    const rebuild = body(home, 'RebuildRows');
+    if (!rebuild) {
+        err('HomeScreen.brs has no RebuildRows() — the add-on-import rebuild path cannot be checked at all');
+    } else {
+        const reap = body(rebuild, 'AsyncTask_Reap') || rebuild;
+        const stops = /(AsyncTask_Reap\s*\([^)]*,\s*[^,)]+,\s*true\s*\))|(task\.control\s*=\s*"STOP")/.test(reap);
+        const removes = /RemoveChild\s*\(/.test(reap);
+        if (!stops && removes) {
+            err('HomeScreen.brs RebuildRows() removes m.catalogTask without sending STOP first. Removing a running Task node does not kill its worker thread (AsyncTask.bs says so explicitly), so a catalog walk already in flight finishes and applies its rows to a grid that was just discarded and rebuilt — two workers interleaving descriptors into one grid. Reap with doStop = true, as AsyncTask.bs prescribes for a possibly-still-running task.');
+        }
+    }
+
+    // StreamsScreen is a static child that survives every pop, so CancelStreamsLoad
+    // runs on the way out of an episode whose batch may still be fetching. STOP
+    // does not reach an in-flight roUrlTransfer, so those workers keep their
+    // sockets open and keep fetching after the screen has disowned them.
+    //
+    // onStreamsLoaded therefore has to tell "the task I launched is reporting" from
+    // "an abandoned task of the same batch shape is reporting". providerIndex is
+    // unique only WITHIN a batch: once a new episode launches its own batch, an
+    // old worker whose index falls inside the new list would otherwise be
+    // accepted, consume a live task's slot, and push the PREVIOUS episode's
+    // streams into this episode's provider. The reporting node has to be the node
+    // still being waited on.
+    const streams = code(read('components/StreamsScreen.brs'));
+    const loaded = body(streams, 'onStreamsLoaded');
+    if (!loaded) {
+        err('StreamsScreen.brs has no onStreamsLoaded() — a cancelled batch cannot be distinguished from the live one without it');
+    } else {
+        const identity = /task\.loadToken\s*<>\s*m\.loadToken/.test(loaded);
+        const slot = /m\.loadTasks\[index\]\s*=\s*invalid/.test(loaded);
+        if (slot && !identity) {
+            err('StreamsScreen.brs onStreamsLoaded() clears m.loadTasks[index] on providerIndex alone. providerIndex is unique only within a batch, so a worker from a batch CancelStreamsLoad already STOPped can land here after the next episode has launched its own, take a live task\'s slot, and push the previous episode\'s streams into this one. Check the batch token first (`if m.loadToken = "" or task.loadToken <> m.loadToken then return`).');
+        }
+        // Neither of these node comparisons exists in BrightScript, and both were
+        // written here and rejected by the device before the token replaced them:
+        // `<>` between two roSGNodes is &h18 (Type Mismatch), and `.IsSame()` is
+        // &hf4 — the roSGNode reference lists ifAssociativeArray, ifSGNodeChildren,
+        // ifSGNodeField, ifSGNodeDict, ifSGNodeFocus, ifSGNodeBoundingRect and
+        // ifSGNodeHttpAgentAccess, and no identity member among them. No static
+        // check can catch either, because the brs interpreter has no node objects.
+        if (/m\.loadTasks\[index\]\s*<>\s*task/.test(loaded)) {
+            err('StreamsScreen.brs onStreamsLoaded() compares two roSGNodes with `<>`. BrightScript\'s comparison operators cannot be applied to node references — that is a runtime &h18 "Type Mismatch. Operator \\"<\\>" can\'t be applied to \\"roSGNode\\" and \\"roSGNode\\"" and it aborts the whole notification handler, so a provider that lands never renders. Compare the scalar loadToken instead.');
+        }
+        if (/m\.loadTasks\[index\]\s*\.\s*IsSame\s*\(/.test(loaded) || /\btask\s*\.\s*IsSame\s*\(/.test(loaded)) {
+            err('StreamsScreen.brs onStreamsLoaded() calls IsSame() on a node. roSGNode has no such member — the documented interfaces are ifAssociativeArray, ifSGNodeChildren, ifSGNodeField, ifSGNodeDict, ifSGNodeFocus, ifSGNodeBoundingRect and ifSGNodeHttpAgentAccess — so this is a runtime &hf4 "Member function not found" that kills the handler. Compare the scalar loadToken instead.');
+        }
+        if (identity && /m\.loadTasks\[index\]\s*=\s*invalid\s+then\s+return/.test(loaded) === false) {
+            err('StreamsScreen.brs onStreamsLoaded() never returns on an already-claimed `m.loadTasks[index] = invalid` slot. Without it a duplicate notification from the same provider re-applies its streams and decrements pendingCount a second time, so the count reaches zero early and the status line misreports while providers are still loading.');
+        }
+        // The token only separates batches if it is actually minted per batch and
+        // stamped onto every task. Either half missing silently disables it.
+        if (identity) {
+            const launch = /loadToken\s*:\s*m\.loadToken/.test(streams);
+            const mint = /m\.loadToken\s*=\s*m\.loadSeq\.ToStr\(\)/.test(streams);
+            if (!launch) {
+                err('StreamsScreen.brs LoadStreams() does not pass loadToken to AsyncTask_Launch — every task would carry the default "" from StreamsLoaderTask.xml, so the token in onStreamsLoaded compares equal for a stale batch and for the live one, which is exactly the collision it was added to prevent.');
+            }
+            if (!mint) {
+                err('StreamsScreen.brs never mints a fresh m.loadToken per batch (m.loadToken = m.loadSeq.ToStr()) — a token that does not change between passes lets two passes over the same episode accept each other\'s reports.');
+            }
+        }
+        // pendingCount is what OnEnter\'s same-episode guard reads to decide a
+        // batch is genuinely in flight. Every terminal path must decrement it or
+        // the count sticks above zero and the guard blocks a legitimate reload
+        // forever, leaving an episode\'s stream list permanently empty.
+        if (identity && slot) {
+            const tail = loaded.slice(loaded.indexOf('m.loadTasks[index] = invalid'));
+            const guard = /if\s+m\.providers\s*=\s*invalid\s+or\s+index\s*>=\s*m\.providers\.Count\(\)\s+then\s*\n\s*if\s+m\.pendingCount\s*>\s*0\s+then\s+m\.pendingCount\s*=\s*m\.pendingCount\s*-\s*1/.test(tail);
+            if (!guard) {
+                err('StreamsScreen.brs onStreamsLoaded() can return between claiming m.loadTasks[index] and writing into m.providers without decrementing m.pendingCount. OnEnter guards the same-episode reload on that count, so a stranded non-zero value makes the guard block every later visit and the list never fills. Count the task as landed on that path too.');
+            }
+        }
+    }
+
+    // The guard is only as good as the key it compares and the invalidation it
+    // relies on. CancelStreamsLoad must clear BOTH, or a cancelled batch stays
+    // "owned": pendingCount keeps its old value and loadKey keeps naming an
+    // episode whose tasks were just reaped, so OnEnter matches, skips the reload,
+    // and the list stays empty with the fetch that would fill it already cancelled.
+    const cancel = body(streams, 'CancelStreamsLoad');
+    if (cancel) {
+        if (/m\.loadKey\s*=\s*""/.test(cancel) === false) {
+            err('StreamsScreen.brs CancelStreamsLoad() does not clear m.loadKey — a reaped batch stays distinguishable from a live one, so OnEnter can treat a cancelled episode as still in flight and skip the reload that would refill the list');
+        }
+        if (/m\.pendingCount\s*=\s*0/.test(cancel) === false) {
+            err('StreamsScreen.brs CancelStreamsLoad() does not zero m.pendingCount — OnEnter reads that count to decide a batch is in flight, so a stale non-zero value makes it skip the reload and the stream list stays empty');
+        }
+    }
+
+    // The same-episode guard, and the reason it exists: OnEnter used to cancel
+    // and re-launch the whole provider batch on every entry, so re-entering an
+    // episode while its batch was still fetching sent a second identical request
+    // per add-on. Four copies of one manifest in a single device log is this.
+    const enter = body(streams, 'OnEnter');
+    if (enter) {
+        const guardAt = /EpisodeKey\(params\)\s*=\s*m\.loadKey/.exec(enter);
+        const cancelAt = /CancelStreamsLoad\(\)/.exec(enter);
+        if (guardAt && cancelAt && guardAt.index > cancelAt.index) {
+            err('StreamsScreen.brs OnEnter() compares EpisodeKey only AFTER CancelStreamsLoad() — by then m.loadKey and m.pendingCount have been cleared by the cancel, so the guard can never match and every entry re-fans out the whole batch again');
+        }
+    }
+
+    return ok;
+}
+
 function checkHomeCatalogStalenessContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
@@ -1964,6 +2146,136 @@ function checkLibraryScreenContract() {
 // non-noScale scaling option, NOT a smaller bitmap. Capping loadWidth/loadHeight
 // silences the identical warning while visibly degrading the artwork, which is
 // strictly worse. Nothing here should ever push toward downscaling.
+// The companion-app QR on AddonsScreen. Three things are invisible until someone
+// looks at the TV, which is exactly why they are pinned here:
+//   1. The Poster's uri must name a file that exists. A typo'd or missing pkg path
+//      simply paints nothing — the same silent failure that made the QR vanish on
+//      LinkStremioScreen.
+//   2. loadSync must be set. It is a bundled image with no network to wait on, so
+//      there is no reason to render a frame with a hole in it.
+//   3. The image must still decode to the URL the panel copy claims it offers.
+//      The encoder in scripts/gen-companion-qr.js is a hand-rolled QR
+//      implementation, and a QR that looks right but will not scan is worse than
+//      none at all — the version/EC table is easy to get subtly wrong in a way
+//      that renders plausibly. Rather than re-implement a decoder here, the
+//      encoder round-trips through a reference implementation when one is
+//      available (see verify-companion-qr.js), so this check covers what is
+//      cheaply checkable and points at the rest.
+function checkCompanionQrContract() {
+    const fs = require('fs');
+    let ok = true;
+    const dir = path.join(projectRoot, 'components');
+    const xml = fs.readFileSync(path.join(dir, 'AddonsScreen.xml'), 'utf8');
+
+    const posters = [...xml.matchAll(/<Poster\b([^>]*)>/g)];
+    if (posters.length === 0) {
+        console.error('AddonsScreen.xml: no <Poster /> — the companion-app QR is missing entirely');
+        return false;
+    }
+    for (const m of posters) {
+        const attrs = m[1];
+        const id = (/\bid="([^"]*)"/.exec(attrs) || [, '(anonymous)'])[1];
+        const uri = /\buri="([^"]*)"/.exec(attrs);
+        if (!uri || !uri[1].trim()) {
+            console.error(`AddonsScreen.xml: Poster "${id}" has no uri — it would paint nothing`);
+            ok = false;
+            continue;
+        }
+        if (!/\bpkg:\/images\//.test(uri[1])) {
+            console.error(`AddonsScreen.xml: Poster "${id}" uri is not a bundled pkg:/images/ path (got "${uri[1]}"). The companion QR must ship with the app, not be fetched at runtime`);
+            ok = false;
+        }
+        const rel = uri[1].replace(/^pkg:\//, '');
+        if (!fs.existsSync(path.join(projectRoot, rel))) {
+            console.error(`AddonsScreen.xml: Poster "${id}" uri "${uri[1]}" does not resolve to ${rel} on disk`);
+            ok = false;
+        }
+        if (!/\bloadSync="true"/.test(attrs)) {
+            console.error(`AddonsScreen.xml: Poster "${id}" must set loadSync="true". It is a bundled asset with no network wait, so there is no reason to paint a frame without it`);
+            ok = false;
+        }
+    }
+
+    // The generator has to keep existing alongside the image, or the asset becomes
+    // an untraceable blob — the state the two donation QRs in SupportDialog are in.
+    const genPath = path.join(projectRoot, 'scripts', 'gen-companion-qr.js');
+    if (!fs.existsSync(genPath)) {
+        console.error('scripts/gen-companion-qr.js is missing. It records what the QR encodes and regenerates it; without it images/qr-companion.png is an untraceable blob');
+        ok = false;
+    } else {
+        const gen = fs.readFileSync(genPath, 'utf8');
+        if (!/const URL\s*=\s*'https?:\/\//.test(gen)) {
+            console.error('scripts/gen-companion-qr.js: expected a `const URL = \'https://...\'` holding the encoded target, so the encoded value stays greppable');
+            ok = false;
+        }
+    }
+
+    // The panel is decorative. If anything in it ever becomes focusable it stops
+    // being an OK/Back no-op, which is the property AddonsScreen's key handling
+    // depends on — so assert there is nothing there to focus.
+    for (const bad of ['Button', 'RowList', 'PosterGrid', 'CheckBox', 'RadioButton', 'EditText']) {
+        if (new RegExp(`<${bad}\\b`).test(xml)) {
+            console.error(`AddonsScreen.xml: <${bad} /> inside the companion panel. The panel is decorative and must not add a focus stop to a screen that has exactly one (addonsList)`);
+            ok = false;
+        }
+    }
+
+    // Geometry: the panel lives in the gap to the right of the list, and must not
+    // run off the canvas or overlap the status line at y=1000.
+    const panel = /<Group\b[^>]*id="companionPanel"[^>]*>/.exec(xml);
+    if (!panel) {
+        console.error('AddonsScreen.xml: no <Group id="companionPanel" /> wrapper for the companion QR');
+        return false;
+    }
+    const tx = /\btranslation="\[(-?\d+),\s*(-?\d+)\]"/.exec(panel[0]);
+    if (!tx) {
+        console.error('AddonsScreen.xml: companionPanel has no translation="[x, y]"');
+        ok = false;
+    } else {
+        const x = parseInt(tx[1], 10);
+        const y = parseInt(tx[2], 10);
+        // The list's own extent, so "to the right of the list" is checked against
+        // the real numbers rather than a hardcoded x. Index [0] on both: these
+        // patterns have no capture group, and reading [1] yields undefined, which
+        // regex.exec then happily coerces to the string "undefined" and returns
+        // null for — silently skipping the comparison.
+        const list = /<ChevronList\b[^>]*>/.exec(xml);
+        const listTx = list && /\btranslation="\[(-?\d+),\s*(-?\d+)\]"/.exec(list[0]);
+        const listW = list && /\bitemWidth="(\d+)"/.exec(list[0]);
+        if (!listTx || !listW) {
+            console.error('AddonsScreen.xml: could not read addonsList translation/itemWidth, so the companion panel position cannot be checked against it');
+            ok = false;
+        } else {
+            const listRight = parseInt(listTx[1], 10) + parseInt(listW[1], 10);
+            if (x < listRight) {
+                console.error(`AddonsScreen.xml: companionPanel starts at x=${x} but addonsList ends at x=${listRight} — the panel overlaps the list`);
+                ok = false;
+            }
+        }
+        const plate = /id="companionPlate"[^>]*width="(\d+)"[^>]*height="(\d+)"/.exec(xml);
+        if (!plate) {
+            console.error('AddonsScreen.xml: no companionPlate Rectangle with width/height. The Group has no extent of its own, so without it the panel is unsized');
+            ok = false;
+        } else {
+            const pw = parseInt(plate[1], 10);
+            const ph = parseInt(plate[2], 10);
+            if (x + pw > 1920) {
+                console.error(`AddonsScreen.xml: companion panel runs to x=${x + pw}, past the 1920 canvas`);
+                ok = false;
+            }
+            if (y + ph > 1000) {
+                console.error(`AddonsScreen.xml: companion panel runs to y=${y + ph}, past the addonsStatus line at y=1000`);
+                ok = false;
+            }
+        }
+    }
+
+    // No width/height check on the Group here: checkPosterFallbackContract
+    // already rejects those repo-wide, with the reason.
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -2503,7 +2815,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkCompanionQrContract()) {
         process.exit(1);
     }
 

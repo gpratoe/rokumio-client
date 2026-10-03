@@ -7,12 +7,20 @@
          the pause screen, seek/trick-play, and Options/captions dialog belong
          to the platform. Pops on Back and records the watched position through
          LibraryStore.SetPosition. The buffering logo is the one branded piece
-         that stays. -->
+         that stays.
+         A static child of MainScene, reused across plays: OnBackPressed only
+         records the position and declines, the stack pops, and OnExit cancels
+         the resolve and sends the Video node a plain stop. The node survives the
+         pop, so the next play re-arms it in CreateVideo. -->
     <interface>
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <field id="closeRequest" type="assocarray" alwaysNotify="true" />
+        <!-- Called by MainScene from the two points the add-on registry actually
+             moves (the sync install loop, and a Rokumio import), so a subtitle
+             provider that lands after this screen entered is still asked. See
+             EnsureSubtitleProviders. -->
+        <function name="EnsureSubtitleProviders" />
         <field id="watchStateUpdate" type="assocarray" alwaysNotify="true" />
     </interface>
 
@@ -73,7 +81,41 @@
                 keyValue="[0.15, 0.35, 1.0, 0.35, 0.15]" />
         </Animation>
 
-        <Timer id="stopWatchdog" duration="3" repeat="false" />
+        <!-- A transient warning, for the one thing playback cannot fix itself:
+             captions that could not be fetched. Rides above the video on a
+             translucent plate so the text reads over any frame, holds for two
+             seconds, then fades. Not a status line: playerStatus below is the
+             play state, and a failed caption fetch would overwrite that.
+
+             The fade is an Animation on toastGroup.opacity, which cascades to
+             both children — RailTile dims its whole subtree the same way, so
+             the field is one this app has already proven on device. And because
+             a FloatFieldInterpolator on an OS that lacks the field would fail
+             SILENTLY (the easeFunction attribute that did nothing but print a
+             warning is the precedent above), toastHideTimer is armed for the
+             same window and force-hides the group regardless, so a no-op
+             interpolator cannot strand the label on screen over the video. -->
+        <Group id="toastGroup" visible="false" translation="[210, 496]">
+            <Rectangle id="toastPlate" width="1500" height="64" cornerRadius="32" />
+            <Label
+                id="toastLabel"
+                width="1500"
+                height="64"
+                font="font:MediumSystemFont"
+                horizAlign="center"
+                vertAlign="center" />
+            <Animation id="toastFade" delay="2" duration="0.5" repeat="false">
+                <FloatFieldInterpolator
+                    id="toastFadeOpacity"
+                    fieldToInterp="toastGroup.opacity"
+                    key="[0.0, 1.0]"
+                    keyValue="[1.0, 0.0]" />
+            </Animation>
+        </Group>
+
+        <!-- The Animation's own end is not trusted to hide anything: see above.
+             2s hold + 0.5s fade + margin. Armed by ShowToast alongside the fade. -->
+        <Timer id="toastHideTimer" duration="2.6" repeat="false" />
 
         <!-- Not cosmetic: StartPlayback hands the Video node its content and
              asks it to play from separate ticks, and this is the boundary. See
