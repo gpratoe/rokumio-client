@@ -106,6 +106,29 @@ sub Test_Transport_PostLong_RoutesLongRequest()
     Harness_Equal(log[0].body.collection, 7, "body forwarded to the client")
 end sub
 
+sub Test_Transport_RetryPolicy()
+    Harness_Suite("Transport retries transport-level failures and nothing else")
+    ' A negative status is the transfer never completing (refused connect -7,
+    ' DNS -6, TLS). Those are the measured concurrency collisions, so they retry.
+    Harness_Ok(TransportFailureIsRetryable(-7), "-7 (refused connect) is retryable")
+    Harness_Ok(TransportFailureIsRetryable(-6), "-6 (DNS failure) is retryable")
+    Harness_Ok(TransportFailureIsRetryable(-35), "-35 (TLS connect) is retryable")
+    ' Everything else is an answer or a wait that must not be multiplied.
+    Harness_Ok(not TransportFailureIsRetryable(0), "status 0 (timeout) is NOT retryable")
+    Harness_Ok(not TransportFailureIsRetryable(200), "200 is NOT retryable")
+    Harness_Ok(not TransportFailureIsRetryable(404), "404 is NOT retryable")
+    Harness_Ok(not TransportFailureIsRetryable(500), "500 is NOT retryable")
+end sub
+
+sub Test_Transport_RetryBudget()
+    Harness_Suite("Transport's retry backoff grows linearly")
+    ' The attempt cap (MAX_TRANSPORT_ATTEMPTS) is a file-scope const, which the
+    ' interpreter does not expose to this scope; tests/run.js pins it instead.
+    Harness_Equal(TransportRetryBackoffMs(1), 250, "the first retry waits one base unit")
+    Harness_Equal(TransportRetryBackoffMs(2), 500, "the second retry waits two base units")
+    Harness_Equal(TransportRetryBackoffMs(3), 750, "the third retry waits three base units")
+end sub
+
 sub Test_Transport_GetRaw_ReturnsBodyUnparsed()
     Harness_Suite("Transport.GetRaw returns the body verbatim instead of parsing it as JSON")
     log = []
@@ -136,11 +159,69 @@ sub Test_Transport_GetRaw_ForwardsTimeout()
     transport.GetRaw("http://host/abc/hls.m3u8", 4000)
     transport.GetRaw("http://host/abc/hls.m3u8")
 
-    ' The probe's short timeout has to actually arrive. The wait is bounded by
+    ' The probe's own timeout has to actually arrive. The wait is bounded by
     ' attempts x (timeout + interval) and there is no clock in the loop, so a
-    ' default that quietly won would hold the player for over 90 seconds across
-    ' six attempts — the exact stall the probe exists to prevent.
+    ' default that quietly won would hold the player for over a minute across
+    ' four attempts — the exact stall the probe exists to prevent.
     Harness_Equal(log[0].timeoutMs, 4000, "the probe's short timeout reaches the client")
+    Harness_Equal(log[1].timeoutMs, 15000, "no timeout given keeps the 15s default, so every other caller's behaviour is unchanged")
+    ' ...and no headers given means none sent, so adding the parameter did not
+    ' start attaching something to the sixteen callers that never asked for it.
+    Harness_Ok(log[1].headers = invalid, "no headers given still sends none")
+end sub
+
+' The forced-metadata read in WarmEngine is a ranged GET on the streaming
+' server's torrent route, which serves a feature-sized body. A Range header is
+' the only thing standing between that readiness check and a request to buffer
+' an entire film into a string, so the header has to survive the trip down
+' through GetRaw and out to the client.
+sub Test_Transport_GetRaw_ForwardsHeaders()
+    Harness_Suite("Transport.GetRaw forwards a Range header to the client")
+    log = []
+    script = [
+        { method: "GET", url: "http://host/abc/0", ok: true, status: 206, body: "", error: "" }
+    ]
+    transport = Transport(ScriptedHttpClient(script, log))
+    result = transport.GetRaw("http://host/abc/0", 8000, { "Range": "bytes=0-65535" })
+
+    Harness_Ok(result.ok, "a 206 partial response counts as ok")
+    Harness_Equal(log[0].headers.Range, "bytes=0-65535", "the Range header reaches the client, which is what keeps this from reading the whole feature")
+    Harness_Equal(log[0].timeoutMs, 8000, "and the timeout reaches it alongside")
+end sub
+
+sub Test_Transport_Head_SendsHeadAndStaysRaw()
+    Harness_Suite("Transport.Head asks for headers only and leaves the empty body unparsed")
+    log = []
+    script = [
+        { method: "HEAD", url: "http://host/abc/4", ok: true, status: 200, body: "", error: "" }
+    ]
+    transport = Transport(ScriptedHttpClient(script, log))
+
+    result = transport.Head("http://host/abc/4")
+
+    Harness_Ok(result.ok, "ok on a 200")
+    Harness_Equal(result.status, 200, "status surfaced")
+    ' Raw, like GetRaw. A HEAD has no body, so Result()'s JSON parse would
+    ' report "invalid JSON response" for a request that succeeded — which is how
+    ' a working warm-up gets reported as a broken one.
+    Harness_Equal(result.error, "", "no error invented from an empty body")
+    Harness_Equal(log[0].method, "HEAD", "the method reaches the client as HEAD")
+    Harness_Ok(result.json = invalid, "and the result is raw-shaped, not parsed")
+end sub
+
+sub Test_Transport_Head_ForwardsTimeout()
+    Harness_Suite("Transport.Head forwards a caller-supplied timeout and otherwise keeps the default")
+    log = []
+    script = [
+        { method: "HEAD", ok: true, status: 200, body: "", error: "" }
+    ]
+    transport = Transport(ScriptedHttpClient(script, log))
+    transport.Head("http://host/abc/4", 8000)
+    transport.Head("http://host/abc/4")
+
+    ' The warm-up's ceiling has to arrive, or a cold engine eats the 15s default
+    ' on top of the probe loop that is already waiting behind it.
+    Harness_Equal(log[0].timeoutMs, 8000, "the warm-up's timeout reaches the client")
     Harness_Equal(log[1].timeoutMs, 15000, "no timeout given keeps the 15s default, so every other caller is unchanged")
 end sub
 

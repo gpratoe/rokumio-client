@@ -1238,6 +1238,384 @@ function checkStremioProvisioningContract() {
 // structurally here, and the worker narrates its own progress into a "stage" field
 // so that if it ever fails again the fault text names the hop instead of costing
 // another round of hypotheses.
+// The engine warm-up is what makes the readiness wait possible at all, it spans
+// three files, and no interpreter test can reach any of it: the Task's Wait()
+// ABORTS the run, and a HEAD in a store is one line. So the invariants below are
+// the only guard, and every one of them fails SILENTLY — still compiling, still
+// green, still timing out exactly as before.
+function checkEngineWarmupContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const task = code(read('components/StreamResolveTask.brs'));
+    const store = code(read('source/stores/PlaybackStore.bs'));
+    const transport = code(read('source/stores/Transport.bs'));
+    const player = code(read('components/PlayerScreen.brs'));
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    // 1. HEAD has to reach roUrlTransfer AS a HEAD. Transport used to special-case
+    //    only POST, so every other method fell through to AsyncGetToString() and
+    //    a "HEAD" was quietly a GET — against a stream route advertising a
+    //    Content-Length in the gigabytes, which is a request to buffer an entire
+    //    feature into a string while believing it was asking for headers.
+    if (!/request\.method\s*=\s*"HEAD"/.test(transport) || !/AsyncHead\(\)/.test(transport)) {
+        err('Transport.bs does not dispatch HEAD to AsyncHead() — every method except POST falls through to AsyncGetToString(), so the warm-up would silently be a full GET of the stream route');
+    }
+
+    // 2. The warm-up must precede the playlist probe. Order IS the fix: a playlist
+    //    request to a server that has not been told to make an engine is not a
+    //    slow request, it is a hung one — which is what six timed-out probes and a
+    //    44-second wait turned out to be.
+    const warmAt = task.search(/WarmEngine\(/);
+    const probeAt = task.search(/WaitForPlaylist\(/);
+    if (warmAt === -1) {
+        err('StreamResolveTask.brs never calls WarmEngine() — the engine is never asked for, so the probe is asking a server that was never told to make one');
+    } else if (probeAt !== -1 && warmAt > probeAt) {
+        err('StreamResolveTask.brs warms the engine AFTER probing for the playlist — the probe has to run first or it is still the request that hangs');
+    }
+
+    // 3. Both warm-up timeouts have to actually arrive, and they are two numbers
+    //    because the two requests are not alike. The HEAD submits work and answers
+    //    in 30-65ms (the server logs "Engine created" that far behind the
+    //    request); the ranged GET is the one that blocks until the engine has
+    //    torrent metadata, which is the entire cost of a DHT-only cold start.
+    //
+    //    They were one constant, and that is how a 40ms request ended up holding
+    //    the same budget as the request meant to wait — which is how a cold engine
+    //    outlived the cap that existed to notice it. The ceilings below are not
+    //    "what the work needs", they are the two ways this can rot: the HEAD
+    //    drifting up toward the readiness budget, and the readiness read drifting
+    //    up toward a hang.
+    const headTimeout = /const\s+ENGINE_HEAD_TIMEOUT_MS\s*=\s*(\d+)/.exec(store);
+    const readyTimeout = /const\s+ENGINE_READY_TIMEOUT_MS\s*=\s*(\d+)/.exec(store);
+    if (!headTimeout) {
+        err('PlaybackStore.bs has no ENGINE_HEAD_TIMEOUT_MS — the warm-up HEAD pays the 15s default, and a default-sized budget on the request that only submits work is where the readiness budget came from in the first place');
+    } else {
+        if (Number(headTimeout[1]) > 8000) {
+            err(`PlaybackStore.bs ENGINE_HEAD_TIMEOUT_MS is ${headTimeout[1]}ms — this request has answered in 30-65ms every time it has been logged, so a budget past 8s is not headroom, it is slack that will get spent on the readiness read instead`);
+        }
+        if (!/Head\(url,\s*ENGINE_HEAD_TIMEOUT_MS\)/.test(store)) {
+            err('PlaybackStore.bs WarmEngine does not pass ENGINE_HEAD_TIMEOUT_MS to Head — the constant is declared but the warm-up still pays the default timeout');
+        }
+    }
+    if (!readyTimeout) {
+        err('PlaybackStore.bs has no ENGINE_READY_TIMEOUT_MS — the ranged metadata read falls back to the 15s default, which is the request whose whole job is to block until a cold engine is ready');
+    } else {
+        if (Number(readyTimeout[1]) > 20000) {
+            err(`PlaybackStore.bs ENGINE_READY_TIMEOUT_MS is ${readyTimeout[1]}ms — past this the readiness read is no longer waiting out a cold engine, it is the thing deciding whether the stream is servable, and the probe loop behind it is what decides that`);
+        }
+    }
+
+    // 3b. The pair is one budget, and only their sum is meaningful. Measured waits
+    //     were 1.78s / 3.03s / 4.71s / and one over 8s, so the read needs real room
+    //     — but the room does not come from the HEAD, and a pair that can creep up
+    //     independently is how the warm-up ends up quietly longer than the probe
+    //     loop it sits in front of.
+    if (headTimeout && readyTimeout) {
+        const warmBudget = Number(headTimeout[1]) + Number(readyTimeout[1]);
+        if (warmBudget > 20000) {
+            err(`the warm-up can spend ${warmBudget}ms before the probe loop even starts (${headTimeout[1]}ms HEAD + ${readyTimeout[1]}ms readiness read) — the readiness wait is measured in single-digit seconds, so a pair totalling over 20s means the split has drifted back toward one number`);
+        }
+    }
+
+    // 4. It must be unable to fail the resolve. The warm-up is an optimisation, and
+    //    sharing the probe's catch would report its fault as a probe that gave up
+    //    — describing a request the server never received as one it refused.
+    if (!/catch\s+e\s+resolved\.warmup\s*=/.test(task)) {
+        err('StreamResolveTask.brs does not give the warm-up a catch that records it — a throw there would be reported as a failed resolve, or as the probe giving up');
+    }
+
+    // 5. A 2xx warm-up is deliberately NOT logged by the transport trace, so the
+    //    record it rides back on is the only evidence the request happened at all.
+    if (!/result\.warmup\s*<>\s*invalid/.test(player)) {
+        err('PlayerScreen.brs never reads result.warmup — a warm-up that succeeded leaves no trace anywhere, so a stall would have nothing to rule it out with');
+    }
+
+    // 6. The record has to say WHAT the engine was handed. A timed-out warm-up is
+    //    ambiguous on its own — a slow server and an engine with no trackers to
+    //    bootstrap from produce the identical line — and those two call for
+    //    opposite fixes, so the count is what makes the next run decidable.
+    if (!/resolved\.warmup\.trackers\s*=/.test(task)) {
+        err('StreamResolveTask.brs does not record how many trackers the engine was handed — a timed-out warm-up cannot otherwise be told apart from an engine bootstrapping over DHT alone');
+    }
+    if (!/warmup\.trackers\s*<>\s*invalid/.test(player)) {
+        err('PlayerScreen.brs never prints the warm-up tracker count — the diagnostic that distinguishes a slow server from an engine with nothing to bootstrap from');
+
+    }
+
+    // 7. The warm-up is TWO requests, and the second is the one that matters. The
+    //    HEAD gets the engine CREATED and returns in milliseconds, so it never said
+    //    whether the engine could then ANSWER — the probe behind it kept finding
+    //    that out the slow way, one timeout at a time. Stremio's client follows the
+    //    HEAD with a ranged GET of the first 64KB and lets it block until the
+    //    engine has torrent metadata, and the server's log for a device that
+    //    starts cleanly shows exactly that request sitting between the HEAD and
+    //    the /hls.m3u8.
+    //
+    //    Without it the warm-up creates an engine and walks away, which is the
+    //    state the last unexplained timeout in this whole path came from: the
+    //    server held our probe open for ~8.4s gathering metadata and a 4s
+    //    deadline cancelled it. The Range header is also what keeps this from
+    //    becoming the mistake check #1 describes — an unbounded GET on the torrent
+    //    route is a request to buffer a whole feature into a string.
+    if (!/bytes=0-65535/.test(store)) {
+        err('PlaybackStore.bs WarmEngine no longer asks for a byte range — the HEAD creates the engine but never waits for its metadata, so the readiness probe is back to timing out against a server that was still legitimately working');
+    }
+    if (!/GetRaw\(\s*url\s*,\s*ENGINE_READY_TIMEOUT_MS\s*,\s*\{[^}]*"Range"/.test(store)) {
+        err('PlaybackStore.bs WarmEngine does not pass a Range header to GetRaw — the forced-metadata read is either gone, or became an unbounded GET of the torrent route');
+    }
+    if (!/function\s+GetRaw\([^)]*headers/.test(transport)) {
+        err('Transport.bs GetRaw does not accept headers — the forced-metadata read has nowhere to put its Range header, so it can only ever be a full-body GET');
+    }
+
+    // 8. And the result of it has to be readable, or the one thing this warm-up
+    //    is for is invisible. HEAD 200 with a dead range means the engine was
+    //    created and never became ready; both 200 means the engine was ready and
+    //    anything after this belongs to the player.
+    if (!/warmup\.range\s*<>\s*invalid/.test(player)) {
+        err('PlayerScreen.brs never reads result.warmup.range — a warm-up whose engine was created but never became ready leaves no trace anywhere, which is the one distinction this second request exists to make');
+    }
+
+    return ok;
+}
+
+// The device refuses NEW concurrent connections past a low ceiling (~4-6):
+// sequential soaks are perfect while 8-wide bursts drop transfers, and the
+// app's parallel launch syncs collide the same way. Transport's bounded retry
+// is what keeps a lost race from failing the fetch. None of this is reachable
+// from the brs interpreter — every store test injects a fake client and the
+// real one needs roUrlTransfer — so the invariants are pinned structurally.
+function checkTransportRetryContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const transport = read('source/stores/Transport.bs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    if (!/const\s+MAX_TRANSPORT_ATTEMPTS\s*=\s*\d+/.test(transport)) {
+        err('Transport.bs has no MAX_TRANSPORT_ATTEMPTS — a retry loop without a ceiling hammers a dead host, and no retry at all lets a connection collision fail the fetch');
+    }
+    const policy = /function\s+TransportFailureIsRetryable\s*\(\s*status\s+as\s+integer\s*\)\s*as\s+boolean\s*[\s\S]*?return\s+status\s*<\s*0[\s\S]*?end\s+function/.exec(transport);
+    if (!policy) {
+        err('Transport.bs TransportFailureIsRetryable must retry only negative (transport-level) statuses — an HTTP 404/500 is a real answer, and retrying a timeout (status 0) multiplies a full wait');
+    }
+    const exec = /client\._execute\s*=\s*function\s*\(request[\s\S]*?\n    end function/.exec(transport);
+    if (!exec) {
+        err('Transport.bs has no client._execute — the retry wrapper is gone and a connection collision fails the fetch outright');
+    } else {
+        const body = exec[0];
+        if (!/m\._attempt\(request\)/.test(body)) {
+            err('Transport.bs client._execute does not call m._attempt — the single round-trip is the thing being retried');
+        }
+        if (!/m\._retryable\(result\.status\)/.test(body) || !/m\._retryAfter\(attempt\)/.test(body)) {
+            err('Transport.bs client._execute does not consult the retry policy and backoff — the retry is unconditional or absent');
+        }
+        if (!/MAX_TRANSPORT_ATTEMPTS/.test(body)) {
+            err('Transport.bs client._execute does not cap attempts at MAX_TRANSPORT_ATTEMPTS — an unbounded retry can hammer a dead host');
+        }
+    }
+
+    // The backoff has to DESYNCHRONISE, not merely delay. The failure being
+    // ridden out is a refused connect, which the device answers in milliseconds
+    // — which is exactly when a fixed backoff is worst. Every loser wakes at the
+    // same instant, is refused again at the same instant, and keeps marching in
+    // step. A fixed backoff reproduces the stampede it exists to break.
+    if (!/const\s+TRANSPORT_RETRY_JITTER_MS\s*=\s*\d+/.test(transport)) {
+        err('Transport.bs has no TRANSPORT_RETRY_JITTER_MS — retries share one fixed schedule, so the clients that lost the same race all retry at the same instant');
+    }
+    if (!/Rnd\(\s*TRANSPORT_RETRY_JITTER_MS\s*\)/.test(transport)) {
+        err('Transport.bs never applies Rnd(TRANSPORT_RETRY_JITTER_MS) — the jitter is declared but the retries are still synchronised');
+    }
+    // Rnd is a Roku global and does not resolve in the brs interpreter, so it
+    // must not reach TransportRetryBackoffMs: that file-scope function IS
+    // exercised by the suite. It belongs on the client closure, which
+    // CreateSyncHttpClient builds and no store test ever reaches (every one
+    // injects a fake client).
+    const backoff = /function\s+TransportRetryBackoffMs\s*\([^)]*\)([\s\S]*?)end\s+function/.exec(transport);
+    if (backoff && /\bRnd\s*\(/.test(backoff[1])) {
+        err('Transport.bs TransportRetryBackoffMs calls Rnd — that file-scope function is run by the brs interpreter, which has no Rnd global, and the unit tests for it would throw at runtime');
+    }
+    return ok;
+}
+
+// The two account pulls (add-on collection and library) are both launched in
+// Start() and on login completion. Firing them together opens two NEW
+// connections at the same instant — exactly the concurrency the device refuses
+// past ~4-6. The library sync is therefore deferred behind the add-on sync and
+// pumped when it settles. The interpreter cannot run either Task, so the
+// ordering is pinned structurally.
+function checkStaggeredSyncContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const brs = read('components/MainScene.brs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const body = (name) => {
+        const start = new RegExp(`^[ \\t]*sub\\s+${name}\\s*\\(`, 'm').exec(brs);
+        if (!start) return null;
+        const rest = brs.slice(start.index);
+        const end = rest.slice(1).search(/^[ \t]*end\s+sub\b/m);
+        return end === -1 ? rest : rest.slice(0, end + 1);
+    };
+
+    const start = body('StartLibrarySync');
+    if (!start || !/m\.addonSyncTask\s*<>\s*invalid/.test(start) || !/m\.pendingLibrarySync\s*=\s*true/.test(start)) {
+        err('MainScene.brs StartLibrarySync no longer defers behind an in-flight add-on sync — both launch-time pulls would open connections at once, the concurrency that loses transfers');
+    }
+    if (!/LaunchLibrarySync\(\)/.test(start || '')) {
+        err('MainScene.brs StartLibrarySync no longer launches the library sync when it is free to do so');
+    }
+    const pump = body('PumpPendingLibrarySync');
+    if (!pump || !/m\.pendingLibrarySync\s*<>\s*true\s+then\s+return/.test(pump) || !/LaunchLibrarySync\(\)/.test(pump)) {
+        err('MainScene.brs PumpPendingLibrarySync must run only a deferred sync and launch it exactly once');
+    }
+    for (const name of ['onAddonSyncResult', 'onAddonSyncFinished']) {
+        const b = body(name);
+        if (!b || !/PumpPendingLibrarySync\(\)/.test(b)) {
+            err(`MainScene.brs ${name} does not pump a deferred library sync — a launch that deferred it would never run it (a silent no-library-sync)`);
+        }
+    }
+    const revoked = body('HandleRevokedSession');
+    if (!revoked || !/m\.pendingLibrarySync\s*=\s*false/.test(revoked)) {
+        err('MainScene.brs HandleRevokedSession must clear a deferred library sync — the session is gone and nothing should pull');
+    }
+    return ok;
+}
+
+// TEMPORARY, like the component it guards. NetDiagTask exists to locate the
+// intermittent outbound-connect failures (status -7): DNS, the radio, or
+// concurrency. Once that is known the component, the Settings row and this
+// contract all go together. The first check is the one that matters:
+// roUrlTransfer is Task-only, so a probe written as a plain Group would fail for
+// a reason unrelated to the network and would send the whole investigation the
+// wrong way.
+function checkNetDiagContract() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    const xml = read('components/NetDiagTask.xml');
+    const raw = read('components/NetDiagTask.brs');
+    const task = code(raw);
+    const settings = code(read('components/SettingsScreen.brs'));
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    if (!/extends="Task"/.test(xml)) {
+        err('NetDiagTask.xml does not extend Task — roUrlTransfer is Task-only, so every probe would fail for a reason unrelated to the network question');
+    }
+
+    // The ladder is a control experiment: each rung changes exactly one thing
+    // from the one before it. Losing a rung does not just lose a data point, it
+    // removes the control the adjacent rungs are read against.
+    const tags = ['A', 'B', 'C', 'D', 'E'].filter(t => new RegExp(`tag:\\s*"${t}"`).test(task));
+    if (tags.length !== 5) {
+        err(`NetDiagTask.brs defines only probes ${tags.join(', ')} — the experiment is the A/B/C/D/E ladder, and dropping one removes the control it depends on`);
+    }
+
+    // B must be an IP literal with no DNS in the path; C the same request by
+    // hostname. B vs C is the DNS comparison.
+    if (!/tag:\s*"B"[^\n]*http:\/\/1\.1\.1\.1\//.test(task)) {
+        err('NetDiagTask.brs probe B is not the bare http://1.1.1.1/ IP literal — without a DNS-free internet probe, B vs C cannot isolate name resolution');
+    }
+    if (!/tag:\s*"C"[^\n]*httpforever\.com/.test(task)) {
+        err('NetDiagTask.brs probe C is not the httpforever.com hostname request — C is the DNS-using half of the B/C pair');
+    }
+
+    // D and E differ by exactly one call. If E stops asking for the bundle the
+    // run silently becomes two copies of D, and "both failed" would be read as
+    // evidence about certificates when certificates were never in the test.
+    if (!/tag:\s*"E"[^\n]*certs:\s*true/.test(task)) {
+        err('NetDiagTask.brs probe E does not set certs: true — without it E is an identical copy of D and the run cannot say anything about the CA bundle');
+    }
+    if (!/tag:\s*"D"[^\n]*certs:\s*false/.test(task)) {
+        err('NetDiagTask.brs probe D sets certs — D must be the uncertificated control or there is nothing to compare E against');
+    }
+
+    // DNS is measured on its own, not only through HTTP: roSocketAddress does the
+    // same lookup roUrlTransfer does, so a flaky result here is the resolver
+    // failing before any socket opens.
+    if (!/roSocketAddress/.test(task) || !/IsAddressValid\(\)/.test(task)) {
+        err('NetDiagTask.brs no longer resolves hostnames through roSocketAddress/IsAddressValid — DNS would only be implied by HTTP failures instead of measured');
+    }
+
+    // Device facts decide the radio hypothesis and name the resolver in use.
+    if (!/GetConnectionInfo\(\)/.test(task) || !/GetConnectionType\(\)/.test(task)) {
+        err('NetDiagTask.brs no longer reads GetConnectionType()/GetConnectionInfo() — the Wi-Fi signal and the DNS servers actually in use would be invisible');
+    }
+
+    // The concurrency burst is the only section that puts several transfers in
+    // flight at once, which is the pattern the production failures cluster in.
+    if (!/RunBurst\(/.test(task)) {
+        err('NetDiagTask.brs no longer issues a concurrency burst — a contention cause could not be distinguished from a DNS one');
+    }
+
+    // The three concurrency experiments escalate: the soak removes concurrency
+    // entirely, the sweep finds the size at which it breaks, and the version
+    // comparison tests Roku's documented "HTTP/2 sharing wants one thread"
+    // constraint. Dropping any one leaves a plausible alternative unmeasured.
+    if (!/report\.soak\s*=\s*RunSoak\(/.test(task)) {
+        err('NetDiagTask.brs no longer runs the sequential soak — a link that drops under NO load would look identical to a concurrency problem');
+    }
+    if (!/report\.sweep\s*=\s*RunBurstSweep\(/.test(task)) {
+        err('NetDiagTask.brs no longer sweeps burst sizes — the concurrency threshold would be a guess instead of a measurement');
+    }
+    if (!/report\.versions\s*=\s*RunHttpVersionComparison\(/.test(task) || !/SetHttpVersion\(/.test(task)) {
+        err('NetDiagTask.brs no longer compares HTTP versions — the documented HTTP/2 same-thread sharing constraint would go untested');
+    } else if (!/versions\s*=\s*\[[^\]]*"AUTO"[^\]]*"http2"[^\]]*"1\.1"/.test(task)) {
+        err('NetDiagTask.brs HTTP-version comparison does not cover both "http2" and "1.1" — one of the two mechanisms would be unmeasured');
+    }
+
+    // The dev line printed all-empty on the first device run because it guessed
+    // key names and values. The raw dump is what makes that impossible to
+    // repeat silently, so it is the thing worth guarding.
+    if (!/FormatJson\(info\)/.test(task)) {
+        err('NetDiagTask.brs no longer dumps GetConnectionInfo() raw — the dev line silently printed all-empty on device once already');
+    }
+
+    // BoxStr stringifies platform values. A bare `"" + value` is a Type Mismatch
+    // (&h18) on the booleans GetLinkStatus/GetInternetStatus/HasFeature return —
+    // it crashed the whole task on device before a single probe ran, which is a
+    // deploy spent to learn what this check now catches for free.
+    if (!/Boolean/.test(task) || /return "" \+ value/.test(task)) {
+        err('NetDiagTask.brs BoxStr no longer special-cases booleans (or reverted to `"" + value`) — GetLinkStatus/GetInternetStatus/HasFeature return booleans and that concat is a hard &h18');
+    }
+    if (!/CABundlePath\(\)/.test(task) || !/common:\/certs\/ca-bundle\.crt/.test(task)) {
+        err('NetDiagTask.brs does not name common:/certs/ca-bundle.crt — Roku documents that path for public CAs, and probing anything else proves nothing about the documented fix');
+    }
+    const certAt = task.search(/SetCertificatesFile\(/);
+    const issueAt = task.search(/AsyncGetToString\(\)/);
+    if (certAt === -1) {
+        err('NetDiagTask.brs never calls SetCertificatesFile() — the one call under test is missing');
+    } else if (issueAt !== -1 && certAt > issueAt) {
+        err('NetDiagTask.brs calls SetCertificatesFile() after issuing the request — the docs require it before, and a late call measures the wrong thing');
+    }
+
+    // The threshold is inlined in SettingsScreen.brs because standard
+    // BrightScript has no file-scope const; assert it is still a deliberate,
+    // repeated gesture rather than a single accidental press.
+    if (!/m\.testServerTaps\s*>=\s*(\d+)/.test(settings)) {
+        err('SettingsScreen.brs no longer gates the diagnostics row on a tap count — the hidden row cannot be reached deliberately');
+    } else if (Number(/m\.testServerTaps\s*>=\s*(\d+)/.exec(settings)[1]) < 3) {
+        err('SettingsScreen.brs reveals diagnostics on too few taps — few enough to fire by accident on a row users are meant to press');
+    }
+    if (!/action\s*=\s*"netdiag"/.test(settings) || !/RunNetDiag\(\)/.test(settings)) {
+        err('SettingsScreen.brs never dispatches the netdiag row to RunNetDiag() — the row appears and does nothing');
+    }
+    if (!/AsyncTask_Launch\([^\n]*"NetDiagTask"/.test(settings)) {
+        err('SettingsScreen.brs does not launch NetDiagTask — the diagnostic exists but nothing starts it');
+    }
+
+    // Both files say TEMPORARY in their own header. Cheap, but this is scaffolding
+    // that is easy to build on by accident once it is committed.
+    if (!/TEMPORARY/.test(raw) || !/TEMPORARY/.test(read('components/SettingsScreen.brs'))) {
+        err('NetDiagTask.brs or SettingsScreen.brs has lost its TEMPORARY marker — scaffolding that stops announcing itself tends to stay');
+    }
+
+    return ok;
+}
+
 function checkStreamResolveTaskContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
@@ -1294,7 +1672,7 @@ function checkStreamResolveTaskContract() {
     // 2. With no clock, attempts x (per-request timeout + interval) IS the
     //    ceiling — so the per-request timeout is now load-bearing, and it has to
     //    be a short one AND the one the probe actually passes. At Transport's
-    //    default 15s, six attempts hold the player for over 90 seconds, which is
+    //    default 15s, four attempts hold the player for over a minute, which is
     //    longer than the stall this whole mechanism exists to prevent.
     const store = read('source/stores/PlaybackStore.bs');
     const probeTimeout = /const\s+PROBE_TIMEOUT_MS\s*=\s*(\d+)/.exec(store);
@@ -1316,6 +1694,26 @@ function checkStreamResolveTaskContract() {
         err('StreamResolveTask.brs WaitForPlaylist does not retry a counted number of times — an unbounded wait here is a render-thread-adjacent hang waiting for a bad edit');
     } else if (Number(loop[1]) < 2) {
         err(`StreamResolveTask.brs WaitForPlaylist tries ${loop[1]} time(s) — with one attempt the readiness wait is not a wait, it is the request that was always there`);
+    }
+
+    // 2b. The ceiling is attempts x probe timeout, plus the gaps BETWEEN them —
+    //     which is one fewer than the attempt count, because the last attempt
+    //     deliberately skips its sleep. That off-by-one is the whole reason this
+    //     is computed rather than read off a constant: 4 x 8000 + 3 x 4000 is
+    //     44s, and so was 6 x 4000 + 5 x 4000, which is how the probe timeout was
+    //     raised to 8000 without lengthening the player's worst-case wait at all.
+    //
+    //     The three numbers involved live in two files and are independently
+    //     editable, so pinning any one of them would pin today's arrangement
+    //     rather than the property that matters. A future edit that moves either
+    //     knob up without paying the other back down is the regression, whichever
+    //     file it came through.
+    const gapMs = interval ? Number(interval[1]) : 0;
+    if (loop && probeTimeout && interval) {
+        const ceiling = Number(loop[1]) * Number(probeTimeout[1]) + (Number(loop[1]) - 1) * gapMs;
+        if (ceiling > 44000) {
+            err(`the readiness wait can hold the player for ${ceiling}ms (${loop[1]} attempts x ${probeTimeout[1]}ms probe + ${Number(loop[1]) - 1} x ${gapMs}ms gap) — that ceiling is what this mechanism exists to cap, and it only stays capped while the attempt count and the probe timeout are moved together`);
+        }
     }
 
     // 3. The pause has to be skipped on the final attempt. With no budget
@@ -1369,6 +1767,44 @@ function checkStreamResolveTaskContract() {
             const fallbackAt = /resolved\.probe\s*=\s*\{/.exec(resolveBody).index;
             if (resultAt !== -1 && fallbackAt > resultAt) {
                 err('StreamResolveTask.brs resolve() publishes the result before the probe fallback — the record of a failed probe would never reach the screen');
+            }
+        }
+    }
+
+    // 7. The probe's account has to reach the log in the SUCCESS case too, and this
+    //    one exists because that gap cost real diagnosis. A play that times out once
+    //    and then recovers on attempt 2 IS a success — the failure-branch print was
+    //    gated on gaveUp, so it stayed silent, and the only trace left was a stray
+    //    [http] timeout line with nothing saying how many attempts ran or what the
+    //    first one answered. That is precisely the pair of facts needed to tell a
+    //    cold engine (first attempt expires while the engine is still coming up)
+    //    from a flaky link (an engine already proven ready still loses a request),
+    //    and without it the two were indistinguishable in the log.
+    const player = code(read('components/PlayerScreen.brs'));
+    if (!/probe gave up after/.test(player)) {
+        err('PlayerScreen.brs no longer prints the probe give-up — a stream the server refused has nothing left to tell it apart from one that was never asked');
+    }
+    if (!/probe recovered after/.test(player)) {
+        err('PlayerScreen.brs does not print the RECOVERED probe — a play that timed out once and then succeeded is a success, so with only the give-up path logged its timeout left nothing behind but a stray [http] line');
+    } else {
+        // ...and the recovered print must not be reachable only through the give-up
+        // guard, which is what nesting it in that branch would look like. Walked line
+        // by line to the first branch terminator rather than matched with one regex:
+        // the regex forms of this are all subtly wrong — a lazy match runs straight
+        // through an `else if` sibling and reports it as nested, and a tempered one
+        // that stops at the `else` can then never reach the `end if` it is looking
+        // for. A `^`-anchored lookahead also needs the `m` flag to mean "start of
+        // line" at all, which is the sort of detail a contract should not be
+        // resting on. Being two lines further down the sub is not nesting.
+        const playerLines = player.split('\n');
+        const gaveUpLine = playerLines.findIndex(l => /gaveUp\s*=\s*true/.test(l));
+        if (gaveUpLine !== -1) {
+            for (let i = gaveUpLine + 1; i < playerLines.length; i++) {
+                if (/^\s*(else|end if|end while|end for)\b/.test(playerLines[i])) break;
+                if (/probe recovered after/.test(playerLines[i])) {
+                    err('PlayerScreen.brs prints the recovered probe from inside the gaveUp branch — that branch can never be reached when the probe succeeded, which is the one case that needed it');
+                    break;
+                }
             }
         }
     }
@@ -2815,7 +3251,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkCompanionQrContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkCompanionQrContract()) {
         process.exit(1);
     }
 

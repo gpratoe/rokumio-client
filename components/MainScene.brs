@@ -98,6 +98,11 @@ sub init()
     m.loginFromSettings = false
     m.logoutTask = invalid
     m.pendingLogout = false
+    ' A library sync asked for while the add-on sync is still running is deferred
+    ' to that sync's completion: both are launched together at startup and the
+    ' device refuses too many NEW concurrent connections. See StartLibrarySync.
+    ' Initialized here for the same &h18 reason as the flags above.
+    m.pendingLibrarySync = false
     ' A revoked-account bounce fires at most once per login: both launch-time
     ' pulls (library + addon) fail together on a dead authKey, and only the
     ' first one tears the session down.
@@ -783,6 +788,9 @@ end sub
 sub HandleRevokedSession()
     if m.revokedSessionHandled then return
     m.revokedSessionHandled = true
+    ' The session is being torn down; a launch-time library sync deferred behind
+    ' the add-on sync has nothing left to pull.
+    m.pendingLibrarySync = false
     ResetToAuthGate()
     ShowSessionRevokedDialog()
 end sub
@@ -892,6 +900,7 @@ sub onAddonSyncResult()
         reason = "unknown error"
         if result.error <> invalid and result.error <> "" then reason = result.error
         AddAddonSyncFault("addon sync failed: " + reason)
+        PumpPendingLibrarySync()
         return
     end if
 
@@ -936,6 +945,9 @@ sub onAddonSyncResult()
     if m.storeHost <> invalid and m.storeHost.callFunc("AddonsGetAll").Count() = 0
         AddAddonSyncFault("addon sync: the account reported no add-ons")
     end if
+    ' The add-on sync is done, so a launch-time library sync that deferred behind
+    ' it can now run without opening a second connection alongside it.
+    PumpPendingLibrarySync()
 end sub
 
 ' The worker's sentinel fired. The VALUE of the sentinel decides what that means,
@@ -985,6 +997,7 @@ sub onAddonSyncFinished()
     ClearAddonSyncFaults()
     print "[addons] sync worker finished with NO result (stage: " ; stage ; ")"
     AddAddonSyncFault("addon sync: the worker finished with no result (stage: " + stage + ")")
+    PumpPendingLibrarySync()
 end sub
 
 ' Retract exactly the lines the last add-on sync published. Clearing by text
@@ -1009,11 +1022,34 @@ end sub
 ' persists, so the full library must be re-pulled from the account in the
 ' background each time. The task returns the raw library item array; MainScene
 ' passes it to LibraryStore.SyncFromStremio, the single mapping authority.
+' Launch the library sync unless the add-on sync is still running; if it is,
+' remember to run it when that settles. Both pull in the background at launch,
+' and the device refuses NEW concurrent connections past a low ceiling (~4-6),
+' so serializing the two account syncs keeps the launch burst under it. Whatever
+' still slips through is caught by Transport's bounded retry.
 sub StartLibrarySync()
+    if m.addonSyncTask <> invalid
+        m.pendingLibrarySync = true
+        return
+    end if
+    LaunchLibrarySync()
+end sub
+
+' The actual launch, split out so the deferred path can reuse it unchanged.
+sub LaunchLibrarySync()
     fields = {}
     if m.storeHost <> invalid then fields.authKey = m.storeHost.callFunc("AuthGetAuthKey")
     task = AsyncTask_Launch(m.top, "LibrarySyncTask", "onLibrarySyncResult", fields, "librarySyncTask")
     m.librarySyncTask = task
+end sub
+
+' Run the library sync that was deferred behind an in-flight add-on sync. Called
+' from every place the add-on sync node is torn down — except revocation, which
+' is dropping the session and has nothing to sync.
+sub PumpPendingLibrarySync()
+    if m.pendingLibrarySync <> true then return
+    m.pendingLibrarySync = false
+    LaunchLibrarySync()
 end sub
 
 ' One library sync settled. Reconcile the store with the remote collection and
