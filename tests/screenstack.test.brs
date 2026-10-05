@@ -93,7 +93,7 @@ sub Test_Push_ShowsAndEnters()
 
     stack.push("detail", { pick: 3 })
     Harness_Ok(screens.detail.visible, "detail visible after push")
-    Harness_Ok(screens.home.visible, "outgoing home stays visible after push")
+    Harness_Ok(not screens.home.visible, "outgoing home hidden after push")
     Harness_Equal(stack.count(), 2, "count is 2")
 
     call = Test_FindCall(log, "detail", "OnEnter")
@@ -217,7 +217,7 @@ sub Test_PushNode_LikePush()
 
     Harness_Equal(stack.count(), 2, "count is 2 after pushNode")
     Harness_Ok(player.visible, "player visible after pushNode")
-    Harness_Ok(home.visible, "outgoing home stays visible after pushNode")
+    Harness_Ok(not home.visible, "outgoing home hidden after pushNode")
     Harness_Ok(not home.screenActive, "outgoing home inactive after pushNode")
     Harness_Ok(player.screenActive, "player node is the active top")
 
