@@ -888,7 +888,25 @@ function checkPosterFallbackContract() {
         }
     }
 
-    for (const [name, expectW, expectH] of [['PosterTile', 270, 405], ['EpisodeTile', 320, 180]]) {
+    // Both tiles now cap to their node. PosterTile moved from scaleToFill to
+    // limitSize when its texture was capped to the node (see
+    // checkPosterLoadSizePolicy for why the old "never downscale" note was
+    // wrong), and EpisodeTile followed once its per-season row was measured as
+    // ~25-30 live cells against a 64MB budget shared with Home. limitSize is
+    // never wrong for a high-volume tile. scaleToFit is never right for either.
+    //
+    // The one genuine difference left is what an off-ratio source costs. limitSize
+    // fits the source inside the bounds preserving aspect, so a thumbnail that is
+    // not 2:3 (tile) or 16:9 (episode) decodes smaller than the cell and leaves an
+    // uncovered strip. That is tolerable in both places for the same reason: tiles
+    // never sit over bare artwork. PosterTile's is backed by its own tileBg, and
+    // EpisodeTile's rows sit on the opaque lower half of EpisodesScreen's mask
+    // (alpha 254), not on the fanart behind it. If a tile is ever moved to sit
+    // over visible artwork, that changes — see EpisodeTile.xml.
+    for (const [name, expectW, expectH, expectMode] of [
+        ['PosterTile', 270, 405, 'limitSize'],
+        ['EpisodeTile', 320, 180, 'limitSize']
+    ]) {
         const xml = read(`${name}.xml`);
         const src = read(`${name}.brs`).split('\n').map(line => line.split("'")[0]).join('\n');
 
@@ -921,9 +939,17 @@ function checkPosterFallbackContract() {
             // and the tile is 2:3, so this crops nothing in practice; it is here
             // so an off-ratio image can never leave an uncovered strip with the
             // face showing through it.
-            if (!/loadDisplayMode="scaleToFill"/.test(art[0])) {
-                console.error(`${name}.xml poster does not set loadDisplayMode="scaleToFill" — scaleToFit letterboxes inside the node, so any image whose ratio is not exactly the tile's leaves an uncovered strip where the artless face shows through`);
+            if (!art[0].includes(`loadDisplayMode="${expectMode}"`)) {
+                console.error(`${name}.xml poster does not set loadDisplayMode="${expectMode}" (see the load-size policy in checkPosterLoadSizePolicy for why a high-volume tile caps at its node). A scaling mode leaves the full-size source resident, which is what drove the eviction/refetch cycle. scaleToFit is never right here either — it letterboxes inside the node, leaving an uncovered strip, and because artless is hidden the moment the poster paints there is no tileBg behind that strip to catch it`);
                 ok = false;
+            }
+            if (expectMode === 'limitSize') {
+                for (const bound of ['loadWidth', 'loadHeight']) {
+                    if (!new RegExp(`\\b${bound}="\\d+"`).test(art[0])) {
+                        console.error(`${name}.xml poster sets limitSize but no ${bound} — limitSize only caps the bitmap while it is decoded into texture memory when a load bound is given, so without it the full-size source stays resident and the eviction cycle returns`);
+                        ok = false;
+                    }
+                }
             }
             const dim = art[0].match(/width="(\d+)" height="(\d+)"/);
             if (dim === null || Number(dim[1]) !== expectW || Number(dim[2]) !== expectH) {
@@ -2576,14 +2602,103 @@ function checkLibraryScreenContract() {
 //    renders those same 1920x1080 coordinates 1:1 on a 1280x720 canvas and every
 //    element comes out 1.5x oversized — a silent, total layout failure.
 //
-// Deliberately NOT checked: whether a Poster's bitmap is larger than the device's
-// UI resolution. That produces a real warning ("Loaded texture (1920 x 1080)
-// larger than the UI resolution (1280 x 720)") but the correct fix is a legal
-// non-noScale scaling option, NOT a smaller bitmap. Capping loadWidth/loadHeight
-// silences the identical warning while visibly degrading the artwork, which is
-// strictly worse. Nothing here should ever push toward downscaling.
+// The Poster load-size policy, which the earlier version of this comment got
+// exactly backwards. It claimed capping loadWidth/loadHeight "visibly degrades
+// the artwork, which is strictly worse" and that nothing should push toward
+// downscaling. Measured on a real device, both halves of that are wrong:
+//
+//   1. UNCAPED is what degrades artwork. Home builds a tile for every meta in
+//      every catalog row — a few hundred — and add-on posters arrive at 500x750,
+//      costing 500*750*4 = 1.43MB of texture each to fill a 270x405 node. Total
+//      demand ran ~570MB against a budget no device has, so the memory manager
+//      evicted continuously and every evicted tile refetched. That is the
+//      visible symptom: posters flashing while scrolling the grid, rail icons
+//      vanishing under the same pressure, and a device log full of
+//      "sg.scene.bitmap.big". Capped to the node, each tile is 0.42MB.
+//
+//   2. The size must come from the node's own canvas dimensions, never from the
+//      UI resolution. ui_resolutions=fhd means the canvas is 1920x1080 on every
+//      device and Roku scales the whole canvas to whatever panel it finds. On a
+//      720p-UI device that means the canvas renders at 1280x720 and the panel
+//      upscales. Capping the artwork to the UI resolution — which is what
+//      "Loaded texture (1920 x 1080) larger than the UI resolution (1280 x 720)"
+//      appears to ask for — made it worse, not better: Roku downsampled the
+//      source at load, then the canvas upscale resampled it again, and the
+//      backgrounds visibly degraded. A texture the size of its node is already
+//      correct there. So sg.scene.bitmap.big is a false signal on 720p devices
+//      and is deliberately NOT an error here; GetUIResolution/GetDisplaySize
+//      must never feed a load size, which is why that pairing is rejected above.
+//
+// limitSize is the only mode that caps the texture at load — the others scale at
+// draw time and leave the full bitmap resident — so it is the mode to reach for.
+// It preserves aspect ratio, which is why an off-ratio source decodes smaller than
+// its node and leaves an uncovered strip rather than being squashed. That is
+// acceptable only because every capped tile here sits over something opaque
+// rather than over bare artwork (see checkPosterScalingContract). Capped tiles:
+// PosterTile (2:3 tile, 2:3 posters), EpisodeTile (16:9 cell, 16:9 stills), and
+// the 1:1 glyphs. EpisodeTile used to be exempt on the theory that its crop was
+// load-bearing; that was weighing a cosmetic edge case against ~25-30 uncapped
+// cells per season row, which is the wrong side of the ledger.
+function checkPosterLoadSizePolicy() {
+    const fs = require('fs');
+    const path = require('path');
+    let ok = true;
+    const projectRoot = path.resolve(__dirname, '..');
+    const dir = path.join(projectRoot, 'components');
+    const attr = (src, name) => {
+        const m = new RegExp('\\b' + name + '="([^"]*)"').exec(src);
+        return m ? m[1] : null;
+    };
+    const num = (v) => (v === null ? null : parseInt(v, 10));
+
+    let cappedHighVolumeTile = false;
+
+    for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.xml'))) {
+        const xml = fs.readFileSync(path.join(dir, name), 'utf8');
+
+        for (const m of xml.matchAll(/<Poster\b([^>]*?)\/?>/g)) {
+            const id = attr(m[1], 'id') || '(anonymous)';
+            const w = num(attr(m[1], 'width'));
+            const h = num(attr(m[1], 'height'));
+            const lw = num(attr(m[1], 'loadWidth'));
+            const lh = num(attr(m[1], 'loadHeight'));
+
+            // A hint with only half the pair leaves the other dimension
+            // uncapped, which looks correct and does not work.
+            if ((lw === null) !== (lh === null)) {
+                console.error(`${name}: Poster "${id}" sets only one of loadWidth/loadHeight — the other dimension stays uncapped, so the bitmap is still oversized in that axis. Set both or neither`);
+                ok = false;
+                continue;
+            }
+            if (lw === null) continue;
+
+            // The rule the old comment got backwards, stated as an invariant:
+            // a load hint may only ever match or undercut its own node. A hint
+            // derived from the UI resolution (or from GetDisplaySize) lands here
+            // and is rejected, which is exactly the backgrounds regression.
+            if ((w !== null && lw > w) || (h !== null && lh > h)) {
+                console.error(`${name}: Poster "${id}" caps its load at ${lw}x${lh}, which is LARGER than its own ${w}x${h} node — a load hint must never exceed the node it fills. Deriving the hint from the UI resolution rather than the node is what downsamples artwork twice (once at load, once in the canvas upscale) and visibly degrades it`);
+                ok = false;
+            }
+
+            if (name === 'PosterTile.xml' && id === 'poster') cappedHighVolumeTile = true;
+        }
+    }
+
+    // The tile behind every Home catalog row. Without its hint the grid goes
+    // back to ~570MB of texture demand and the eviction/refetch cycle returns,
+    // and nothing in the diff would look wrong.
+    if (!cappedHighVolumeTile) {
+        console.error('PosterTile.xml: the "poster" node must set loadWidth/loadHeight/limitSize. It is the component behind every Home catalog tile, and it is the one whose uncapped texture size causes the eviction and refetch cycle');
+        ok = false;
+    }
+
+    return ok;
+}
+
 // The companion-app QR on AddonsScreen. Three things are invisible until someone
-// looks at the TV, which is exactly why they are pinned here:
+// looks at the TV — or, in the third case's absence, invisible until texture
+// telemetry is pulled — which is exactly why they are pinned here:
 //   1. The Poster's uri must name a file that exists. A typo'd or missing pkg path
 //      simply paints nothing — the same silent failure that made the QR vanish on
 //      LinkStremioScreen.
@@ -3251,7 +3366,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkCompanionQrContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract()) {
         process.exit(1);
     }
 

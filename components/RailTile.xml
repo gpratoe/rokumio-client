@@ -30,6 +30,9 @@
                 id="railGlyph"
                 width="60"
                 height="60"
+                loadWidth="60"
+                loadHeight="60"
+                loadDisplayMode="limitSize"
                 scaleRotateCenter="[30, 30]"
                 translation="[10, 10]" />
         </Rectangle>

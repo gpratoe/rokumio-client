@@ -31,7 +31,12 @@
         <Rectangle id="bgScrim" width="1920" height="1080" />
 
         <!-- Hero: left poster, right name/type/description. -->
-        <Poster id="heroPoster" translation="[80, 120]" width="340" height="510" />
+        <!-- Capped to its own canvas size, same rule as PosterTile: hero artwork
+             arrives around 500x750, so uncapped it costs 1.43MB of texture to
+             fill a 340x510 node, and it is alive at the same time as the
+             uncapped 1920x1080 background above. The hero is 2:3 and add-on
+             posters are 2:3, so limitSize changes nothing visually. -->
+        <Poster id="heroPoster" translation="[80, 120]" width="340" height="510" loadWidth="340" loadHeight="510" loadDisplayMode="limitSize" />
         <Label
             id="detailName"
             translation="[520, 140]"
