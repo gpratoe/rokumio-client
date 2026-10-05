@@ -28,7 +28,6 @@
                 translation="[120, 120]"
                 width="300"
                 height="300"
-                loadSync="true"
                 uri="pkg:/images/qr-buymeacoffee.png" />
         </StdDlgSideCardArea>
     </children>

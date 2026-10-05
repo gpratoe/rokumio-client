@@ -20,12 +20,56 @@
 ' LibraryStore.
 
 ' The playlist probe asks a liveness question, not for a download, so it gets a
-' short timeout of its own. A server still spinning up an engine answers
-' quickly — with a refusal — and the caller re-asks, so a slow answer is worth
-' nothing. The wait loop's whole bound is attempts x (this + the interval
-' between them), which is only a sensible ceiling while a request cannot eat the
-' default 15s each time.
-const PROBE_TIMEOUT_MS = 4000
+' timeout of its own rather than Transport's 15s default. The wait loop's whole
+' bound is attempts x (this + the interval between them), which is only a sensible
+' ceiling while a request cannot eat the default each time.
+'
+' Raised from 4000 to 8000 against the streaming server's own log, which is what
+' settled the last unexplained timeout in this path. The server logged the engine
+' being created, then our probe arriving 4.4s later, then NOTHING until a second
+' probe 4s after that — roughly 8.4s from engine creation to a served playlist.
+' The engine existed the whole time; it had no torrent metadata yet, and a
+' request for a playlist is HELD OPEN by the server while it gathers some rather
+' than refused. So a 4s deadline was not detecting a slow answer, it was
+' cancelling a request the server was still legitimately working on, and the
+' recovery it bought was a second identical request plus another 4s of waiting.
+'
+' 8000 is the ceiling that lets the first attempt actually wait out a cold
+' engine. It is paid for by cutting the attempt count from six to four
+' (StreamResolveTask), because the bound is attempts x (this + interval) and
+' 6 x (4000 + 4000) and 4 x (8000 + 4000) are both 44s — the same worst case
+' spent on one attempt that can succeed instead of two that cannot.
+const PROBE_TIMEOUT_MS = 8000
+
+' The warm-up's two timeouts, split because the two requests it makes are not
+' remotely alike and one shared number was letting the wrong one fail.
+'
+' The HEAD asks the server to CREATE the engine, and the server's log puts that
+' at 30-65ms from request to "Engine created". It is not a request that waits;
+' it is a request that submits work. 4000ms is roughly a hundred times what it
+' has ever taken, which is the point — a budget that large on a 40ms request is
+' not headroom, it is the number that gets reused for the request below.
+'
+' The ranged GET is the one that actually waits. It blocks until the engine has
+' torrent metadata, which for a DHT-only stream is the whole cost of a cold start
+' — measured across four plays at 1.78s, 3.03s, 4.71s, and one that outlived an
+' 8s cap entirely. That last one is what this number is for: the read is SUPPOSED
+' to block, and a cap that expires before the engine is ready does not fail the
+' stream (the probe behind it picks the wait up) but it throws away the one
+' request that was doing the waiting productively, and the player starts several
+' seconds later than it needed to.
+'
+' Together they cost 14s, less than the 16s they cost when both were 8000, so
+' splitting them bought the readiness wait 2s of real headroom by taking 4s off a
+' request that never used it.
+const ENGINE_HEAD_TIMEOUT_MS = 4000
+
+' The readiness read's own budget, and the only number in this file that is
+' genuinely allowed to be large — it is bounded by DHT, not by us. Kept well
+' under the point where it stops being a wait and starts being a hang on a server
+' that will never answer, because the probe loop behind it is what decides
+' whether the stream is servable and this must not become the thing that decides.
+const ENGINE_READY_TIMEOUT_MS = 10000
 
 class PlaybackStore
     transport as object
@@ -173,7 +217,33 @@ class PlaybackStore
     ' suffix belongs on the request rather than being a separate route the
     ' official client simply has no reason to use.
     function PlaybackUrl(serverAddress as string, infoHash as string, fileIdx as integer, filters = [] as object, trackers = [] as object) as string
-        url = serverAddress + "/" + infoHash + "/" + fileIdx.ToStr() + "/hls.m3u8"
+        return m.TorrentUrl(serverAddress, infoHash, fileIdx, filters, trackers, "/hls.m3u8")
+    end function
+
+    ' The bare torrent route — the official client shape with no HLS suffix —
+    ' which is where the engine is asked into existence.
+    '
+    ' Built from the same stream ResolvePlayback resolved, so the two URLs cannot
+    ' disagree about which file is being warmed or which trackers the engine will
+    ' be handed. Takes the stream rather than the parts because the caller holds
+    ' the stream, and re-deriving it here is the only way the warm-up stays in
+    ' step with the URL that follows it.
+    function EngineUrl(serverAddress as string, stream as object, season = 0 as integer, episode = 0 as integer) as string
+        infoHash = m.StreamInfoHash(stream)
+        if infoHash = "" or serverAddress = "" then return ""
+        return m.TorrentUrl(serverAddress, infoHash, m.DirectFileIdx(stream), m.EpisodeFilters(season, episode), m.StreamTrackers(stream), "")
+    end function
+
+    ' The one place that knows the shape of a streaming-server torrent request:
+    ' {server}/{infoHash}/{fileIdx|-1}{suffix}, carrying f= and tr= as query
+    ' parameters.
+    '
+    ' The suffix is a parameter instead of a boolean because the only two callers
+    ' differ by exactly one path segment, and a flag here would be read at the
+    ' call site as an unanswerable "which one is this" — the /hls.m3u8 literal
+    ' already answers it where the call is made.
+    function TorrentUrl(serverAddress as string, infoHash as string, fileIdx as integer, filters as object, trackers as object, suffix as string) as string
+        url = serverAddress + "/" + infoHash + "/" + fileIdx.ToStr() + suffix
         query = m.QueryString(filters, trackers)
         if query <> "" then url = url + "?" + query
         return url
@@ -284,6 +354,75 @@ class PlaybackStore
         url = stream.url
         if url <> invalid and url.Trim() <> "" then return false
         return m.StreamInfoHash(stream) <> ""
+    end function
+
+    ' HEAD the bare torrent route so the streaming server has created the engine
+    ' before the playlist is ever asked for.
+    '
+    ' Stremio's own client opens every torrent this way, and the server log shows
+    ' the engine appearing on the back of that request. Asking for the playlist
+    ' first is what left the probe timing out six times over: that was not a slow
+    ' engine being raced, it was a server that had never been asked to make one.
+    '
+    ' Best effort, and never fatal. The probe loop behind this is what decides
+    ' whether the stream is servable and it runs either way, so a warm-up that
+    ' fails costs the optimisation and nothing else — which is why the caller can
+    ' keep it in a try of its own.
+    '
+    ' The status comes back for the reason the probe's does: to be able to say
+    ' afterwards whether the request reached the server at all. A 2xx here is not
+    ' logged by the transport trace, so this record is the only trace of it.
+    '
+    ' Then the forced-metadata read, which is the request that actually makes the
+    ' engine able to answer. The HEAD above only asks the server to CREATE the
+    ' engine, and it returns in milliseconds — so "HEAD 200" was never evidence
+    ' the engine could serve a playlist, and the probe behind this was left
+    ' discovering the difference the slow way, one 4s timeout at a time.
+    '
+    ' Stremio's client does not poll for readiness at all. It asks for the first
+    ' 64KB of the file and lets THAT block until the engine has metadata, and the
+    ' server's log for a working device shows exactly that request sitting between
+    ' the HEAD and the /hls.m3u8. So this mirrors the client's own sequence rather
+    ' than inventing a readiness protocol: one ranged GET converts "the engine
+    ' exists" into "the engine can serve", and the probe behind it then hits a
+    ' ready engine on attempt 1.
+    '
+    ' The Range header is what keeps this from being the mistake the HEAD comment
+    ' above warns about. An unbounded GET on this route is a request to buffer an
+    ' entire feature into a string; 64KB is enough to prove the engine can serve
+    ' bytes and small enough to be free. The body is discarded — this is a
+    ' readiness signal, not data, and the player fetches its own segments
+    ' afterwards.
+    '
+    ' Recorded separately rather than folded into `ok`, because whether the engine
+    ' was CREATED and whether it went READY are different questions and only the
+    ' first is answered by the HEAD. A cold engine and an unreachable server are
+    ' indistinguishable without the second, which is the whole difference between
+    ' "wait longer" and "this stream is not coming".
+    function WarmEngine(url as string) as object
+        result = { ok: false, status: 0, error: "", range: invalid }
+        if url = "" then
+            result.error = "no engine url"
+            return result
+        end if
+        raw = m.transport.Head(url, ENGINE_HEAD_TIMEOUT_MS)
+        if raw = invalid
+            result.error = "no transport"
+            return result
+        end if
+        result.ok = raw.ok
+        result.status = raw.status
+        if raw.error <> invalid then result.error = raw.error
+
+        ' Not guarded on the HEAD's own success. A refused or timed-out HEAD still
+        ' leaves the server building the engine, and this request is the one that
+        ' finds out whether it did — so skipping it on a failed HEAD would throw
+        ' away the only remaining evidence exactly when there is least of it.
+        ranged = m.transport.GetRaw(url, ENGINE_READY_TIMEOUT_MS, { "Range": "bytes=0-65535" })
+        if ranged <> invalid then
+            result.range = { ok: ranged.ok, status: ranged.status, error: ranged.error }
+        end if
+        return result
     end function
 
     ' One plain GET of the playlist URL, with the body left as text.

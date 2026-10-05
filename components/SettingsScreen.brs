@@ -5,6 +5,18 @@
 ' Test-server row that hearts the configured streaming server so a playback
 ' dead-end is caught before pressing play. Every value is rebuilt on entry so
 ' the rows always reflect the persisted values.
+'
+' A hidden Network-diagnostics row sits behind NETDIAG_REVEAL_TAPS presses of
+' the Test-server row. It is TEMPORARY: it exists to locate the intermittent
+' outbound-connect failures (status -7) as DNS, radio, or concurrency, and it
+' goes away — with NetDiagTask itself — once that is known.
+
+' Five consecutive presses of the Test-server row reveal the hidden
+' Network-diagnostics row. Test-server is the right host for the gesture: it is
+' already the row about connectivity, so a diagnostic living one row below it
+' reads as a continuation rather than as a stray debug affordance. The count is
+' inlined at its one use because standard BrightScript has no file-scope const
+' (that is a BrighterScript feature, and this is a .brs file).
 
 sub init()
     m.title = m.top.FindNode("settingsTitle")
@@ -23,10 +35,17 @@ sub init()
     m.rows = []
     m.languages = ["en", "es", "fr", "de", "it", "pt"]
     m.heartbeatTask = invalid
+    ' Component fields outlive OnEnter, so once the diagnostics row is revealed it
+    ' stays revealed for the rest of the session instead of vanishing every time
+    ' the screen is left and re-entered.
+    m.showNetDiag = false
+    m.testServerTaps = 0
+    m.netDiagTask = invalid
 end sub
 
 function OnEnter(params as object) as void
     CancelTestServer()
+    CancelNetDiag()
     BuildRows()
     m.status.text = ""
     m.list.SetFocus(true)
@@ -34,6 +53,7 @@ end function
 
 function OnExit() as void
     CancelTestServer()
+    CancelNetDiag()
 end function
 
 function OnBackPressed() as boolean
@@ -76,6 +96,15 @@ sub BuildRows()
         title: "Test server"
         value: "Check streaming server"
     })
+    ' Appended last so the rows above keep the indexes they already had, and the
+    ' RowList already has numRows="6" with four rows in use.
+    if m.showNetDiag
+        m.rows.Push({
+            action: "netdiag"
+            title: "Network diagnostics"
+            value: "Probe LAN, plain HTTP and HTTPS with and without a CA bundle"
+        })
+    end if
 
     content = CreateObject("roSGNode", "ContentNode")
     for each row in m.rows
@@ -126,7 +155,19 @@ sub onRowSelected()
     else if action = "language"
         CycleLanguage()
     else if action = "testServer"
+        ' Counted here rather than inside TestServer so every press is counted,
+        ' including the presses that TestServer itself declines to act on —
+        ' a tap that gets rejected for a missing address is still a tap, and the
+        ' gesture should not need the server to be configured to reach.
+        m.testServerTaps = m.testServerTaps + 1
+        if m.testServerTaps >= 5 and not m.showNetDiag
+            m.showNetDiag = true
+            BuildRows()
+            m.status.text = "Network diagnostics added below — press it to run."
+        end if
         TestServer()
+    else if action = "netdiag"
+        RunNetDiag()
     end if
 end sub
 
@@ -292,6 +333,56 @@ sub CancelTestServer()
     if m.heartbeatTask <> invalid
         task = m.heartbeatTask
         m.heartbeatTask = invalid
+        AsyncTask_Reap(task, m.top, true)
+    end if
+end sub
+
+' TEMPORARY. Launch the four-probe HTTPS diagnostic. The server address is read
+' here and handed over rather than read inside the task, because the task is
+' scoped to the component and SettingsStore is not — this is the same handoff
+' HeartbeatTask's "address" field exists for.
+sub RunNetDiag()
+    if m.netDiagTask <> invalid then return
+    address = ""
+    if m.stores <> invalid then address = m.stores.settings.callFunc("SettingsGetServerAddress")
+
+    m.status.text = "Running network diagnostics…"
+    m.netDiagTask = AsyncTask_Launch(m.top, "NetDiagTask", "onNetDiagResult", { serverAddress: address }, "netDiagTask")
+end sub
+
+' Fires once per probe as well as once at the end, so the summary fills in
+' progressively instead of appearing all at once. The done flag is what
+' distinguishes the two: an alwaysNotify field with no value can notify before
+' the worker has written anything, and reaping on that would pull the task out
+' from under a run that is still going. An invalid result is the same case and is
+' dropped for the same reason.
+'
+' Only the compact "A=200 B=301 C=-7 D=200" summary goes on screen. The verdict
+' is a full sentence and settingsStatus is a single unfilled line, so the prose
+' would be clipped; it is printed to the console instead, where the reader
+' already is. C against D is readable from the summary either way.
+sub onNetDiagResult()
+    if m.netDiagTask = invalid then return
+    task = m.netDiagTask
+    result = task.result
+    if result = invalid then return
+    if result.done
+        m.netDiagTask = invalid
+        AsyncTask_Reap(task, m.top, false)
+    end if
+    m.status.text = result.summary
+end sub
+
+sub CancelNetDiag()
+    if m.netDiagTask <> invalid
+        task = m.netDiagTask
+        m.netDiagTask = invalid
+        ' Best effort. STOP and RemoveChild are synchronous on this thread while
+        ' the worker checks the flag on its own, so it may or may not see this
+        ' before the node goes away. It is worth setting because the flag is
+        ' checked BETWEEN probes, and the alternative is a reaped node running
+        ' three more five-second transfers against a screen nobody is watching.
+        task.cancelRequested = true
         AsyncTask_Reap(task, m.top, true)
     end if
 end sub

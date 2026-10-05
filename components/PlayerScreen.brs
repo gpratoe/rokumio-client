@@ -196,29 +196,69 @@ sub onResolveResult()
         AsyncTask_Reap(task, m.top, false)
         StopResolvePulse()
 
-        if result = invalid or not result.ok or result.url = invalid or result.url = ""
-            ' A torrent resolve is not one request. StreamResolveTask probes the
-            ' stream up to six times with a four second gap and, on exhausting that,
-            ' records what happened in `result.probe`. That record used to be
-            ' dropped here: the screen only ever asked "did result.ok arrive", so a
-            ' source that answered six times and never produced a byte looked
-            ' identical to one that was never asked. This prints the probe's own
-            ' account — final HTTP status, how many attempts it took to give that
-            ' up, and the first error rather than only the last — so the trace says
-            ' which of the two happened.
-            '
-            ' Read only on this branch, where result is known valid: a field read on
-            ' invalid throws &h18 (the trap MainScene.onAddonSyncResult documents),
-            ' and a probe that gave up is always an unsuccessful resolve anyway, so
-            ' there is nothing to report in the success path.
-            if result <> invalid and result.probe <> invalid and result.probe.gaveUp = true then
-                probeStatus = -1
-                if result.probe.status <> invalid then probeStatus = result.probe.status
-                probeAttempts = 0
-                if result.probe.attempts <> invalid then probeAttempts = result.probe.attempts
-                print "[resolve] probe gave up after " ; probeAttempts ; " attempt(s) — status=" ; probeStatus ; " firstError=[" ; result.probe.firstError ; "] body=" ; Left(result.probe.body, 200)
+        ' The engine warm-up, printed on both paths and unconditionally within
+        ' them. The transport trace deliberately stays quiet about a 2xx, so
+        ' without this line a warm-up that worked leaves no trace at all — and
+        ' "did the HEAD reach the server" is the first thing to establish when a
+        ' torrent is slow to start, since everything downstream of it assumes the
+        ' engine exists.
+        '
+        ' `trackers` is the field that decides what the answer meant. A cold engine
+        ' given trackers resolves in seconds; one given none has DHT alone to find
+        ' metadata, which is a wait no timeout here should be tuned against.
+        '
+        ' `range` is the second request in that warm-up: a ranged GET of the first
+        ' 64KB of the file, which is what actually waits out the metadata. The HEAD
+        ' above only reports that the engine was CREATED — it returns in
+        ' milliseconds and says nothing about whether the engine can then answer.
+        ' Printed next to it because the pair is the diagnosis: HEAD 200 with a
+        ' dead range means the engine was created and never became ready (the
+        ' stream is not coming), and both 200 means the engine was ready and
+        ' anything after this is the player''s own problem.
+        if result <> invalid and result.warmup <> invalid then
+            warmTrackers = -1
+            if result.warmup.trackers <> invalid then warmTrackers = result.warmup.trackers
+            warmIdx = -1
+            if result.warmup.fileIdx <> invalid then warmIdx = result.warmup.fileIdx
+            print "[resolve] engine warm-up HEAD -> status=" ; result.warmup.status ; " ok=" ; result.warmup.ok ; " trackers=" ; warmTrackers ; " fileIdx=" ; warmIdx ; " error=[" ; result.warmup.error ; "]"
+            ' Printed on its own line rather than folded into the one above, because
+            ' a range of `invalid` is a warm-up that never got to run the request
+            ' and concatenating a missing field would throw &h18 — the same trap
+            ' MainScene.onAddonSyncResult documents.
+            if result.warmup.range <> invalid then
+                print "[resolve] engine metadata read -> status=" ; result.warmup.range.status ; " ok=" ; result.warmup.range.ok ; " error=[" ; result.warmup.range.error ; "]"
             end if
+        end if
 
+        ' The probe's own account, and it is printed for the SUCCESS case too. That used to
+        ' be gated to the failure branch on the reasoning that a probe which gave up
+        ' is always an unsuccessful resolve — which is true, and which meant the
+        ' successful case reported nothing at all. A play that timed out once and
+        ' then recovered on attempt 2 is a SUCCESS, so its one timeout was visible
+        ' only as a stray [http] line with nothing to say how many attempts it took
+        ' or what the first one answered. That is exactly the distinction needed to
+        ' tell a cold engine (first attempt expires, engine not ready yet) from a
+        ' flaky link (an already-warm engine still loses a request), and it was the
+        ' thing that made the two indistinguishable in the log.
+        '
+        ' Read only when result is known valid: a field read on invalid throws &h18
+        ' (the trap MainScene.onAddonSyncResult documents). Printed only when the
+        ' probe took more than one attempt — a first-try success is the expected
+        ' case and printing it every play would be noise, so its absence from the
+        ' log IS the signal that nothing went wrong.
+        if result <> invalid and result.probe <> invalid then
+            probeStatus = -1
+            if result.probe.status <> invalid then probeStatus = result.probe.status
+            probeAttempts = 0
+            if result.probe.attempts <> invalid then probeAttempts = result.probe.attempts
+            if result.probe.gaveUp = true then
+                print "[resolve] probe gave up after " ; probeAttempts ; " attempt(s) — status=" ; probeStatus ; " firstError=[" ; result.probe.firstError ; "] body=" ; Left(result.probe.body, 200)
+            else if probeAttempts > 1 then
+                print "[resolve] probe recovered after " ; probeAttempts ; " attempt(s) — status=" ; probeStatus ; " firstError=[" ; result.probe.firstError ; "]"
+            end if
+        end if
+
+        if result = invalid or not result.ok or result.url = invalid or result.url = ""
             m.status.text = "This source is poorly available or your internet connection is not fast enough."
             return
         end if

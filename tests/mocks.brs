@@ -44,21 +44,30 @@ function ScriptedTransport(script as object) as object
     ' The raw twin of _respond: the body comes back as text rather than as parsed
     ' json, which is the shape Transport.GetRaw speaks. An entry that scripts no
     ' `body` yields an empty one rather than a fabricated body.
-    transport._respondRaw = function(method as string, url as string) as object
+    transport._respondRaw = function(method as string, url as string, headers = invalid as dynamic, timeoutMs = invalid as dynamic) as object
         for each entry in m._script
             if (entry.method = invalid or entry.method = method) and (entry.url = invalid or entry.url = url)
-                m.log.Push({ method: method, url: url, body: entry.body })
+                m.log.Push({ method: method, url: url, headers: headers, timeoutMs: timeoutMs, body: entry.body })
                 return { ok: entry.ok, status: entry.status, body: entry.body, error: entry.error }
             end if
         end for
-        m.log.Push({ method: method, url: url, body: invalid })
+        m.log.Push({ method: method, url: url, headers: headers, timeoutMs: timeoutMs, body: invalid })
         return { ok: false, status: 0, body: invalid, error: "no scripted response" }
     end function
-    ' timeoutMs is accepted and ignored, matching Transport.GetRaw's signature.
-    ' A mock that declared one parameter and was called with two is how a seam
-    ' starts lying about what the real client accepts.
-    transport.GetRaw = function(url as string, timeoutMs = invalid as dynamic) as object
-        return m._respondRaw("GET", url)
+    ' timeoutMs is accepted and logged, not just ignored, matching Transport's real
+    ' signatures. A mock that swallows it cannot show that two requests were given
+    ' two different budgets — which is the whole claim the warm-up's split constants
+    ' rest on, and the thing that let a 40ms request and the request meant to block
+    ' share one number. A mock that declared fewer parameters than the real client
+    ' is also how a seam starts lying about what it accepts.
+    transport.GetRaw = function(url as string, timeoutMs = invalid as dynamic, headers = invalid as dynamic) as object
+        return m._respondRaw("GET", url, headers, timeoutMs)
+    end function
+    ' The HEAD twin: raw-shaped, because a HEAD carries no body to parse and
+    ' Transport.Head returns the client's raw result for the same reason
+    ' GetRaw does.
+    transport.Head = function(url as string, timeoutMs = invalid as dynamic) as object
+        return m._respondRaw("HEAD", url, invalid, timeoutMs)
     end function
     transport.Post = function(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
         return m._respond("POST", url, body)

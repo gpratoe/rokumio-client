@@ -55,7 +55,6 @@
                 translation="[185, 140]"
                 width="330"
                 height="330"
-                loadSync="true"
                 uri="pkg:/images/qr-companion.png" />
             <Label
                 id="companionCaption"

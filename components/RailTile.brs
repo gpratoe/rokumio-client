@@ -35,6 +35,9 @@ end sub
 
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
+    ' Unconditional for the same reason as PosterTile: re-assigning the uri is
+    ' what makes Roku re-request an evicted texture, so guarding it strands the
+    ' icon blank on a recycled tile.
     m.glyph.uri = m.top.itemContent.title
     UpdateLook()
 end sub

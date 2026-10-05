@@ -60,6 +60,18 @@ class ScreenStack
             ' A non-modal push hides the outgoing screen. A modal push keeps it
             ' visible (dimmed by the modal's own scrim) but still blurs it, so
             ' the underlying screen can never eat keys while the modal is up.
+            '
+            ' Hiding unconditionally is also what keeps the incoming screen on top
+            ' without inspecting z-order. An earlier version left the outgoing
+            ' screen visible whenever the incoming one was declared later in
+            ' MainScene.xml, on the theory that a still-visible screen holds its
+            ' textures and so evicts less. Measured on device that bought
+            ' nothing — eviction is driven by total texture demand, not by
+            ' whether a node is visible, so the grid reloaded either way — and it
+            ' cost a real regression: DetailsScreen is declared before
+            ' LibraryScreen, so Library → Details left Details underneath it. It
+            ' also needed node-identity comparison to find the declaration
+            ' order, which is where the roSGNode `=` crash came from.
             if not modal then shown.node.visible = false
             shown.node.callFunc("BlurFocus")
             shown.node.screenActive = false

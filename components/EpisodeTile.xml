@@ -33,15 +33,27 @@
         </Group>
         <!-- Never hide this poster: it paints nothing until it has a bitmap.
              Declaring it visible="false" deadlocked the load — see
-             PosterTile.xml. scaleToFill (see the note there) so artwork covers
-             the cell instead of letterboxing inside it. -->
-        <Poster id="poster" width="320" height="180" loadDisplayMode="scaleToFill"/>
+             PosterTile.xml.
+
+             Capped to the cell like PosterTile. EpisodesScreen realizes a whole
+             row per season, so a 20-episode season is ~25-30 live cells; at an
+             uncapped source that is 1.5MB each for a 500x750 still and 8.3MB for a
+             full 1920x1080 one, against a 64MB texture budget shared with Home.
+
+             The cost is that limitSize fits the source inside the bounds
+             preserving aspect, so an off-ratio thumbnail decodes narrower than
+             the cell and leaves an uncovered strip. Acceptable here because
+             episode stills are overwhelmingly 16:9 and the cells sit over a
+             60%-opaque scrim (Theme.scrim = 0x00000099) rather than bare art, so
+             a gap reads as dark fill instead of a hole. Note that artless is
+             hidden once the poster paints, so tileBg is NOT behind the strip. -->
+        <Poster id="poster" width="320" height="180" loadWidth="320" loadHeight="180" loadDisplayMode="limitSize"/>
         <!-- Optional watched badge (40px check on a translucent plate,
              top-right) so the white glyph reads against any thumbnail.
              Hidden until a screen passes itemContent.watched. -->
         <Group id="watchedBadgeGroup" translation="[266, 4]" visible="false">
             <Rectangle id="watchedPlate" width="52" height="52" />
-            <Poster id="watchedBadge" width="40" height="40" translation="[6, 6]" />
+            <Poster id="watchedBadge" width="40" height="40" loadWidth="40" loadHeight="40" loadDisplayMode="limitSize" translation="[6, 6]" />
         </Group>
     </children>
 </component>
