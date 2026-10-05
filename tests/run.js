@@ -2702,8 +2702,23 @@ function checkPosterLoadSizePolicy() {
 //   1. The Poster's uri must name a file that exists. A typo'd or missing pkg path
 //      simply paints nothing — the same silent failure that made the QR vanish on
 //      LinkStremioScreen.
-//   2. loadSync must be set. It is a bundled image with no network to wait on, so
-//      there is no reason to render a frame with a hole in it.
+//   2. loadSync must NOT be set. It was originally required, on the reasoning
+//      that a bundled image has no network to wait on so there is no reason to
+//      paint a frame with a hole. Device testing showed the hole is not real —
+//      the panel renders correctly without it — while the stall is: loadSync
+//      blocks startup on decoding a 700x700 asset for a screen most sessions
+//      never open.
+//
+//      One thing this does NOT do, which an earlier version of this comment got
+//      wrong: removing loadSync does not free the texture. A fresh-start
+//      r2d2-bitmaps with loadSync already removed still showed both QRs resident
+//      at 700x700 / 1,982,464 bytes each while sitting on Home. Roku eagerly
+//      decodes bundled Poster textures for nodes that exist in the scene graph,
+//      and every static screen exists from app start. loadSync only controls
+//      whether the app *blocks* on that decode, not whether it happens. Actually
+//      reclaiming those ~3.96MB means clearing the Poster's uri when the screen
+//      is hidden, which is a separate change and is not implemented here — do not
+//      assume otherwise from this check passing.
 //   3. The image must still decode to the URL the panel copy claims it offers.
 //      The encoder in scripts/gen-companion-qr.js is a hand-rolled QR
 //      implementation, and a QR that looks right but will not scan is worse than
@@ -2741,8 +2756,8 @@ function checkCompanionQrContract() {
             console.error(`AddonsScreen.xml: Poster "${id}" uri "${uri[1]}" does not resolve to ${rel} on disk`);
             ok = false;
         }
-        if (!/\bloadSync="true"/.test(attrs)) {
-            console.error(`AddonsScreen.xml: Poster "${id}" must set loadSync="true". It is a bundled asset with no network wait, so there is no reason to paint a frame without it`);
+        if (/\bloadSync="true"/.test(attrs)) {
+            console.error(`AddonsScreen.xml: Poster "${id}" sets loadSync="true". Device testing showed the companion panel renders correctly without it, so loadSync only buys a startup stall on decoding a 700x700 asset for a screen most sessions never open. Note this does NOT reclaim texture memory either way — see the comment above for what actually would`);
             ok = false;
         }
     }
