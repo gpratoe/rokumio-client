@@ -2639,6 +2639,103 @@ function checkLibraryScreenContract() {
 // the 1:1 glyphs. EpisodeTile used to be exempt on the theory that its crop was
 // load-bearing; that was weighing a cosmetic edge case against ~25-30 uncapped
 // cells per season row, which is the wrong side of the ledger.
+// A Poster that crops (scaleToZoom) is a promise about its source: the node shows
+// the centre of the image, scaled by max(nodeW/srcW, nodeH/srcH) so it covers the
+// node. When the source's aspect ratio matches the node's, that is a near-identity
+// and nothing is lost. When it does not, the crop silently throws most of the
+// image away — and for a gradient the surviving slice can be the one part that
+// looks completely wrong.
+//
+// This is not hypothetical. images/mask.png was a 1918x1079 vertical alpha ramp in
+// a 1920x1080 node: aspects matched to within 0.1%, so scaleToZoom was effectively
+// a fit and the scrim looked right. Shrinking it to an 8x256 ramp — 8KB of texture
+// instead of 8.36MB — left scaleToZoom scaling it 240x, rendering 1920x61440, and
+// cropping to source rows 125.8-130.2: alpha ~247, i.e. a flat opaque black
+// Episodes background. Nothing in the diff looked wrong and nothing failed to
+// build; the screen just went black.
+//
+// The lesson is not "don't shrink the mask", it is that an asset's aspect ratio is
+// load-bearing whenever the display mode crops. Two ways out, and this pins both:
+//   - Give the asset the node's aspect ratio so no crop can change what is shown
+//     (mask.png is now 114x64, 16:9 to within 0.2%, at 29KB instead of 8.36MB).
+//   - Or pick a display mode that does not crop, when the source has no aspect
+//     worth preserving. A gradient uniform along x has nothing to preserve, so
+//     scaleToFill is both correct and immune to this entire class of bug.
+function checkPosterCropFit() {
+    const fs = require('fs');
+    const path = require('path');
+    let ok = true;
+    const projectRoot = path.resolve(__dirname, '..');
+    const dir = path.join(projectRoot, 'components');
+    const attr = (src, name) => {
+        const m = new RegExp('\\b' + name + '="([^"]*)"').exec(src);
+        return m ? m[1] : null;
+    };
+    const num = (v) => (v === null ? null : parseInt(v, 10));
+
+    const pngSize = (file) => {
+        const fd = fs.openSync(file, 'r');
+        const head = Buffer.alloc(24);
+        fs.readSync(fd, head, 0, 24, 0);
+        fs.closeSync(fd);
+        if (head.readUInt32BE(0) !== 0x89504e47) return null;
+        return { w: head.readUInt32BE(16), h: head.readUInt32BE(20) };
+    };
+
+    // Modes that crop to cover the node. limitSize/scaleToFill/scaleToFit
+    // deliberately do not, so they are not subject to this check.
+    const crops = new Set(['scaleToZoom']);
+    let sawBgMask = false;
+
+    for (const name of fs.readdirSync(dir).filter(f => f.endsWith('.xml'))) {
+        const xml = fs.readFileSync(path.join(dir, name), 'utf8');
+        for (const m of xml.matchAll(/<Poster\b([^>]*?)\/?>/g)) {
+            const id = attr(m[1], 'id') || '(anonymous)';
+            const uri = attr(m[1], 'uri');
+            const mode = attr(m[1], 'loadDisplayMode');
+            const w = num(attr(m[1], 'width'));
+            const h = num(attr(m[1], 'height'));
+
+            if (name === 'EpisodesScreen.xml' && id === 'bgMask') {
+                sawBgMask = true;
+                if (mode !== 'scaleToFill') {
+                    console.error(`EpisodesScreen.xml: bgMask must use loadDisplayMode="scaleToFill", not "${mode}". The source is a vertical alpha ramp that is uniform along x, so it has no aspect ratio worth preserving and nothing is lost by stretching it — whereas a cropping mode makes the render depend entirely on the asset's aspect ratio matching the node's, which is the bug that turned this scrim into an opaque black screen. If you ever swap in a non-gradient asset here, change the display mode with it`);
+                    ok = false;
+                }
+            }
+
+            // Only bundled assets have knowable dimensions. Posters whose uri is
+            // assigned at runtime (the background fanarts) cannot be checked here,
+            // which is worth knowing rather than assuming.
+            if (!mode || !crops.has(mode)) continue;
+            if (!uri || !uri.startsWith('pkg:/')) continue;
+            const rel = uri.replace(/^pkg:\//, '');
+            if (!fs.existsSync(path.join(projectRoot, rel))) continue;
+            if (!w || !h) continue;
+
+            const src = pngSize(path.join(projectRoot, rel));
+            if (!src) continue;
+
+            // scale = max(...) to cover the node; the smaller axis then overflows.
+            const scale = Math.max(w / src.w, h / src.h);
+            const visibleFrac = (w / scale / src.w) * (h / scale / src.h);
+            const lostPct = (1 - visibleFrac) * 100;
+
+            if (lostPct > 5) {
+                console.error(`${name}: Poster "${id}" uses ${mode} on a ${w}x${h} node but ${rel} is ${src.w}x${src.h}. Covering the node crops away ${lostPct.toFixed(0)}% of the image (aspect ${(src.w / src.h).toFixed(3)} vs node ${(w / h).toFixed(3)}), so the node renders only the centre slice. For a gradient that slice can be a flat block of one tone. Either give the asset the node's aspect ratio or use a non-cropping mode`);
+                ok = false;
+            }
+        }
+    }
+
+    if (!sawBgMask) {
+        console.error('EpisodesScreen.xml: no bgMask Poster found — the gradient scrim that fades the background fanart is missing entirely');
+        ok = false;
+    }
+
+    return ok;
+}
+
 function checkPosterLoadSizePolicy() {
     const fs = require('fs');
     const path = require('path');
@@ -3381,7 +3478,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkPosterCropFit() || !checkCompanionQrContract()) {
         process.exit(1);
     }
 
