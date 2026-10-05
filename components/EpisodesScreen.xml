@@ -22,7 +22,15 @@
         <Rectangle id="epBg" width="1920" height="1080" color="0x0" />
         <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToZoom" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
-        <Poster id="bgMask" width="1920" height="1080" loadDisplayMode="scaleToZoom" uri="pkg:/images/mask.png" />
+        <!-- scaleToFill, not scaleToZoom. images/mask.png is a vertical alpha ramp
+             that is uniform along x, so preserving its aspect ratio buys nothing —
+             it only decides which slice of the gradient survives the crop. At
+             8x256 against a 1920x1080 node, scaleToZoom scales 240x and crops to
+             a 4-row window at the middle of the ramp, which is alpha ~247 and
+             renders as a flat opaque black background. scaleToFill stretches the
+             ramp across the node, which is what the 1918x1079 original was already
+             getting by accident (its aspect matched the node to within 0.1%). -->
+        <Poster id="bgMask" width="1920" height="1080" loadDisplayMode="scaleToFill" uri="pkg:/images/mask.png" />
         <!-- Header: series name, then the focused episode's label and synopsis. -->
         <Label
             id="epName"
