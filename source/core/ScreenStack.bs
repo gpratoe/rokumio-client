@@ -51,16 +51,48 @@ class ScreenStack
     ' A surviving component keeps everything it owns — a mid-buffer Video node's
     ' media player above all — alive behind the next screen. Static screens pass
     ' false and are never removed (see push).
+    '
+    ' `modal` no longer changes anything. It used to decide whether the outgoing
+    ' screen was hidden, which is the one behaviour this sub no longer has, and no
+    ' caller ever passed it — every push site in the app is two-argument, and the
+    ' support dialog the Home rail marks `dialog = true` is intercepted by MainScene
+    ' and shown as a native dialog rather than pushed through here. Left in the
+    ' signature so the API does not have to change for the callers that read like
+    ' they want it, but do not expect it to do anything.
     sub pushNode(node as object, params = invalid as dynamic, modal = false as boolean, destroy = true as boolean)
         if node = invalid then return
         screenId = node.id
 
         shown = m.top()
         if shown <> invalid
-            ' A non-modal push hides the outgoing screen. A modal push keeps it
-            ' visible (dimmed by the modal's own scrim) but still blurs it, so
-            ' the underlying screen can never eat keys while the modal is up.
-            if not modal then shown.node.visible = false
+            shouldHide = false
+            if modal
+                shouldHide = false
+            else
+                incomingParent = node.getParent()
+                shownParent = shown.node.getParent()
+                if incomingParent <> invalid and shownParent <> invalid and incomingParent = shownParent
+                    incomingIdx = -1
+                    shownIdx = -2
+                    count = incomingParent.getChildCount()
+                    for i = 0 to count - 1
+                        child = incomingParent.getChild(i)
+                        if child = node then incomingIdx = i
+                        if child = shown.node then shownIdx = i
+                        if incomingIdx >= 0 and shownIdx >= 0 then exit for
+                    end for
+                    if incomingIdx < shownIdx
+                        shouldHide = true
+                    else
+                        shouldHide = false
+                    end if
+                else
+                    shouldHide = false
+                end if
+            end if
+            if shouldHide
+                shown.node.visible = false
+            end if
             shown.node.callFunc("BlurFocus")
             shown.node.screenActive = false
         end if
