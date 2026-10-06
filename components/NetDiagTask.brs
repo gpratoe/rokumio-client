@@ -1,17 +1,45 @@
 ' NetDiagTask — TEMPORARY network probe. See NetDiagTask.xml.
 '
-' Why this exists: every outbound request to a DOMAIN intermittently fails with
-' status=-7 ("Could not connect to server") in tens of milliseconds, while the
-' one request that uses an IP literal (the LAN streaming server) never fails.
+' Why this exists: outbound requests intermittently fail with status=-7 ("Could
+' not connect to server") in tens of milliseconds — a refusal, not a slow link or
+' a timeout. Rung A (the LAN streaming server, IP literal) is the known-good
+' baseline and answers reliably; the WAN rungs are the ones that drop.
 '
-' Two runs of the first version already answered the easy questions:
+' A wired run produced this measurement, which should be read as a measurement
+' and nothing more:
 '
-'   DNS is not the cause. Every host resolved 3/3 on every run, through the
-'   same IPv4 stack roUrlTransfer uses.
+'   versions  AUTO 5/6, http2 5/6, 1.1 6/6 at burst width 6.
+'   sweep     clean to 2 wide, first loss at 3.
+'   soak      12/12 sequential.
 '
-'   The CA bundle is not the fix. A single HTTPS request to the failing host
-'   succeeded 9/9 WITHOUT SetCertificatesFile, while the same request WITH it
-'   failed most early runs (its failures are connect-level -7, not TLS).
+' It was first read as proof that the HTTP version was the mechanism: AUTO
+' negotiates HTTP/2, which shares one connection across transfers; Roku's docs
+' require every transfer on a shared connection to come from the SAME thread,
+' and the app issues from many Task threads at once. That reading did not
+' replicate — a second run was clean at every width and for every version — and
+' the -7s behind the first run turned out to be the device overheating.
+' Transport.bs does not pin the version and should not be given one on this
+' evidence: a spread of one transfer on a six-wide burst is noise-sized, and
+' "1.1" is not among the values Roku documents for SetHttpVersion ("http2" and
+' "AUTO" are), so a clean 1.1 is equally consistent with the string being
+' ignored outright. The comparison stays because it is still the cheapest way
+' to separate connection sharing from a bad link.
+'
+' Two earlier conclusions were wrong and are retracted, because both were drawn
+' from a probe whose verdict could not tell them apart:
+'
+'   "DNS is not the cause" — the resolver answering 3/3 does show resolution
+'   works, but the claim rested on B (the IP literal) coming back connected, and
+'   `connected` was `status <> 0`, which counts a -7 as connected. B was failing.
+'   The DNS verdict now only speaks when one of B/C connects and the other does
+'   not, and reports both-red as inconclusive instead of blaming DNS.
+'
+'   "The CA bundle is not the fix / might be the fix" — D vs E only compares
+'   certificate outcomes when D and E both got a RESPONSE. A -7 is the TCP
+'   connect refused before any handshake, so a bundle cannot explain it, and
+'   "CA bundle fixes HTTPS" was once emitted off a rung that never connected.
+'   That recommendation would have added SetCertificatesFile to Transport for a
+'   connection that was never made.
 '
 ' What was left is the shape the failures cluster in: one sequential request is
 ' reliable, but the same request under six-at-once, or alongside the app's own
@@ -40,7 +68,10 @@
 '   D  WAN, HTTPS, hostname, no CA bundle how the app behaves today
 '   E  WAN, HTTPS, hostname, + CA bundle  the certificate hypothesis
 '
-' B against C isolates DNS; D against E isolates certificates.
+' B against C isolates DNS, and D against E isolates certificates — but ONLY when
+' the pair differs in the way it is meant to. Both-red says nothing about DNS, and
+' a rung that failed to connect says nothing about certificates; the verdict below
+' reports those as inconclusive instead of reading intent into them.
 '
 ' Everything is self-contained so it can be deleted in one move: no probe goes
 ' through Transport, and every probe builds its own roUrlTransfer.
@@ -269,9 +300,25 @@ end function
 ' One blocking GET on its own transfer and port. roUrlTransfer is not
 ' re-entrant, so each probe gets its own pair — the same reason Transport builds
 ' a fresh transfer per request. GET follows redirects on its own and there is no
-' API to stop it (ifUrlTransfer exposes none), so "connected" is judged on
-' status <> 0 rather than on 2xx: a redirect that was answered still proves the
-' socket opened, which is all B needs.
+' API to stop it (ifUrlTransfer exposes none), so "connected" is judged on a
+' response having arrived rather than on 2xx: a redirect that was answered still
+' proves the socket opened, which is all B needs.
+'
+' NetDiagConnected is that decision, kept as its own function because it is the
+' one piece of RunProbe that decides the whole DNS verdict, and RunProbe needs a
+' live roUrlTransfer — as an inline expression it was unreachable without one,
+' which is how it stayed wrong. It was `status <> 0`, which counts
+' CURLE_COULDNT_CONNECT (-7) — a connection that never opened — as connected, so
+' a wired run where BOTH the IP-literal and hostname probes came back -7 still
+' reported the internet as reachable and closed the DNS question on a probe that
+' had failed.
+'
+' The comparison has to exclude zero AND negatives: a real HTTP response code is
+' always >= 100, while a redirect answered on the way to a 2xx still counts.
+function NetDiagConnected(status as integer) as boolean
+    return status > 0
+end function
+
 function RunProbe(probe as object) as object
     outcome = OutcomeRecord(probe)
 
@@ -320,7 +367,16 @@ function RunProbe(probe as object) as object
 
     outcome.status = event.GetResponseCode()
     outcome.ok = outcome.status >= 200 and outcome.status < 300
-    outcome.connected = outcome.status <> 0
+    ' A NEGATIVE status is the transfer never completing: the socket never
+    ' opened. CURLE_COULDNT_CONNECT (-7) is what this device returns, and it is
+    ' non-zero, so `status <> 0` counted it as connected — which is how a run
+    ' where both the IP-literal and hostname probes came back -7 still printed
+    ' "Both IP and hostname reach the internet".
+    '
+    ' The comparison has to be against 0 with status strictly positive: a real
+    ' HTTP response code is always >= 100, and a redirect answered on the way to
+    ' a 2xx still counts, which is all B needs to prove the socket opened.
+    outcome.connected = NetDiagConnected(outcome.status)
     if not outcome.ok
         if outcome.status < 0
             reason = event.GetFailureReason()
@@ -596,12 +652,18 @@ function Verdict(probes as object, dns as object, soak as object, sweep as objec
 
     parts = []
 
-    ' DNS: B is IP literal, C is hostname. B green + C red means DNS.
+    ' DNS: B is IP literal, C is hostname. The comparison is only meaningful when
+    ' one connects and the other does not. Both-green proves reachability; both-red
+    ' says nothing about DNS at all — an unreachable internet blocks the IP probe
+    ' and the hostname probe equally — so it must not be reported as a DNS result,
+    ' and previously it was, because a -7 counted as connected.
     if b <> invalid and c <> invalid then
         if b.connected and not c.connected then
             parts.Push("IP literal works, hostname does not -> DNS.")
         else if b.connected and c.connected then
             parts.Push("Both IP and hostname reach the internet.")
+        else if not b.connected and not c.connected then
+            parts.Push("Neither IP nor hostname connected -> not DNS; see the http versions below.")
         end if
     end if
 
@@ -622,15 +684,35 @@ function Verdict(probes as object, dns as object, soak as object, sweep as objec
     end if
 
     ' Certificates: D is no bundle, E is bundle.
+    '
+    ' Only a TLS-level answer can say anything about certificates. A negative
+    ' status is the TCP connect refused BEFORE any handshake, so a bundle cannot
+    ' possibly be what changed the outcome — certificate validation does not
+    ' exist yet at that point. Reading "D=-7, E=200" as "the bundle fixes HTTPS"
+    ' would send someone to add SetCertificatesFile to Transport for a connection
+    ' that was never made, which is what this verdict did on a wired run.
+    '
+    ' A positive non-2xx (a TLS or HTTP-layer rejection) is a real answer and is
+    ' compared as before.
     if d <> invalid and e <> invalid then
-        if d.ok and e.ok then
-            parts.Push("HTTPS works with and without a CA bundle -> not certificates.")
-        else if not d.ok and not e.ok then
-            parts.Push("HTTPS fails with and without a CA bundle -> not certificates.")
-        else if d.ok and not e.ok then
-            parts.Push("CA bundle BREAKS working HTTPS -> do not add it to Transport.")
-        else if not d.ok and e.ok then
-            parts.Push("CA bundle fixes HTTPS -> add SetCertificatesFile to Transport.")
+        dTls = d.status > 0
+        eTls = e.status > 0
+        if not dTls and not eTls then
+            parts.Push("Both HTTPS probes failed before the handshake -> not certificates.")
+        else if not dTls and eTls then
+            parts.Push("CA bundle appears to fix HTTPS, but D never connected -> inconclusive, not certificates.")
+        else if dTls and not eTls then
+            parts.Push("D got a response and E never connected -> inconclusive, not certificates.")
+        else
+            if d.ok and e.ok then
+                parts.Push("HTTPS works with and without a CA bundle -> not certificates.")
+            else if not d.ok and not e.ok then
+                parts.Push("HTTPS fails with and without a CA bundle -> not certificates.")
+            else if d.ok and not e.ok then
+                parts.Push("CA bundle BREAKS working HTTPS -> do not add it to Transport.")
+            else
+                parts.Push("CA bundle fixes an HTTPS-layer failure -> consider SetCertificatesFile in Transport.")
+            end if
         end if
     end if
 
@@ -668,12 +750,29 @@ function Verdict(probes as object, dns as object, soak as object, sweep as objec
         if autoRecord <> invalid and h2Record <> invalid then
             if autoRecord.ok < autoRecord.count and h2Record.ok = h2Record.count then
                 parts.Push("Forcing HTTP/2 recovered the burst -> connection sharing fixes the connects.")
-            else if autoRecord.ok = autoRecord.count and h2Record.ok < h2Record.count then
-                parts.Push("Forcing HTTP/2 broke a clean AUTO burst -> HTTP/2 is harmful here.")
             end if
         end if
         if h1Record <> invalid and h1Record.error <> "" then
             parts.Push("OS rejected HTTP/1.1 (" + h1Record.error + ").")
+        else if h1Record <> invalid and h1Record.count > 0 then
+            ' HTTP/1.1 is the actionable result and it used to be printed but never
+            ' interpreted: AUTO and http2 both lost transfers on a wired run while
+            ' 1.1 was clean, and the verdict said nothing about it.
+            '
+            ' 1.1 gives each transfer its own connection, so a clean burst here
+            ' points at HTTP/2's shared-connection pool as what loses the
+            ' connects. Report it as a finding, not as an instruction: the app
+            ' does not pin the version, and it cannot be justified from this
+            ' alone. Roku documents only "http2" and "AUTO" as accepted values
+            ' for SetHttpVersion, so "1.1" is unverified, and a spread of one
+            ' transfer on a six-wide burst is noise-sized.
+            if h1Record.ok = h1Record.count and (autoRecord = invalid or autoRecord.ok < autoRecord.count) then
+                parts.Push("HTTP/1.1 ran the burst clean while AUTO lost transfers -> the loss looks like HTTP/2 connection sharing rather than a bad link; re-run at a larger burst before treating the version as the cause.")
+            else if h1Record.ok = h1Record.count and autoRecord <> invalid and autoRecord.ok = autoRecord.count then
+                parts.Push("HTTP/1.1 and AUTO both ran clean at this width -> no version effect at this width; raise the burst to find it.")
+            else if h1Record.ok < h1Record.count then
+                parts.Push("HTTP/1.1 also lost transfers -> not the HTTP version; look at the sweep threshold.")
+            end if
         end if
     end if
 

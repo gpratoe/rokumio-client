@@ -308,6 +308,9 @@ sub Harness_RunAll()
     Test_DeepLink_UnknownVerb()
     Test_DeepLink_DecodePercent()
     Test_DeepLink_DialLaunchArgs()
+    Test_NetDiag_Connected_MeansAResponseArrived()
+    Test_NetDiag_Verdict_OnTheWiredRun()
+    Test_NetDiag_Verdict_StillReachesRealConclusions()
     Harness_Finish()
 end sub
 

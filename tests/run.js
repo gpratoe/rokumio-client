@@ -22,6 +22,7 @@ async function writeCombinedScript() {
     const parts = [
         'tests/harness.brs',
         'tests/mocks.brs',
+        'components/NetDiagTask.brs',
         'tests/screenstack.test.brs',
         'tests/transport.test.brs',
         'tests/settingsstore.test.brs',
@@ -41,6 +42,7 @@ async function writeCombinedScript() {
         'tests/linkcode.test.brs',
         'tests/playbackstore.test.brs',
         'tests/subtitlesstore.test.brs',
+        'tests/netdiagverdict.test.brs',
         'tests/watchedcodec.fixtures.brs',
         'tests/watchedcodec.test.brs',
         'tests/videoidcodec.test.brs',
@@ -1591,6 +1593,37 @@ function checkNetDiagContract() {
         err('NetDiagTask.brs no longer compares HTTP versions — the documented HTTP/2 same-thread sharing constraint would go untested');
     } else if (!/versions\s*=\s*\[[^\]]*"AUTO"[^\]]*"http2"[^\]]*"1\.1"/.test(task)) {
         err('NetDiagTask.brs HTTP-version comparison does not cover both "http2" and "1.1" — one of the two mechanisms would be unmeasured');
+    } else if (!/h1Record\s*=\s*FindVersion\(/.test(task) || !/h1Record\.ok\s*=\s*h1Record\.count/.test(task)) {
+        err('NetDiagTask.brs no longer interprets the 1.1 result — the wired run that identified the root cause printed AUTO 5/6, http2 5/6, 1.1 6/6 and the verdict said nothing about it, because the comparison only ever looked at AUTO vs http2');
+    }
+
+    // The verdict is what a reader acts on, and it has now been wrong twice in
+    // ways that pointed real debugging effort at the wrong layer.
+    //
+    // `connected` was `status <> 0`, which counts CURLE_COULDNT_CONNECT (-7) as
+    // connected. So a run where BOTH the IP-literal and hostname probes returned
+    // -7 printed "Both IP and hostname reach the internet" and the DNS question
+    // was closed on evidence that never tested it. A real HTTP response code is
+    // always >= 100, so the comparison has to be `> 0`.
+    if (/outcome\.connected\s*=\s*outcome\.status\s*<>\s*0/.test(task)) {
+        err('NetDiagTask.brs computes connected as `status <> 0` — a negative status is a connect that never opened, so a -7 reads as connected and the DNS verdict closes itself on a probe that failed');
+    }
+    if (!/NetDiagConnected\(outcome\.status\)/.test(task) || !/function\s+NetDiagConnected[\s\S]*?return\s+status\s*>\s*0/.test(task)) {
+        err('NetDiagTask.brs does not compute connected as `status > 0` via NetDiagConnected — reachability has to mean a response arrived, and a redirect answered on the way to a 2xx still counts');
+    }
+    if (!/neither IP nor hostname connected/i.test(task)) {
+        err('NetDiagTask.brs has no both-red branch for the B/C pair — when neither the IP literal nor the hostname connects, that says nothing about DNS and must not be reported as if it did');
+    }
+
+    // A CA bundle is validated AFTER the TCP connect and TLS handshake. A -7 is
+    // the connect refused before either, so "the bundle fixes HTTPS" cannot be
+    // concluded from a rung that never connected — and following it would add
+    // SetCertificatesFile to Transport for a connection that was never made.
+    if (!/dTls\s*=\s*d\.status\s*>\s*0/.test(task) || !/eTls\s*=\s*e\.status\s*>\s*0/.test(task)) {
+        err('NetDiagTask.brs does not gate the D/E certificate comparison on whether either rung got a response — a connect-level -7 cannot be a certificate result, so the comparison must report inconclusive instead of blaming or exonerating the bundle');
+    }
+    if (/CA bundle fixes HTTPS -> add SetCertificatesFile/.test(task)) {
+        err('NetDiagTask.brs still emits an unconditional "CA bundle fixes HTTPS -> add SetCertificatesFile to Transport" — that fired off a rung which never connected, and acting on it adds a stall to every request for a connect that failed before TLS');
     }
 
     // The dev line printed all-empty on the first device run because it guessed
