@@ -46,7 +46,7 @@
 
         <Label
             id="settingsStatus"
-            translation="[80, 620]"
+            translation="[80, 720]"
             width="1760"
             height="40"
             font="font:SmallSystemFont" />

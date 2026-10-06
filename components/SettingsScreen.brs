@@ -104,6 +104,7 @@ sub BuildRows()
             title: "Network diagnostics"
             value: "Probe LAN, plain HTTP and HTTPS with and without a CA bundle"
         })
+        m.status.translation = [80, 900]
     end if
 
     content = CreateObject("roSGNode", "ContentNode")
