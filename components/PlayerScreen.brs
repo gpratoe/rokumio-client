@@ -910,7 +910,7 @@ function DetectStreamFormat(url as string) as string
     cleanUrl = LCase(url.Trim())
     queryIndex = cleanUrl.InStr("?")
     if queryIndex > 0 then cleanUrl = cleanUrl.Left(queryIndex - 1)
-    if cleanUrl.Right(5) = ".m3u8" then return "hls"
+    if cleanUrl.Right(5) = ".m3u8" or cleanUrl.Right(4) = ".m3u" then return "hls"
     if cleanUrl.Right(4) = ".mpd" then return "dash"
     if cleanUrl.Right(4) = ".mkv" then return "mkv"
     if cleanUrl.Right(4) = ".mp4" or cleanUrl.Right(4) = ".m4v" then return "mp4"
