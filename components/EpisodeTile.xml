@@ -47,7 +47,7 @@
              60%-opaque scrim (Theme.scrim = 0x00000099) rather than bare art, so
              a gap reads as dark fill instead of a hole. Note that artless is
              hidden once the poster paints, so tileBg is NOT behind the strip. -->
-        <Poster id="poster" width="320" height="180" loadWidth="320" loadHeight="180" loadDisplayMode="limitSize"/>
+        <Poster id="poster" width="320" height="180" loadWidth="320" loadHeight="180" loadDisplayMode="scaleToFit"/>
         <!-- Optional watched badge (40px check on a translucent plate,
              top-right) so the white glyph reads against any thumbnail.
              Hidden until a screen passes itemContent.watched. -->
