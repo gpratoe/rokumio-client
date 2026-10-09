@@ -356,6 +356,25 @@ sub Test_Addons_HasResource()
     Harness_Ok(not addons.HasResource([], "stream"), "empty resources not matched")
 end sub
 
+sub Test_Addons_HasType()
+    Harness_Suite("AddonsStore.HasType matches the media type against declared types")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+
+    Harness_Ok(addons.HasType(["movie", "series"], "movie"), "exact movie match")
+    Harness_Ok(addons.HasType(["movie", "series"], "series"), "exact series match")
+    Harness_Ok(not addons.HasType(["movie"], "series"), "movie-only add-on refused for series")
+    Harness_Ok(not addons.HasType(["channel"], "movie"), "channel add-on refused for movie")
+    Harness_Ok(not addons.HasType(["movie", "series"], "channel"), "movie/series add-on refused for channel")
+
+    Harness_Ok(addons.HasType(["channel"], "tv"), "channel declared, tv wanted")
+    Harness_Ok(addons.HasType(["tv"], "channel"), "tv declared, channel wanted")
+    Harness_Ok(addons.HasType(["movie", "channel"], "tv"), "mixed add-on serves the channel family")
+
+    Harness_Ok(addons.HasType(invalid, "movie"), "invalid types are permissive")
+    Harness_Ok(addons.HasType([], "movie"), "empty types are permissive")
+    Harness_Ok(addons.HasType(["channel"], ""), "blank wanted type is permissive")
+end sub
+
 sub Test_Addons_StremioSessionHidesBuiltIns()
     Harness_Suite("AddonsStore stremio session hides the virtual built-in seeds")
     addons = AddonsStore(ScriptedTransport([]), invalid, "stremio")

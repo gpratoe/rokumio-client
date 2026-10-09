@@ -2935,6 +2935,51 @@ function checkChannelCwPolicyContract() {
     return ok;
 }
 
+function checkStreamTypeGateContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const streams = fs.readFileSync(path.join(projectRoot, 'components', 'StreamsScreen.brs'), 'utf8');
+    const store = fs.readFileSync(path.join(projectRoot, 'source', 'stores', 'AddonsStore.bs'), 'utf8');
+    const host = fs.readFileSync(path.join(projectRoot, 'components', 'StoreHost.brs'), 'utf8');
+    const hostXml = fs.readFileSync(path.join(projectRoot, 'components', 'StoreHost.xml'), 'utf8');
+
+    // Stream fetching must be mediatype-specific: a live-TV add-on (types
+    // ["channel"]/["tv"]) is never asked for a movie/series stream, and a
+    // movie/series add-on is never asked for a channel. The gate belongs in the
+    // provider build, alongside the stream-resource check, and it must run
+    // BEFORE the provider is pushed — a provider filtered after Push is still
+    // queried.
+    const load = /sub LoadStreams[\s\S]*?end sub/.exec(streams);
+    if (!load) {
+        err('StreamsScreen.brs has no LoadStreams() — the provider build is where the media type has to be applied');
+        return ok;
+    }
+    const gate = /AddonsHasType"\s*,\s*addon\.types\s*,\s*ParamString\(params\.metaType\)/.exec(load[0]);
+    if (!gate) {
+        err('StreamsScreen.brs LoadStreams does not gate providers on AddonsHasType(addon.types, ...) — every add-on with a stream resource would be asked for every media type');
+    } else if (load[0].indexOf('providers.Push') !== -1 && load[0].indexOf('AddonsHasType') > load[0].indexOf('providers.Push')) {
+        err('StreamsScreen.brs LoadStreams evaluates the type gate after providers.Push — a provider pushed before the check is still queried, so the type filter has no effect');
+    }
+    if (!/AddonsHasResource"\s*,\s*addon\.resources\s*,\s*"stream"/.test(load[0])) {
+        err('StreamsScreen.brs LoadStreams no longer requires the "stream" resource — add-ons that serve no streams would be queried');
+    }
+
+    const hasType = /function HasType\(types as dynamic, metaType as string\) as boolean[\s\S]*?channel[\s\S]*?tv[\s\S]*?return false[\s\S]*?end function/.exec(store);
+    if (!hasType) {
+        err('AddonsStore.bs HasType() no longer treats channel/tv as one family — a "tv"-typed live add-on would be dropped for channel media (and vice versa)');
+    }
+
+    if (!host.includes('function AddonsHasType(types as dynamic, metaType as string) as boolean')) {
+        err('StoreHost.brs has no AddonsHasType bridge — StreamsScreen cannot reach the store predicate through m.stores.addons');
+    }
+    if (!/<function name="AddonsHasType" \/>/.test(hostXml)) {
+        err('StoreHost.xml is missing <function name="AddonsHasType" /> — callFunc against an undeclared interface function is a silent no-op that returns invalid, which would read as "matches nothing"');
+    }
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -3434,7 +3479,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract()) {
         process.exit(1);
     }
 

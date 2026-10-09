@@ -97,6 +97,11 @@ function AddonsHasResource(resources as dynamic, name as string) as boolean
     return m.stores.addons.HasResource(resources, name)
 end function
 
+' addons.HasType
+function AddonsHasType(types as dynamic, metaType as string) as boolean
+    return m.stores.addons.HasType(types, metaType)
+end function
+
 ' addons.IsBuiltin
 '
 ' Rank providers on this, never on a record's builtin flag: the account sync

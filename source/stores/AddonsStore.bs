@@ -185,6 +185,29 @@ class AddonsStore
         return false
     end function
 
+    ' Whether an add-on's declared types cover the media being watched. A
+    ' manifest's `types` is the union of types across everything it serves, so a
+    ' live-TV add-on declares ["channel"] (or the older ["tv"]) and must never be
+    ' asked for a movie or series stream, while a movie/series add-on must never
+    ' be asked for a channel. "channel" and "tv" are one family here, because
+    ' manifests in the wild use either spelling for the same content.
+    '
+    ' Missing or empty declared types are permissive: a manifest that never said
+    ' what it serves is asked for everything rather than silently dropped (the
+    ' same call the resource check makes for a stream-less manifest). A blank
+    ' wanted type is permissive too — a caller with no type to filter on should
+    ' not exclude every provider.
+    function HasType(types as dynamic, metaType as string) as boolean
+        if metaType = "" then return true
+        if types = invalid or Type(types) <> "roArray" or types.Count() = 0 then return true
+        wantChannel = (metaType = "channel" or metaType = "tv")
+        for each declared in types
+            if declared = metaType then return true
+            if wantChannel and (declared = "channel" or declared = "tv") then return true
+        end for
+        return false
+    end function
+
     ' Catalog manifests may omit a display name — real-world add-ons (Stremio's
     ' own Channels add-on among them) ship catalogs with only type/id. Every
     ' consumer renders the catalog name as a row/chip label, so an invalid name

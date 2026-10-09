@@ -162,7 +162,9 @@ end sub
 ' error } the instant that address responds, and onStreamsLoaded routes it into
 ' the matching provider slot. The installed add-ons are read here (registry reads
 ' only, no network) so only the addresses that advertise the "stream" resource
-' cross into the tasks. Failure handling mirrors Home: on total failure the grid
+' AND whose declared types cover this media cross into the tasks — a live-TV
+' add-on is never asked for a movie/series stream and a movie/series add-on is
+' never asked for a channel. Failure handling mirrors Home: on total failure the grid
 ' stays empty, and a hung add-on only delays its own provider, never the others.
 sub LoadStreams(params as object)
     if m.stores = invalid then return
@@ -171,10 +173,12 @@ sub LoadStreams(params as object)
     providers = []
     for each addon in m.stores.addons.callFunc("AddonsGetAll")
         if m.stores.addons.callFunc("AddonsHasResource", addon.resources, "stream")
-            if addon.address <> invalid and addon.address <> ""
-                name = addon.name
-                if name = invalid or name = "" then name = addon.address
-                providers.Push({ name: name, address: addon.address, streams: [], error: "" })
+            if m.stores.addons.callFunc("AddonsHasType", addon.types, ParamString(params.metaType))
+                if addon.address <> invalid and addon.address <> ""
+                    name = addon.name
+                    if name = invalid or name = "" then name = addon.address
+                    providers.Push({ name: name, address: addon.address, streams: [], error: "" })
+                end if
             end if
         end if
     end for

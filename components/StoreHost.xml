@@ -10,6 +10,7 @@
         <function name="AddonsGet" />
         <function name="AddonsGetAll" />
         <function name="AddonsHasResource" />
+        <function name="AddonsHasType" />
         <function name="AddonsInstallFromDescriptor" />
         <function name="AddonsIsBuiltin" />
         <function name="AddonsRegister" />
