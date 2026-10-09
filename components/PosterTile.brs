@@ -40,6 +40,41 @@ sub init()
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
     m.poster.ObserveField("loadStatus", "onPosterLoadStatus")
+
+    ApplyTileSize()
+end sub
+
+' RowList writes each item's cell size into the width/height interface fields,
+' one row at a time. Home gives channel/tv rows square cells, so the tile has
+' to follow: resize the poster (and the caps that keep its texture bounded —
+' loadWidth/loadHeight ride the node so the memory policy holds for the new
+' size too), plus the artless face, the title, the progress bar and the watched
+' badge, which are all laid out against the fixed 270x405 slab in XML. The XML
+' already lays out the portrait baseline exactly, so that case returns untouched
+' and every other screen (which keeps 2:3 cells) is pixel-identical to before.
+sub ApplyTileSize()
+    w = m.top.width
+    h = m.top.height
+    if w = invalid or h = invalid then return
+    if w <= 0 or h <= 0 then return
+    if w = 270 and h = 405 then return
+
+    m.poster.width = w
+    m.poster.height = h
+    m.poster.loadWidth = w
+    m.poster.loadHeight = h
+    m.tileBg.width = w
+    m.tileBg.height = h
+    m.titleText.width = w - 24
+    m.titleText.height = h - 16
+    m.titleText.translation = [12, 8]
+    m.progressTrack.width = w
+    m.progressTrack.translation = [0, h - 8]
+    m.progressFill.translation = [0, h - 8]
+    m.progressFill.width = w
+    m.watchedBadge.translation = [w - 62, 8]
+    m.loadSpinner.translation = [(w - 44) / 2, (h - 44) / 2]
+    if m.top.itemContent <> invalid then UpdateOverlays()
 end sub
 
 ' Every focus observer re-applies the whole look from the tile's current field

@@ -2617,6 +2617,23 @@ function checkPosterLoadSizePolicy() {
         ok = false;
     }
 
+    // PosterTile now resizes itself from the per-row cell RowList writes into
+    // its width/height interface fields (channel/tv rows are 1:1 squares). The
+    // load caps must ride the node, or a square cell decodes at the XML-only
+    // 270x405 hint — still one cap, but for a node that is no longer that
+    // shape. Declaring the fields is what lets the tile learn its size at all.
+    const tileBrs = fs.readFileSync(path.join(projectRoot, 'components', 'PosterTile.brs'), 'utf8');
+    const posterTileXml = fs.readFileSync(path.join(projectRoot, 'components', 'PosterTile.xml'), 'utf8');
+    if (!/<field\s+id="width"\s+type="float"[^>]*onChange="ApplyTileSize"/.test(posterTileXml) ||
+        !/<field\s+id="height"\s+type="float"[^>]*onChange="ApplyTileSize"/.test(posterTileXml)) {
+        console.error('PosterTile.xml must declare the RowList width/height item fields (wired to ApplyTileSize) — without them the tile never learns its per-row cell size and a square row renders the fixed 2:3 slab');
+        ok = false;
+    }
+    if (!/m\.poster\.loadWidth\s*=\s*w/.test(tileBrs) || !/m\.poster\.loadHeight\s*=\s*h/.test(tileBrs)) {
+        console.error('PosterTile.brs ApplyTileSize must resize loadWidth/loadHeight WITH width/height — a dynamically resized tile that keeps the XML-only caps decodes a texture that no longer matches its node shape');
+        ok = false;
+    }
+
     return ok;
 }
 

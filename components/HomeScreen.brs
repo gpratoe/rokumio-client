@@ -152,6 +152,7 @@ sub ApplyCatalogRow(row as object)
     m.catalogRows.Push(descriptor)
     m.gridRows.Push(descriptor)
     m.catalog.numRows = m.gridRows.Count()
+    m.catalog.rowItemSize = RowSizes()
     ResyncRowLabels()
 end sub
 
@@ -203,6 +204,7 @@ sub BuildRows()
     end for
     m.catalog.content = content
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
+    m.catalog.rowItemSize = RowSizes()
 end sub
 
 ' Rebuild the grid from the current add-on set — called by the Scene after a
@@ -270,6 +272,28 @@ function MakeRowNode(row as object, counts = invalid as object) as object
         PaintTileFields(node.CreateChild("TileContent"), meta, glyph)
     end for
     return node
+end function
+
+' The poster cell for one grid row. Channel-style add-ons (Stremio content types
+' "channel"/"tv") ship 1:1 posters, so those rows get square cells; everything
+' else keeps the 2:3 poster slab. PosterTile sizes itself from the cell it is
+' handed, so this single array drives both the slot and the tile shape.
+function RowCellSize(row as object) as object
+    if row <> invalid and row.metaType <> invalid and (row.metaType = "channel" or row.metaType = "tv")
+        return [270, 270]
+    end if
+    return [270, 405]
+end function
+
+' Per-row item sizes, one vector2d per grid row, in grid order. Rebuilt with the
+' size of m.gridRows whenever the grid changes (rows stream in one at a time and
+' the Continue Watching row slots in front).
+function RowSizes() as object
+    sizes = []
+    for each row in m.gridRows
+        sizes.Push(RowCellSize(row))
+    end for
+    return sizes
 end function
 
 ' Paint the shared poster-tile fields — title, hdPosterUrl, progress-bar fraction

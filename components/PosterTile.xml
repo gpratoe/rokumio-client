@@ -9,6 +9,12 @@
         <field id="itemContent" type="node" />
         <field id="itemHasFocus" type="boolean" />
         <field id="rowHasFocus" type="boolean" />
+        <!-- RowList writes these with the item's cell size, one per row (the
+             standard width/height item-component fields, updated before index).
+             Home gives channel/tv rows square cells, so the tile must size
+             itself from them rather than assume the fixed 2:3 slab below. -->
+        <field id="width" type="float" onChange="ApplyTileSize" />
+        <field id="height" type="float" onChange="ApplyTileSize" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/PosterTile.brs" />
