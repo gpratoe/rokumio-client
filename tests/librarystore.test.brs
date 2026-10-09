@@ -56,6 +56,25 @@ sub Test_Library_RemovePosition()
     Harness_Ok(not store.RemovePosition("tt0133093"), "remove missing position is false")
 end sub
 
+sub Test_Library_ChannelsIgnoredBySetPosition()
+    Harness_Suite("SetPosition ignores live channel/tv types")
+    store = LibraryStore(MockRegistry())
+    store.SetPosition("chan1", "chan1", "channel", 0, 0, "CNN", "poster.png", 120000, 3600000)
+    store.SetPosition("chan2", "chan2", "tv", 0, 0, "NTV", "poster.png", 120000, 3600000)
+    Harness_Equal(store.ContinueWatching().Count(), 0, "no channel/tv continue-watching entries")
+    Harness_Ok(not store.IsWatching("chan1"), "channel never marked watching")
+    Harness_Ok(not store.IsWatching("chan2"), "tv never marked watching")
+
+    ' A channel share a video id with an existing movie entry must not evict it:
+    ' the gate returns before the prune loop runs.
+    store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix", "", 300, 3600)
+    store.SetPosition("tt0133093", "tt0133093", "tv", 0, 0, "Matrix Live", "", 120000, 3600000)
+    list = store.ContinueWatching()
+    Harness_Equal(list.Count(), 1, "movie entry survives the channel spell")
+    Harness_Equal(list[0].position, 300, "movie position untouched")
+    Harness_Equal(list[0].metaType, "movie", "movie type untouched")
+end sub
+
 sub Test_Library_ResumeFor()
     Harness_Suite("LibraryStore.ResumeFor returns the most recent entry for a meta")
     store = LibraryStore(MockRegistry())

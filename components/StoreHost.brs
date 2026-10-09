@@ -276,6 +276,11 @@ function LibraryResumeFor(metaId as string) as dynamic
     return m.stores.library.ResumeFor(metaId)
 end function
 
+' library.IsChannelType
+function LibraryIsChannelType(metaType as string) as boolean
+    return m.stores.library.IsChannelType(metaType)
+end function
+
 ' library.SetPosition
 function LibrarySetPosition(videoId as string, metaId as string, metaType as string, season as integer, episode as integer, name as string, poster = "" as string, position = 0 as integer, duration = 0 as integer) as void
     m.stores.library.SetPosition(videoId, metaId, metaType, season, episode, name, poster, position, duration)

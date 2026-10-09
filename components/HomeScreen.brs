@@ -383,11 +383,13 @@ sub RefreshContinueWatching()
             content.InsertChild(MakeRowNode(live, invalid), 0)
             m.gridRows.Unshift(live)
             m.catalog.numRows = m.gridRows.Count()
+            m.catalog.rowItemSize = RowSizes()
         end if
     else if haveCw
         content.RemoveChildIndex(0)
         m.gridRows.Delete(0)
         m.catalog.numRows = m.gridRows.Count()
+        m.catalog.rowItemSize = RowSizes()
     end if
 end sub
 

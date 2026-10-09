@@ -249,13 +249,27 @@ class LibraryStore
         return 1000000000
     end function
 
+    ' Live add-ons speak Stremio content types "channel"/"tv". A live stream
+    ' never has a resume point, so those entries are kept out of Continue
+    ' Watching entirely: here, at the SyncFromStremio mapping, and at the
+    ' player's save/publish gates (they share this helper so no caller can
+    ' drift). They still ride the saved set and the account layer when the
+    ' account has them.
+    function IsChannelType(metaType as string) as boolean
+        if metaType = "channel" then return true
+        if metaType = "tv" then return true
+        return false
+    end function
+
     ' Record playback progress for a video (a movie metaId, or the
     ' "{metaId}:{season}:{episode}" id for an episode). Drops the previous
     ' entry for the same video or series, pushes the new one on top of the
     ' capped stack, and pops anything beyond MAX_CONTINUE_WATCHING. Blank
     ' positions are ignored so a fresh screen never clears stored progress.
+    ' Channel/tv playback records nothing — see IsChannelType.
     sub SetPosition(videoId as string, metaId as string, metaType as string, season as integer, episode as integer, name as string, poster = "" as string, position = 0 as integer, duration = 0 as integer)
         if videoId = "" or metaId = "" then return
+        if m.IsChannelType(metaType) then return
         for i = m.positions.Count() - 1 to 0 step -1
             if m.positions[i].videoId = videoId or m.positions[i].metaId = metaId
                 m.positions.Delete(i)
@@ -689,7 +703,7 @@ class LibraryStore
                 inProgress: parsed.inProgress
                 bitfield: parsed.bitfield
             }
-            if parsed.cw then cw.Push(parsed)
+            if parsed.cw and not m.IsChannelType(parsed.metaType) then cw.Push(parsed)
             if parsed.saved and parsed.metaId <> "" and not m.HasKey(saved, parsed.metaId)
                 saved[parsed.metaId] = {
                     metaId: parsed.metaId

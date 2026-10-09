@@ -117,6 +117,23 @@ sub Test_LibrarySync_CwClassificationRules()
     Harness_Equal(cw[1].metaId, "tt1000004", "removed-but-temp retains its watch state")
 end sub
 
+sub Test_LibrarySync_ChannelsKeptOutOfCw()
+    Harness_Suite("SyncFromStremio keeps channel/tv items saved but out of continue watching")
+    items = []
+    items.Push(LibraryItemFixture("cnn1", "channel", "CNN", "2024-06-03T00:00:00Z", { timeOffset: 1000 }))        ' live channel, would qualify on position alone
+    items.Push(LibraryItemFixture("ntv1", "tv", "NTV", "2024-06-02T00:00:00Z", { timeOffset: 1000 }))            ' live tv, same
+    items.Push(LibraryItemFixture("tt1000005", "movie", "Active", "2024-06-01T00:00:00Z", { timeOffset: 1000 })) ' plain watch -> cw
+    store = LibraryStore(MockRegistry(), "stremio")
+    store.SyncFromStremio(items)
+
+    cw = store.ContinueWatching()
+    Harness_Equal(cw.Count(), 1, "only the movie qualifies")
+    Harness_Equal(cw[0].metaId, "tt1000005", "movie entry kept")
+    Harness_Ok(store.IsSaved("cnn1"), "channel still saved")
+    Harness_Ok(store.IsSaved("ntv1"), "tv still saved")
+    Harness_Equal(store.StremioLibraryItems().Count(), 3, "channels retained in the full library")
+end sub
+
 sub Test_LibrarySync_SavedMappedInMemory()
     Harness_Suite("SyncFromStremio fills saved entries for the session")
     items = []

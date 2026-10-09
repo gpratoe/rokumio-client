@@ -2872,6 +2872,52 @@ function checkStreamFormatQueryContract() {
     return ok;
 }
 
+function checkChannelCwPolicyContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const store = fs.readFileSync(path.join(projectRoot, 'source', 'stores', 'LibraryStore.bs'), 'utf8');
+    const host = fs.readFileSync(path.join(projectRoot, 'components', 'StoreHost.brs'), 'utf8');
+    const player = fs.readFileSync(path.join(projectRoot, 'components', 'PlayerScreen.brs'), 'utf8');
+
+    // A live channel has no resume point, so it must never become a
+    // continue-watching entry: not from local playback, and not from the
+    // account's library on a linked session. One shared predicate keeps every
+    // gate honest; a stray literal at any one of the four gates resurrects the
+    // entries through the others.
+    const predicate = /function IsChannelType\(metaType as string\) as boolean[\s\S]*?(channel|tv)[\s\S]*?return true[\s\S]*?return false[\s\S]*?end function/.exec(store);
+    if (!predicate) {
+        err('LibraryStore.bs has no IsChannelType() predicate — the policy needs one shared test for "channel"/"tv" so the player gates and the sync filter cannot drift');
+    }
+
+    const setGate = store.includes('if m.IsChannelType(metaType) then return');
+    if (!setGate) {
+        err('LibraryStore.bs SetPosition does not early-return on channel/tv — local playback would push a live channel onto the continue-watching stack');
+    }
+
+    const syncFilter = /parsed\.cw and not m\.IsChannelType\(parsed\.metaType\)/.exec(store);
+    if (!syncFilter) {
+        err('LibraryStore.bs SyncFromStremio no longer excludes channel/tv items from the cw stack — a linked session would surface the account\'s live-channel entries in Continue Watching');
+    }
+
+    const bridge = host.includes('function LibraryIsChannelType(metaType as string) as boolean');
+    if (!bridge) {
+        err('StoreHost.brs has no LibraryIsChannelType bridge — the player cannot call the shared predicate through m.stores.library');
+    }
+
+    const gate = /LibraryIsChannelType", metaType\)\s+then return/;
+    const save = /sub SavePosition[\s\S]*?end sub/.exec(player);
+    const publish = /sub PublishWatchState[\s\S]*?end sub/.exec(player);
+    if (!save || !gate.test(save[0])) {
+        err('PlayerScreen.brs SavePosition no longer returns early for channel/tv — leaving a live channel would record a meaningless resume point');
+    }
+    if (!publish || !gate.test(publish[0])) {
+        err('PlayerScreen.brs PublishWatchState no longer returns early for channel/tv — a paused live channel would publish a position the account push turns into a continue-watching entry');
+    }
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -3371,7 +3417,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract()) {
         process.exit(1);
     }
 

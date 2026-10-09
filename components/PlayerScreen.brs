@@ -1079,6 +1079,15 @@ sub SavePosition()
     ' so an existing resume point is never clobbered with a bogus one.
     if not m.hasPlayed then return
 
+    ' Live channels (Stremio types "channel"/"tv") are kept out of Continue
+    ' Watching on every session, by policy: a live stream has no resume point,
+    ' and on a linked session a position record would also propagate a
+    ' meaningless resume marker to the account. Leaving the gate out here would
+    ' resurrect them through either the local stack or the server push.
+    metaType = params.metaType
+    if metaType = invalid then metaType = ""
+    if m.stores.library.callFunc("LibraryIsChannelType", metaType) then return
+
     position = m.video.position
     duration = m.video.duration
     if position = invalid then position = 0
@@ -1114,14 +1123,19 @@ sub PublishWatchState()
     if m.video = invalid then return
     if not m.hasPlayed then return
 
+    ' Same live-channel policy as SavePosition: a paused channel must not
+    ' publish a position for the account push either. WatchRecord never sees
+    ' the packet, so the buffer and MainScene's push stay clean.
+    params = m.playParams
+    metaType = ""
+    if params.metaType <> invalid then metaType = params.metaType
+    if m.stores.library.callFunc("LibraryIsChannelType", metaType) then return
+
     position = m.video.position
     duration = m.video.duration
     if position = invalid then position = 0
     if duration = invalid then duration = 0
 
-    params = m.playParams
-    metaType = ""
-    if params.metaType <> invalid then metaType = params.metaType
     name = ""
     if params.name <> invalid then name = params.name
     poster = ""
