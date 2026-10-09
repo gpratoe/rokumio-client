@@ -1079,6 +1079,8 @@ sub SavePosition()
     ' so an existing resume point is never clobbered with a bogus one.
     if not m.hasPlayed then return
 
+    params = m.playParams
+
     ' Live channels (Stremio types "channel"/"tv") are kept out of Continue
     ' Watching on every session, by policy: a live stream has no resume point,
     ' and on a linked session a position record would also propagate a
@@ -1093,7 +1095,6 @@ sub SavePosition()
     if position = invalid then position = 0
     if duration = invalid then duration = 0
 
-    params = m.playParams
     season = 0
     if params.season <> invalid then season = params.season
     episode = 0

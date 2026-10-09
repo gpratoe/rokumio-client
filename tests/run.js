@@ -2908,11 +2908,28 @@ function checkChannelCwPolicyContract() {
     const gate = /LibraryIsChannelType", metaType\)\s+then return/;
     const save = /sub SavePosition[\s\S]*?end sub/.exec(player);
     const publish = /sub PublishWatchState[\s\S]*?end sub/.exec(player);
+
+    // The gate reads params.metaType, so params must be assigned FIRST. Grepping
+    // for the gate alone cannot catch the reverse order: reading .metaType off
+    // an uninitialized local throws &hec ("Dot operator attempted with invalid
+    // BrightScript Component or interface reference") BEFORE the gate runs, so
+    // the guard never executes and the throw unwinds Back out of the handler —
+    // the app freezes with no crash and no position ever saved. This is exactly
+    // how a live channel "lost Back" after a play had really started.
+    const paramsBeforeGate = (block) => {
+        const assign = block.indexOf('params = m.playParams');
+        const use = block.indexOf('LibraryIsChannelType');
+        return assign !== -1 && use !== -1 && assign < use;
+    };
     if (!save || !gate.test(save[0])) {
         err('PlayerScreen.brs SavePosition no longer returns early for channel/tv — leaving a live channel would record a meaningless resume point');
+    } else if (!paramsBeforeGate(save[0])) {
+        err('PlayerScreen.brs SavePosition references params before assigning it — reading params.metaType off an uninitialized local throws &hec and freezes the app before the channel gate can run (assign params = m.playParams first)');
     }
     if (!publish || !gate.test(publish[0])) {
         err('PlayerScreen.brs PublishWatchState no longer returns early for channel/tv — a paused live channel would publish a position the account push turns into a continue-watching entry');
+    } else if (!paramsBeforeGate(publish[0])) {
+        err('PlayerScreen.brs PublishWatchState references params before assigning it — same &hec trap seen in SavePosition (assign params = m.playParams first)');
     }
 
     return ok;
