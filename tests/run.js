@@ -2804,6 +2804,57 @@ function checkSetupServerContract() {
     return ok;
 }
 
+// The details screen must hand the stream picker the add-on CONTENT type
+// verbatim. channel/tv (and any future type) items only resolve when the
+// stream request is keyed by the real type: a literal "movie"/"series" sends a
+// live-TV add-on a /stream/movie/{id}.json it does not answer, and the user
+// gets "No streams found". A literal here is a functional break, not cosmetics.
+function checkDetailsMetaTypeContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const details = fs.readFileSync(path.join(projectRoot, 'components', 'DetailsScreen.brs'), 'utf8');
+
+    const literal = details.match(/metaType:\s*"(movie|series)"/);
+    if (literal) {
+        err(`DetailsScreen.brs passes a literal metaType "${literal[1]}" — a considered-kind item of another type would resolve /stream/{wrongType}/{id}.json and an add-on that routes on type would answer nothing`);
+    }
+
+    const passThrough = details.match(/metaType:\s*m\.meta\.type/g);
+    if (!passThrough || passThrough.length < 2) {
+        err('DetailsScreen.brs must pass metaType: m.meta.type on every streamsScreen push (PlayMedia and ResumeEpisode) — the content type has to reach the /stream/ endpoint verbatim');
+    }
+
+    return ok;
+}
+
+// DetectStreamFormat strips a URL's query before sniffing the extension. The
+// method-form InStr is zero-based, so the correct chop is Left(queryIndex)
+// (everything up to the '?'). Left(queryIndex - 1) would also eat the last
+// path character: live-TV URLs like ".../stream.mp4?token=x" (or any
+// extensionless HLS) would lose their format and the Video node would start
+// the classic format-less black screen.
+function checkStreamFormatQueryContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const player = fs.readFileSync(path.join(projectRoot, 'components', 'PlayerScreen.brs'), 'utf8');
+
+    const block = /function DetectStreamFormat[\s\S]*?end function/.exec(player);
+    if (!block) {
+        err('PlayerScreen.brs has no DetectStreamFormat() — StartPlayback depends on the sniffed streamFormat');
+        return ok;
+    }
+    if (block[0].includes('Left(queryIndex - 1)')) {
+        err('PlayerScreen.brs DetectStreamFormat chops the query one character early (Left(queryIndex - 1)) — the zero-based InStr index is where the "?" sits, so the correct chop is Left(queryIndex)');
+    }
+    if (!block[0].includes('Left(queryIndex)')) {
+        err('PlayerScreen.brs DetectStreamFormat no longer strips the query with Left(queryIndex) — query-bearing stream URLs get no streamFormat');
+    }
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -3303,7 +3354,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract()) {
         process.exit(1);
     }
 

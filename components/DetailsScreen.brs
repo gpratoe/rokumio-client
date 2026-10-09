@@ -248,7 +248,7 @@ sub ResumeEpisode()
         screen: "streamsScreen"
         params: {
             addonAddress: m.addonAddress
-            metaType: "series"
+            metaType: m.meta.type
             metaId: m.meta.id
             videoId: videoId
             season: m.resume.season
@@ -271,7 +271,7 @@ sub PlayMedia()
             screen: "streamsScreen"
             params: {
                 addonAddress: m.addonAddress
-                metaType: "series"
+                metaType: m.meta.type
                 metaId: m.meta.id
                 videoId: m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, 1, 1)
                 season: 1
@@ -288,7 +288,7 @@ sub PlayMedia()
             screen: "streamsScreen"
             params: {
                 addonAddress: m.addonAddress
-                metaType: "movie"
+                metaType: m.meta.type
                 metaId: m.meta.id
                 videoId: m.meta.id
                 position: ResumePosition()
