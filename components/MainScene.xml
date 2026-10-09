@@ -10,6 +10,16 @@
         <field id="dialog" type="node" />
         <function name="Start" />
         <function name="HandleDeepLink" />
+        <!-- The local setup page (source/util/SetupPage.brs) publishes the
+             address a phone must open. main() calls this once after Start, and
+             the address rides a declared function rather than a node field:
+             the Add-ons screen is where it displays, and an undeclared field
+             write is invisible (see the dialog field comment). -->
+        <function name="ShowSetupAddress" />
+        <!-- One manifest URL submitted by that page. Returns false while an
+             import is already running so the page can answer 409. Shares the
+             single import slot with HandleDeepLink via BeginImport. -->
+        <function name="ImportFromSetup" />
         <!-- A screen whose store bind came up short reports the failing hop
              here (Screen.brs's SetStores) and the Scene paints it, so a broken
              store layer can never be mistaken for an empty catalog. -->

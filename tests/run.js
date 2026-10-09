@@ -43,6 +43,7 @@ async function writeCombinedScript() {
         'tests/playbackstore.test.brs',
         'tests/subtitlesstore.test.brs',
         'tests/netdiagverdict.test.brs',
+        'tests/setuppage.test.brs',
         'tests/watchedcodec.fixtures.brs',
         'tests/watchedcodec.test.brs',
         'tests/videoidcodec.test.brs',
@@ -76,6 +77,7 @@ const transpiled = [
     path.join(stagingDir, 'source', 'stores', 'SubtitlesStore.brs'),
     path.join(stagingDir, 'source', 'stores', 'WatchedCodec.brs'),
     path.join(stagingDir, 'source', 'util', 'Regex.brs'),
+    path.join(stagingDir, 'source', 'util', 'SetupPage.brs'),
     path.join(stagingDir, 'source', 'util', 'Utilities.brs')
 ];
 
@@ -2972,6 +2974,106 @@ function checkCompanionQrContract() {
     return ok;
 }
 
+function checkSetupServerContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const setup = fs.readFileSync(path.join(projectRoot, 'source', 'util', 'SetupPage.brs'), 'utf8');
+    const main = fs.readFileSync(path.join(projectRoot, 'source', 'main.brs'), 'utf8');
+    const sceneBrs = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8')
+        .split('\n').map(line => line.split("'")[0]).join('\n');
+    const sceneXml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
+    const addonsBrs = fs.readFileSync(path.join(projectRoot, 'components', 'AddonsScreen.brs'), 'utf8');
+    const addonsXml = fs.readFileSync(path.join(projectRoot, 'components', 'AddonsScreen.xml'), 'utf8');
+    const ref = fs.readFileSync(path.join(projectRoot, 'reference', 'ecp-integration.md'), 'utf8');
+
+    // The pure helper layer and the socket lifecycle live in one file; the
+    // socket layer is never exercised by tests, so its API surface has to stay
+    // pinned here for main.brs to compile against.
+    for (const fn of ['SetupServerStart', 'SetupServerPoll', 'SetupServerClose', 'SetupServerPort', 'SetupLanAddress']) {
+        if (!new RegExp(`function ${fn}\\s*\\(|sub ${fn}\\s*\\(`).test(setup)) {
+            err(`SetupPage.brs has no ${fn}() — source/main.brs calls it and the device has no fallback`);
+        }
+    }
+
+    // The listener must register on the SCREEN's message port, or the Wait loop
+    // would never receive a roSocketEvent for it.
+    if (!/listener\.SetMessagePort\s*\(\s*port\s*\)/.test(setup)) {
+        err('SetupPage.brs SetupServerStart must SetMessagePort(port) on the listener — the socket events have to land on the same port Wait() drains');
+    }
+    // ...and every exit path in Main() must close it. Three returns exist:
+    // the exitApp poll fallback, the screen-closed event, and the exitApp node
+    // event. A return with no close leaves the listener bound for the session.
+    const exits = [...main.matchAll(/^[ \t]*return$/gm)];
+    if (exits.length < 3) {
+        err(`source/main.brs has only ${exits.length} return(s) in Main — expected the three exit paths`);
+    } else {
+        for (const m of exits) {
+            const before = main.slice(0, m.index).trimEnd().split('\n').pop();
+            if (!/SetupServerClose\s*\(/.test(before)) {
+                err('source/main.brs returns without SetupServerClose(setup) on every exit path — the port stays bound and the loop is gone');
+            }
+        }
+    }
+    if (!/Type\(message\)\s*=\s*"roSocketEvent"/.test(main) || !/SetupServerPoll\s*\(/.test(main)) {
+        err('source/main.brs must dispatch roSocketEvent into SetupServerPoll — without it accepted connections sit in the listen backlog forever');
+    }
+
+    // The Scene handoff is via callFunc, which only works for DECLARED
+    // interface functions — an undeclared one silently no-ops on device while
+    // passing the (mocked) interpreter. Pin the declarations to the calls.
+    const declaredScene = new Set(
+        [...sceneXml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(m => m[1])
+    );
+    for (const fn of ['ShowSetupAddress', 'ImportFromSetup']) {
+        if (!declaredScene.has(fn)) {
+            err(`MainScene.xml is missing <function name="${fn}" /> from its interface`);
+        }
+    }
+    if (!new RegExp(`sub ShowSetupAddress\\s*\\(`).test(sceneBrs) || !new RegExp(`function ImportFromSetup\\s*\\(`).test(sceneBrs)) {
+        err('MainScene.brs must define ShowSetupAddress() and ImportFromSetup() — main() and the setup page call them');
+    }
+    if (!new RegExp(`ImportFromSetup\\s*\\([^)]*\\)\\s*[\\s\\S]*\\nend function`).test(sceneBrs) || !/BeginImport\s*\(/.test(sceneBrs)) {
+        err('MainScene.brs ImportFromSetup no longer routes through BeginImport — the deep-link and setup-page paths must share the single import slot');
+    }
+
+    const declaredAddons = new Set(
+        [...addonsXml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(m => m[1])
+    );
+    if (!declaredAddons.has('SetSetupAddress')) {
+        err('AddonsScreen.xml is missing <function name="SetSetupAddress" /> from its interface');
+    }
+    if (!/sub SetSetupAddress\s*\(/.test(addonsBrs)) {
+        err('AddonsScreen.brs must define SetSetupAddress() — the Scene forwards the address into it');
+    }
+    for (const id of ['setupHint', 'setupUrl']) {
+        if (!new RegExp(`id="${id}"[^>]*>`, 's').test(addonsXml)) {
+            err(`AddonsScreen.xml has no label id="${id}" — the page address has nowhere to show`);
+        }
+        if (!new RegExp(`id="${id}"[\\s\\S]*?visible="false"`).test(addonsXml)) {
+            err(`AddonsScreen.xml label "${id}" must start visible="false" — it is filled in only when main() publishes an address`);
+        }
+    }
+
+    // The port is one fact with two consumers (the TV that prints it, the
+    // listener that binds it); a second literal anywhere would let the two
+    // drift. And 8324 is verboten — that is the reference app's port.
+    if (!/\b8744\b/.test(setup)) {
+        err('SetupPage.brs must serve SetupServerPort()=8744 — see the comment there');
+    }
+    if (/\b8324\b/.test(setup) || /\b8324\b/.test(main)) {
+        err('port 8324 is the reference app\'s port and must not be reused');
+    }
+
+    // The reference doc's central claim got falser the day this shipped.
+    if (/The channel never listens and never serves anything/.test(ref)) {
+        err('reference/ecp-integration.md still claims "The channel never listens and never serves anything" — it now serves the setup page');
+    }
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -3511,7 +3613,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkPosterCropFit() || !checkCompanionQrContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkPosterCropFit() || !checkCompanionQrContract() || !checkSetupServerContract()) {
         process.exit(1);
     }
 

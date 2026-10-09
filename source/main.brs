@@ -20,6 +20,16 @@ sub Main(args as object)
     ' the launch args. Handle it after Start so the stack is up and Home is the
     ' base; the flow reports through a dialog and never replaces Home.
     scene.callFunc("HandleDeepLink", args)
+
+    ' The local setup page (source/util/SetupPage.brs): a phone on the same
+    ' network opens the address the scene prints on the Add-ons screen and
+    ' pastes a manifest URL, which is far less work than typing one on the
+    ' remote. The listener shares the screen's message port, so the loop below
+    ' dispatches roSocketEvent alongside ECP and the exit poll. Closed on every
+    ' exit path below.
+    setup = SetupServerStart(port, scene)
+    if setup <> invalid then scene.callFunc("ShowSetupAddress", setup.address)
+
     scene.SignalBeacon("AppLaunchComplete")
 
     while true
@@ -29,14 +39,19 @@ sub Main(args as object)
             ' the exit dialog always closes the channel even if the event path
             ' dies.
             if scene.exitApp = true
+                SetupServerClose(setup)
                 return
             end if
         else
             if Type(message) = "roInputEvent"
                 scene.callFunc("HandleDeepLink", message.GetInfo())
+            else if Type(message) = "roSocketEvent"
+                SetupServerPoll(setup, message)
             else if Type(message) = "roSGScreenEvent" and message.IsScreenClosed()
+                SetupServerClose(setup)
                 return
             else if Type(message) = "roSGNodeEvent" and message.GetField() = "exitApp" and scene.exitApp = true
+                SetupServerClose(setup)
                 return
             end if
         end if

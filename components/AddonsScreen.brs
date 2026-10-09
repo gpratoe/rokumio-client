@@ -27,6 +27,8 @@ sub init()
     m.companionPlate = m.top.FindNode("companionPlate")
     m.companionTitle = m.top.FindNode("companionTitle")
     m.companionCaption = m.top.FindNode("companionCaption")
+    m.setupHint = m.top.FindNode("setupHint")
+    m.setupUrl = m.top.FindNode("setupUrl")
 
     t = Theme()
     m.title.color = t.accent
@@ -35,11 +37,24 @@ sub init()
     m.companionPlate.color = t.screenBg
     m.companionTitle.color = t.accent
     m.companionCaption.color = t.textSecondary
+    m.setupHint.color = t.textSecondary
+    m.setupUrl.color = t.accent
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
 
     m.rows = []
     m.installTask = invalid
+end sub
+
+' Address of the local setup page, forwarded from the Scene at launch. The two
+' labels are born hidden so this screen never flashes an address that has not
+' been published yet.
+sub SetSetupAddress(url as dynamic)
+    if url = invalid then return
+    if url = "" then return
+    m.setupUrl.text = url
+    m.setupHint.visible = true
+    m.setupUrl.visible = true
 end sub
 
 function OnEnter(params as object) as void

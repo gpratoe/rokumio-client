@@ -9,6 +9,9 @@
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
+        <!-- main() starts the local setup page before this screen ever opens;
+             the address lands here through the Scene's ShowSetupAddress. -->
+        <function name="SetSetupAddress" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/AddonsScreen.brs" />
@@ -58,13 +61,35 @@
                 uri="pkg:/images/qr-companion.png" />
             <Label
                 id="companionCaption"
-                translation="[40, 500]"
+                translation="[40, 478]"
                 width="620"
-                height="210"
+                height="140"
                 horizAlign="center"
                 wrap="true"
                 text="Use our Android app to add add-ons faster — no need to type a manifest URL by hand."
                 font="font:SmallSystemFont" />
+
+            <!-- Address of the local setup page, at the bottom of the companion
+                 card: the same "do this on your phone" job as the QR, but for
+                 the page the channel itself serves — no companion app to
+                 install. Hidden until main() publishes an address. -->
+            <Label
+                id="setupHint"
+                translation="[40, 636]"
+                width="620"
+                height="30"
+                horizAlign="center"
+                visible="false"
+                text="Or install from your browser:"
+                font="font:SmallSystemFont" />
+            <Label
+                id="setupUrl"
+                translation="[40, 672]"
+                width="620"
+                height="44"
+                horizAlign="center"
+                visible="false"
+                font="font:MediumBoldSystemFont" />
         </Group>
 
         <Label

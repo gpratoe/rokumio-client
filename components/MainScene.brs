@@ -1124,6 +1124,15 @@ sub HandleDeepLink(args as object)
         return
     end if
 
+    BeginImport(parse.addons, parse.settings)
+end sub
+
+' Start an add-on import: seed the single import slot and pump it. Both deep
+' links (above) and the local setup page (ImportFromSetup) land here, so there
+' can never be two import pipelines with two sets of counters and two dialogs
+' racing for the same add-on. Callers guard m.import <> invalid first — the
+' slot holds exactly one import at a time.
+sub BeginImport(addons as object, settings as dynamic)
     m.import = {
         pending: []
         added: 0
@@ -1131,13 +1140,34 @@ sub HandleDeepLink(args as object)
         failed: 0
         failures: []
         task: invalid
-        settings: parse.settings
-        requested: parse.addons.Count()
+        settings: settings
+        requested: addons.Count()
     }
-    for each url in parse.addons
+    for each url in addons
         m.import.pending.Push(url)
     end for
     PumpImport()
+end sub
+
+' The local setup page (source/util/SetupPage.brs) hands off one manifest URL.
+' Returns whether it was queued: the page answers 200 with a "watch the TV"
+' page, or 409 with a "busy" page — never a dialog on this side (the import
+' summary that lands in ShowImportDialog is the TV's own confirmation).
+function ImportFromSetup(url as dynamic) as boolean
+    if m.import <> invalid then return false
+    if url = invalid then return false
+    if url = "" then return false
+    BeginImport([url], invalid)
+    return true
+end function
+
+' Address of the local setup page, published by main() at launch. Stored here
+' and pushed to the Add-ons screen, where the install workflow actually lives.
+sub ShowSetupAddress(url as dynamic)
+    if url = invalid then return
+    if url = "" then return
+    m.setupAddress = url
+    if m.addonsScreen <> invalid then m.addonsScreen.callFunc("SetSetupAddress", url)
 end sub
 
 ' Start the next queued manifest fetch, or finish when the queue is empty.
