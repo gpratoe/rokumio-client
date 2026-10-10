@@ -206,6 +206,9 @@ sub BuildRows()
             if item.metaType <> invalid and LCase(item.metaType) = "channel" then tile.watchedGlyph = ""
             TileWatchFields(tile, item.metaId, item.metaType)
         end for
+        ' The library is a flat poster wall: one cell size for the whole grid from
+        ' the type filter (channel -> 1:1, everything else -> 2:3), so a mixed set
+        ' never goes 16:9 mid-wall and breaks the grid.
         sizes.Push(TileCellSize(m.typeFilter))
     end for
     m.grid.content = content

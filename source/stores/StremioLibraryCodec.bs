@@ -55,6 +55,8 @@ class StremioLibraryCodec
         if name = invalid then name = ""
         poster = item.poster
         if poster = invalid then poster = ""
+        posterShape = ""
+        if item.posterShape <> invalid and (Type(item.posterShape) = "roString" or Type(item.posterShape) = "String") then posterShape = item.posterShape
         removed = item.removed = true
         temp = item.temp = true
 
@@ -93,6 +95,7 @@ class StremioLibraryCodec
             metaType: metaType
             name: name
             poster: poster
+            posterShape: posterShape
             videoId: videoId
             season: season
             episode: episode

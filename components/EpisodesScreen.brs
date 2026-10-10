@@ -454,6 +454,7 @@ sub PushEpisode(season as integer, ep as object)
             position: position
             name: m.meta.name
             poster: m.meta.poster
+            posterShape: m.meta.posterShape
             logo: m.meta.logo
             background: m.meta.background
             episodeName: ep.name

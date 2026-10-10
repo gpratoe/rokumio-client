@@ -280,6 +280,7 @@ sub ResumeEpisode()
             position: ResumePosition()
             name: m.meta.name
             poster: m.meta.poster
+            posterShape: m.meta.posterShape
             logo: m.meta.logo
             background: m.meta.background
         }
@@ -303,6 +304,7 @@ sub PlayMedia()
                 position: ResumePosition()
             name: m.meta.name
             poster: m.meta.poster
+            posterShape: m.meta.posterShape
             logo: m.meta.logo
             background: m.meta.background
             }
@@ -318,6 +320,7 @@ sub PlayMedia()
                 position: ResumePosition()
                 name: m.meta.name
                 poster: m.meta.poster
+                posterShape: m.meta.posterShape
                 logo: m.meta.logo
                 background: m.meta.background
                 description: m.meta.description
@@ -332,7 +335,7 @@ sub OpenEpisodes()
         screen: "episodesScreen"
         params: {
             addonAddress: m.addonAddress
-            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, background: m.meta.background, logo: m.meta.logo }
+            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, posterShape: m.meta.posterShape, background: m.meta.background, logo: m.meta.logo }
             resume: m.resume
         }
     }
@@ -347,11 +350,20 @@ end function
 
 sub ToggleLibrary()
     if m.stores = invalid then return
+    ' A meta from an add-on that ships no shape (or no poster) leaves those fields
+    ' invalid. Every library boundary here is a typed string param, and Roku
+    ' refuses to cast an explicitly-passed invalid (a default only fills in when
+    ' the arg is OMITTED), so normalize once and reuse for both the save and the
+    ' write-back packet MainScene turns into a typed LibraryBuildLibraryChangeItem.
+    poster = ""
+    if m.meta.poster <> invalid then poster = m.meta.poster
+    posterShape = ""
+    if m.meta.posterShape <> invalid then posterShape = m.meta.posterShape
     added = false
     if m.stores.library.callFunc("LibraryIsSaved", m.meta.id)
         m.stores.library.callFunc("LibraryRemoveSaved", m.meta.id)
     else
-        m.stores.library.callFunc("LibraryAddSaved", m.meta.id, m.meta.type, m.meta.name, m.meta.poster)
+        m.stores.library.callFunc("LibraryAddSaved", m.meta.id, m.meta.type, m.meta.name, poster, posterShape)
         added = true
     end if
     label = LibraryActionLabel()
@@ -374,7 +386,7 @@ sub ToggleLibrary()
             metaId: m.meta.id
             metaType: m.meta.type
             name: m.meta.name
-            poster: m.meta.poster
+            poster: poster
             added: added
         }
     end if

@@ -36,6 +36,7 @@ function LibraryItemFixture(metaId as string, metaType as string, name as string
         if options.watched <> invalid then item.state.watched = options.watched
         if options.timesWatched <> invalid then item.state.timesWatched = options.timesWatched
         if options.flaggedWatched <> invalid then item.state.flaggedWatched = options.flaggedWatched
+        if options.posterShape <> invalid then item.posterShape = options.posterShape
     end if
     return item
 end function
@@ -64,7 +65,7 @@ end sub
 sub Test_LibrarySync_CwClassifiedAndMapped()
     Harness_Suite("SyncFromStremio maps continue-watching items to positions")
     items = []
-    items.Push(LibraryItemFixture("tt0133093", "movie", "The Matrix", "2024-06-10T08:00:00Z", { timeOffset: 420000, duration: 8164000 }))
+    items.Push(LibraryItemFixture("tt0133093", "movie", "The Matrix", "2024-06-10T08:00:00Z", { timeOffset: 420000, duration: 8164000, posterShape: "landscape" }))
     items.Push(LibraryItemFixture("tt1234567", "series", "Breaking Bad", "2024-06-15T08:00:00Z", { timeOffset: 1800000, duration: 2700000, videoId: "tt1234567:5:3" }))
     store = LibraryStore(MockRegistry(), "stremio")
     store.SyncFromStremio(items)
@@ -82,6 +83,7 @@ sub Test_LibrarySync_CwClassifiedAndMapped()
     Harness_Equal(cw[1].season, 0, "movie season zero")
     Harness_Equal(cw[1].episode, 0, "movie episode zero")
     Harness_Equal(cw[1].position, 420000, "movie ms position carried")
+    Harness_Equal(cw[1].posterShape, "landscape", "posterShape carried onto the position")
 end sub
 
 sub Test_LibrarySync_CwOrderedByMtimeDesc()
@@ -137,7 +139,7 @@ end sub
 sub Test_LibrarySync_SavedMappedInMemory()
     Harness_Suite("SyncFromStremio fills saved entries for the session")
     items = []
-    items.Push(LibraryItemFixture("tt0111161", "movie", "Shawshank", "2024-06-01T00:00:00Z"))
+    items.Push(LibraryItemFixture("tt0111161", "movie", "Shawshank", "2024-06-01T00:00:00Z", { posterShape: "square" }))
     items.Push(LibraryItemFixture("tt2000001", "movie", "Removed", "2024-06-01T00:00:00Z", { removed: true }))
     items.Push(LibraryItemFixture("tt2000002", "movie", "Temp", "2024-06-01T00:00:00Z", { temp: true }))
     items.Push(LibraryItemFixture("tt0111161", "movie", "Shawshank", "2024-06-02T00:00:00Z"))
@@ -147,6 +149,7 @@ sub Test_LibrarySync_SavedMappedInMemory()
     saved = store.SavedItems()
     Harness_Equal(saved.Count(), 1, "only non-removed non-temp saved, deduped")
     Harness_Equal(saved[0].metaId, "tt0111161", "saved entry present")
+    Harness_Equal(saved[0].posterShape, "square", "posterShape carried onto the saved record")
     Harness_Equal(store.IsSaved("tt0111161"), true, "is saved")
     Harness_Equal(store.IsSaved("tt2000001"), false, "removed item not saved")
     Harness_Equal(store.IsSaved("tt2000002"), false, "temp item not saved")

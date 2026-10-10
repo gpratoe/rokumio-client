@@ -1,10 +1,10 @@
 ' TileSize unit tests — the shared cell-size rules drive every grid row on the
-' device (Home/Discover/Search/Library), so the shape mapping cannot drift.
+' device (Home/Discover/Search), so the shape mapping cannot drift.
 ' PosterShapeName folds a Stremio posterShape value (the spec spells 1:0.675 as
 ' "regular", the SDK as "poster") to one canonical name, TileCellSize picks a
-' row's cell from that shape or the content-type fallback, and TilePosterShape
-' folds a row of metas into a single shape by majority vote so a whole row
-' adapts together.
+' row's cell from that shape or the content-type fallback, TilePosterShape folds
+' a row of metas into a single shape by majority vote so a whole row adapts
+' together, and TileColumns fits that cell across a grid row without overflow.
 
 sub Test_TileSize_ShapeNames()
     Harness_Suite("PosterShapeName normalizes Stremio shapes")
@@ -73,4 +73,14 @@ sub Test_TileSize_PosterShape()
     metas.Push({ posterShape: "poster" })
     metas.Push({ posterShape: "landscape" })
     Harness_Equal(TilePosterShape(metas), "poster", "2:3 majority wins over a lone landscape")
+end sub
+
+sub Test_TileSize_Columns()
+    Harness_Suite("TileColumns fits a grid row without overflowing it")
+    Harness_Equal(TileColumns(1780, 270, 18), 6, "a 2:3 grid fits six columns")
+    Harness_Equal(TileColumns(1780, 480, 18), 3, "a 16:9 grid fits three columns")
+    Harness_Equal(TileColumns(1780, 270, 0), 6, "no gap still fits six")
+    Harness_Equal(TileColumns(1780, 1920, 18), 1, "a cell wider than the row clamps to one")
+    Harness_Equal(TileColumns(0, 270, 18), 1, "a zero-width row clamps to one")
+    Harness_Equal(TileColumns(1780, 0, 18), 1, "a zero-width cell clamps to one")
 end sub

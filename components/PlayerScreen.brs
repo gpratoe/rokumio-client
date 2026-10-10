@@ -1103,8 +1103,10 @@ sub SavePosition()
     if params.name <> invalid then name = params.name
     poster = ""
     if params.poster <> invalid then poster = params.poster
+    posterShape = ""
+    if params.posterShape <> invalid then posterShape = params.posterShape
 
-    m.stores.library.callFunc("LibrarySetPosition", params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration))
+    m.stores.library.callFunc("LibrarySetPosition", params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration), posterShape)
     mid = ""
     if params.metaId <> invalid then mid = params.metaId
     m.stores.library.callFunc("LibraryMarkWatchedIfFinished", mid, params.videoId, Int(position), Int(duration))

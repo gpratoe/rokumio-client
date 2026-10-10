@@ -35,6 +35,12 @@ sub init()
     m.grid.ObserveField("itemFocused", "onGridFocused")
 
     m.chunk = 6
+    ' The grid's row budget: the RowList spans x 150..1930 (translation 150 + the
+    ' itemSize width 1780 in DiscoverScreen.xml), with an 18px gap between tiles
+    ' (rowItemSpacing). A row of cells must fit this or the RowList scrolls that
+    ' row horizontally — see UpdateGrid.
+    m.rowWidth = 1780
+    m.rowGap = 18
     m.sources = []
     m.sourcesSignature = ""
     m.sourcesTask = invalid
@@ -658,10 +664,22 @@ function DiscoverLabel() as string
     return label
 end function
 
-' Lay all loaded metas out as poster rows of m.chunk tiles so the RowList
-' clips/scrolls them vertically. jumpToRow keeps the view anchored after an
+' Lay all loaded metas out as poster rows so the RowList clips/scrolls them
+' vertically. The column count (m.chunk) is recomputed from the cell size so the
+' row always fits the grid width; jumpToRow keeps the view anchored after an
 ' append, preserving the focused row and tile.
 sub UpdateGrid(rowToShow = invalid as dynamic)
+    mt = invalid
+    if m.selectedCatalog <> invalid then mt = m.selectedCatalog.rawType
+    ' The whole grid sizes to the catalog's posterShape (folded from its metas),
+    ' the same rule Home rows use, so a 16:9 catalog gets wide tiles instead of
+    ' letterboxed 2:3 cells; falls back to the content type when no shape ships.
+    size = TileCellSize(mt, TilePosterShape(m.metas))
+    ' A wide (16:9) cell places fewer tiles per row instead of overflowing the row
+    ' into per-row horizontal scrolling (the "grid becomes a list of rows" break).
+    ' All rows share one chunk so the flat index (row*chunk + col) stays honest.
+    m.chunk = TileColumns(m.rowWidth, size[0], m.rowGap)
+
     content = CreateObject("roSGNode", "ContentNode")
     for r = 0 to (m.metas.Count() - 1) / m.chunk
         row = content.CreateChild("ContentNode")
@@ -681,12 +699,7 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
         end for
     end for
     m.grid.content = content
-    mt = invalid
-    if m.selectedCatalog <> invalid then mt = m.selectedCatalog.rawType
-    ' The whole grid sizes to the catalog's posterShape (folded from its metas),
-    ' the same rule Home rows use, so a 16:9 catalog gets wide tiles instead of
-    ' letterboxed 2:3 cells; falls back to the content type when no shape ships.
-    m.grid.rowItemSize = [TileCellSize(mt, TilePosterShape(m.metas))]
+    m.grid.rowItemSize = [size]
     m.grid.numRows = (m.metas.Count() + m.chunk - 1) / m.chunk
     if rowToShow <> invalid and m.grid.numRows > 0
         m.grid.jumpToRowItem = rowToShow

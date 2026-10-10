@@ -8,13 +8,14 @@ sub Test_Library_AddAndListSaved()
     Harness_Suite("LibraryStore stores saved items newest first")
     store = LibraryStore(MockRegistry())
     Harness_Ok(store.AddSaved("tt0111161", "movie", "The Shawshank Redemption"), "add first")
-    Harness_Ok(store.AddSaved("tt0133093", "movie", "The Matrix", "poster.png"), "add second")
+    Harness_Ok(store.AddSaved("tt0133093", "movie", "The Matrix", "poster.png", "landscape"), "add second")
     Harness_Ok(not store.AddSaved("tt0111161", "movie", "The Shawshank Redemption"), "duplicate refused")
     Harness_Ok(not store.AddSaved("", "movie", "No Id"), "blank id refused")
 
     items = store.SavedItems()
     Harness_Equal(items.Count(), 2, "two saved")
     Harness_Equal(items[0].metaId, "tt0133093", "newest first")
+    Harness_Equal(items[0].posterShape, "landscape", "posterShape stored with the record")
     Harness_Ok(items[0].Lookup("logo") = invalid, "no logo stored")
     Harness_Ok(store.IsSaved("tt0111161"), "is saved")
 end sub
@@ -34,13 +35,14 @@ sub Test_Library_ContinueWatchingOrdering()
 
     store.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix")
     store.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot")
-    store.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot", "https://img.png", 90, 1800)
+    store.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot", "https://img.png", 90, 1800, "square")
 
     list = store.ContinueWatching()
     Harness_Equal(list.Count(), 2, "two entries")
     Harness_Equal(list[0].videoId, "tt1234567:1:1", "updated entry is most recent")
     Harness_Equal(list[0].position, 90, "position updated")
     Harness_Equal(list[0].duration, 1800, "duration carried")
+    Harness_Equal(list[0].posterShape, "square", "posterShape carried on the position")
     Harness_Ok(list[0].Lookup("logo") = invalid, "no logo stored")
     Harness_Equal(store.Position("tt0133093"), 0, "other entry still at zero")
     Harness_Ok(store.IsWatching("tt0133093"), "is watching")
@@ -97,8 +99,8 @@ sub Test_Library_PersistsViaRegistry()
     Harness_Suite("LibraryStore persists saved + positions across reloads")
     registry = MockRegistry()
     first = LibraryStore(registry)
-    first.AddSaved("tt0111161", "movie", "The Shawshank Redemption")
-    first.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix", "", 120, 2400)
+    first.AddSaved("tt0111161", "movie", "The Shawshank Redemption", "", "landscape")
+    first.SetPosition("tt0133093", "tt0133093", "movie", 0, 0, "The Matrix", "", 120, 2400, "square")
     first.SetPosition("tt1234567:1:1", "tt1234567", "series", 1, 1, "Pilot", "", 45, 1500)
 
     second = LibraryStore(registry)
@@ -108,9 +110,36 @@ sub Test_Library_PersistsViaRegistry()
     Harness_Equal(watching.Count(), 2, "positions restored")
     Harness_Equal(second.Position("tt0133093"), 120, "position value restored")
     Harness_Equal(watching[0].videoId, "tt1234567:1:1", "reloaded array keeps newest first")
+    Harness_Equal(saved[0].posterShape, "landscape", "saved posterShape survives the reload")
+    Harness_Equal(watching[1].posterShape, "square", "position posterShape survives the reload")
 
     second.SetPosition("tt9999999", "tt9999999", "movie", 0, 0, "Brand New")
     Harness_Equal(second.ContinueWatching()[0].videoId, "tt9999999", "new write lands on top")
+end sub
+
+sub Test_Library_OldRecordsWithoutPosterShape()
+    Harness_Suite("records persisted before posterShape existed still load and size safely")
+    registry = MockRegistry()
+    ' The exact JSON a pre-posterShape build wrote: no posterShape key on either
+    ' the saved record or the continue-watching position.
+    registry.Write("library", FormatJson({
+        saved: { tt1: { metaId: "tt1", metaType: "movie", name: "Old Save", poster: "p.png" } }
+        savedOrder: ["tt1"]
+        watched: {}
+        continueWatching: [
+            { videoId: "tt2", metaId: "tt2", metaType: "movie", season: 0, episode: 0, name: "Old Watch", poster: "p2.png", position: 120, duration: 3600 }
+        ]
+    }))
+    store = LibraryStore(registry)
+    saved = store.SavedItems()
+    watching = store.ContinueWatching()
+    Harness_Equal(saved.Count(), 1, "legacy saved record loads")
+    Harness_Ok(saved[0].posterShape = invalid or saved[0].posterShape = "", "missing saved posterShape reads empty")
+    Harness_Equal(watching.Count(), 1, "legacy position loads")
+    Harness_Ok(watching[0].posterShape = invalid or watching[0].posterShape = "", "missing position posterShape reads empty")
+    ' The TilePosterShape guard absorbs the missing key, so a legacy row falls
+    ' back to the content type instead of crashing on an old record.
+    Harness_Equal(TilePosterShape(saved), "", "legacy records fold to no shape")
 end sub
 
 sub Test_Library_InMemoryOnlyWithoutRegistry()

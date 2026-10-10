@@ -56,9 +56,11 @@
             height="40"
             font="font:MediumSystemFont" />
 
-        <!-- Results grid: one fetch's metas chunked into poster rows of 6 so
-             the RowList clips/scrolls vertically. Same PosterTile contract as
-             Home's grid. -->
+        <!-- Results grid: one fetch's metas chunked into poster rows so the
+             RowList clips/scrolls vertically. UpdateGrid computes the column
+             count to fit the 1780px row budget for the active tile size (6 for
+             2:3, 3 for 16:9), so a landscape row never overflows into per-row
+             horizontal scrolling. Same PosterTile contract as Home's grid. -->
         <RowList
             id="discoverGrid"
             translation="[150, 362]"

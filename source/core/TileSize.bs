@@ -69,6 +69,22 @@ function TilePosterShape(metas as dynamic) as string
     return best
 end function
 
+' The number of tiles of cellWidth that fit across a grid row of gridWidth,
+' counting the spacingX gap between them:
+'   cols*cellWidth + (cols-1)*spacingX <= gridWidth
+' Discover uses this so a wide (16:9) catalog places fewer tiles per row instead
+' of overflowing the row into per-row horizontal scrolling — a RowList row that
+' fits its width reads as a grid; one that overflows reads as a Home-style strip.
+' Always at least one tile so an oversized cell still renders.
+function TileColumns(gridWidth as integer, cellWidth as integer, spacingX as integer) as integer
+    if cellWidth <= 0 then return 1
+    stride = cellWidth + spacingX
+    if stride <= 0 then return 1
+    cols = Int((gridWidth + spacingX) / stride)
+    if cols < 1 then cols = 1
+    return cols
+end function
+
 function TileItemWidth(metaType as dynamic) as integer
     if metaType <> invalid and metaType <> ""
         lower = LCase(metaType)

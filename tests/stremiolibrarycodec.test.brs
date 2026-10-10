@@ -30,6 +30,7 @@ function CodecItemFixture(metaId as string, options = invalid as dynamic) as obj
         if options.timesWatched <> invalid then item.state.timesWatched = options.timesWatched
         if options.flaggedWatched <> invalid then item.state.flaggedWatched = options.flaggedWatched
         if options.watched <> invalid then item.state.watched = options.watched
+        if options.posterShape <> invalid then item.posterShape = options.posterShape
         if options.extra <> invalid then item[options.extraKey] = options.extra
     end if
     return item
@@ -50,6 +51,7 @@ sub Test_StremioLibraryCodec_ClassifiesItems()
     Harness_Equal(entry.season, 1, "season decoded from video id")
     Harness_Equal(entry.episode, 1, "episode decoded from video id")
     Harness_Equal(entry.position, 312000, "position is raw ms")
+    Harness_Equal(entry.posterShape, "", "no posterShape means empty")
 
     ' flaggedWatched / timesWatched mark the whole item watched; the raw bitfield
     ' is kept whole for EpisodesScreen.
@@ -68,6 +70,12 @@ sub Test_StremioLibraryCodec_ClassifiesItems()
     Harness_Equal(movie.metaType, "movie", "movie type survives")
     Harness_Ok(not movie.cw, "no position means not continue watching")
     Harness_Ok(movie.saved, "movie is saved")
+
+    ' The posterShape rides along verbatim for the Library screen's per-row sizing.
+    shaped = codec.ParseLibraryItem(CodecItemFixture("tt7", { type: "movie", posterShape: "landscape" }))
+    Harness_Equal(shaped.posterShape, "landscape", "landscape posterShape travels through")
+    nonString = codec.ParseLibraryItem(CodecItemFixture("tt8", { type: "movie", posterShape: 340 }))
+    Harness_Equal(nonString.posterShape, "", "non-string posterShape is ignored")
 end sub
 
 sub Test_StremioLibraryCodec_RejectsInvalidItems()

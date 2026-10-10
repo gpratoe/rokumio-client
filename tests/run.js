@@ -2937,6 +2937,50 @@ function checkChannelCwPolicyContract() {
     return ok;
 }
 
+function checkMetaFieldCoercionContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const details = fs.readFileSync(path.join(projectRoot, 'components', 'DetailsScreen.brs'), 'utf8');
+    const player = fs.readFileSync(path.join(projectRoot, 'components', 'PlayerScreen.brs'), 'utf8');
+
+    // Roku refuses to cast an explicitly-passed invalid into a typed `as string`
+    // parameter — a default only fills in when the argument is OMITTED. poster and
+    // posterShape are absent on many add-ons, so feeding m.meta.<field> (or
+    // params.<field>) straight across the typed LibraryAddSaved/LibrarySetPosition
+    // boundary throws &h18 on device and freezes the tap. @rokucommunity/brs coerces
+    // leniently and never reproduces it, so pin the call sites here: the optional
+    // args must be pre-normalized locals, never raw field accesses.
+    const addLine = (details.match(/.*callFunc\("LibraryAddSaved".*/) || [''])[0];
+    if (addLine.includes('m.meta.poster')) {
+        err('DetailsScreen.brs passes m.meta.poster/posterShape straight into LibraryAddSaved — an invalid (missing) field casts to a typed string param and throws &h18 on device');
+    }
+    if (!details.includes('if m.meta.poster <> invalid then')) {
+        err('DetailsScreen.brs no longer normalizes m.meta.poster before LibraryAddSaved — an absent poster would crash the save');
+    }
+    if (!details.includes('if m.meta.posterShape <> invalid then')) {
+        err('DetailsScreen.brs no longer normalizes m.meta.posterShape before LibraryAddSaved — the common no-shape case crashes the save');
+    }
+    // The play-param pushes carry m.meta.poster/posterShape inside an AA on purpose
+    // (the player normalizes before its typed SetPosition), so only the write-back
+    // packet is a typed boundary: MainScene feeds change.poster into
+    // LibraryBuildLibraryChangeItem(poster as string), so it must be the local.
+    const packet = (details.match(/m\.top\.libraryChange\s*=\s*\{[\s\S]*?\}/) || [''])[0];
+    if (packet.includes('poster: m.meta.poster')) {
+        err('DetailsScreen.brs publishes poster: m.meta.poster in the libraryChange packet — MainScene feeds it into the typed LibraryBuildLibraryChangeItem and a missing poster throws &h18 on device; send the normalized local instead');
+    }
+
+    const setLine = (player.match(/.*callFunc\("LibrarySetPosition".*/) || [''])[0];
+    if (setLine.includes('params.poster')) {
+        err('PlayerScreen.brs passes params.poster/posterShape straight into LibrarySetPosition — normalize a missing field to "" first');
+    }
+    if (!player.includes('if params.posterShape <> invalid then')) {
+        err('PlayerScreen.brs no longer normalizes params.posterShape before LibrarySetPosition — a title with no shape crashes the position save');
+    }
+
+    return ok;
+}
+
 function checkStreamTypeGateContract() {
     const fs = require('fs');
     let ok = true;
@@ -3690,7 +3734,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract() || !checkMetaFieldCoercionContract()) {
         process.exit(1);
     }
 

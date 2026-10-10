@@ -658,6 +658,7 @@ sub onStreamSelected()
             position: m.params.position
             name: m.headTitle.text
             poster: m.params.poster
+            posterShape: m.params.posterShape
             logo: m.params.logo
         }
     }
