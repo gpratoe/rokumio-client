@@ -683,7 +683,10 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
     m.grid.content = content
     mt = invalid
     if m.selectedCatalog <> invalid then mt = m.selectedCatalog.rawType
-    m.grid.rowItemSize = [TileCellSize(mt)]
+    ' The whole grid sizes to the catalog's posterShape (folded from its metas),
+    ' the same rule Home rows use, so a 16:9 catalog gets wide tiles instead of
+    ' letterboxed 2:3 cells; falls back to the content type when no shape ships.
+    m.grid.rowItemSize = [TileCellSize(mt, TilePosterShape(m.metas))]
     m.grid.numRows = (m.metas.Count() + m.chunk - 1) / m.chunk
     if rowToShow <> invalid and m.grid.numRows > 0
         m.grid.jumpToRowItem = rowToShow
