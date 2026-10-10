@@ -84,6 +84,7 @@ sub RenderHero(meta as object)
     m.detailName.text = name
 
     RenderKind(meta)
+    ApplyHeroSize(meta.type)
 
     poster = meta.poster
     if poster = invalid then poster = ""
@@ -159,6 +160,29 @@ end sub
 sub RestoreFocus()
     if m.meta = invalid then return
     m.chipsRow.SetFocus(true)
+end sub
+
+' Channel-family metas (Stremio "channel"/"tv", one family — the same rule
+' TileCellSize uses for grid rows) ship 1:1 artwork; every other type ships the
+' 2:3 poster slab. The node must take the source's shape or limitSize decodes an
+' off-ratio bitmap smaller than its node and leaves an uncovered strip. The load
+' caps ride the node so the memory policy holds for both shapes, exactly as
+' PosterTile does for a square cell. Called on every render, so a screen reused
+' across entries always resets to the type it is showing now.
+sub ApplyHeroSize(metaType as dynamic)
+    w = 340
+    h = 510
+    if metaType <> invalid and metaType <> ""
+        lower = LCase(metaType)
+        if lower = "channel" or lower = "tv"
+            w = 420
+            h = 420
+        end if
+    end if
+    m.heroPoster.width = w
+    m.heroPoster.height = h
+    m.heroPoster.loadWidth = w
+    m.heroPoster.loadHeight = h
 end sub
 
 ' The second header line: "{type} · {releaseInfo} · ★ {imdbRating}", with the

@@ -34,8 +34,9 @@
         <!-- Capped to its own canvas size, same rule as PosterTile: hero artwork
              arrives around 500x750, so uncapped it costs 1.43MB of texture to
              fill a 340x510 node, and it is alive at the same time as the
-             uncapped 1920x1080 background above. The hero is 2:3 and add-on
-             posters are 2:3, so limitSize changes nothing visually. -->
+             uncapped 1920x1080 background above. The 2:3 slab below is the default
+             for everything; ApplyHeroSize swaps the node (and its load caps) to
+             420x420 for channel-family metas, whose posters are 1:1. -->
         <Poster id="heroPoster" translation="[80, 120]" width="340" height="510" loadWidth="340" loadHeight="510" loadDisplayMode="limitSize" />
         <Label
             id="detailName"
