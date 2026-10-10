@@ -387,7 +387,9 @@ function TypeSearchLabel(raw as dynamic) as string
     if raw = "series" then return "Series"
     if raw = "channel" or raw = "tv" then return "Tv channel"
     if raw = "" then return ""
-    return raw.Left(1).UCase() + raw.Mid(1)
+    ' UCase is a global function, not an roString method; the chained form threw
+    ' &hf4 the first time an add-on declared a custom catalog type.
+    return UCase(raw.Left(1)) + raw.Mid(1)
 end function
 
 ' One SearchLoaderTask per add-on, passing the catalogs that add-on serves.

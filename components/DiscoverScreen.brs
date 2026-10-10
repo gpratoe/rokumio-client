@@ -244,7 +244,10 @@ function TypeLabel(key as string) as string
     if key = "series" then return "Series"
     if key = "channels" then return "Channels"
     if key = "" then return ""
-    return key.Left(1).UCase() + key.Mid(1)
+    ' A declared type is a free string ("sports", "tv", …), so this fallback is
+    ' reachable. UCase is a global function, not an roString method — the chained
+    ' form threw &hf4 the first time a custom type hit it.
+    return UCase(key.Left(1)) + key.Mid(1)
 end function
 
 function TypeMatches(declared as dynamic, key as string) as boolean

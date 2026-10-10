@@ -3175,6 +3175,41 @@ function checkPosterScalingContract() {
     return ok;
 }
 
+// BrightScript exposes Left/Right/Mid/Trim/InStr as roString METHOD forms (the
+// codebase relies on these, e.g. source/util/SetupPage.brs), but UCase/LCase are
+// only GLOBAL functions — roString has no .UCase()/.LCase() member at all.
+// DiscoverScreen's and SearchScreen's type-label fallbacks capitalized a declared
+// catalog type with `key.Left(1).UCase() + key.Mid(1)`. Every known type
+// (movie/series/channels) returned before that line, so it looked correct until an
+// add-on declared a custom catalog type ("sports") and the line threw &hf4
+// "Member function not found", killing DiscoverScreen on load. Pin the whole
+// class: never chain a non-existent method onto a string.
+function checkStringMethodContract() {
+    const fs = require('fs');
+    const path = require('path');
+    let ok = true;
+    const roots = [path.join(projectRoot, 'components'), path.join(projectRoot, 'source')];
+    const bad = /\.\s*(UCase|LCase)\s*\(/i;
+
+    const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) { walk(full); continue; }
+            if (!/\.(brs|bs)$/.test(entry.name)) continue;
+            const src = fs.readFileSync(full, 'utf8');
+            const m = bad.exec(src);
+            if (m) {
+                const line = src.slice(0, m.index).split('\n').length;
+                console.error(`${path.relative(projectRoot, full)}:${line} calls .${m[1]}(...) as a string method — roString has no UCase/LCase member; they are global functions, so this throws &hf4 the first time the line runs. Wrap the argument instead: ${m[1]}(value)`);
+                ok = false;
+            }
+        }
+    };
+    for (const root of roots) walk(root);
+
+    return ok;
+}
+
 // The theme migration moved every painted color into theme.reads in init()
 // plus script includes, because XML color attributes cannot call code. One
 // failure mode would slip past the interpreter: a component calling
@@ -3653,7 +3688,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract()) {
         process.exit(1);
     }
 
