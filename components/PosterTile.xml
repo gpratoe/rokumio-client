@@ -71,7 +71,7 @@
              The one residual: an add-on that served an off-ratio poster would
              now letterbox where scaleToFill used to crop, exposing the row
              behind the tile edges. -->
-        <Poster id="poster" width="270" height="405" loadWidth="270" loadHeight="405" loadDisplayMode="limitSize" />
+        <Poster id="poster" width="270" height="405" loadWidth="270" loadHeight="405" loadDisplayMode="scaleToFit" />
         <BusySpinner
             id="loadSpinner"
             translation="[113, 163]"
