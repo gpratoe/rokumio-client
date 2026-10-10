@@ -49,15 +49,25 @@ end sub
 ' to follow: resize the poster (and the caps that keep its texture bounded —
 ' loadWidth/loadHeight ride the node so the memory policy holds for the new
 ' size too), plus the artless face, the title, the progress bar and the watched
-' badge, which are all laid out against the fixed 270x405 slab in XML. The XML
-' already lays out the portrait baseline exactly, so that case returns untouched
-' and every other screen (which keeps 2:3 cells) is pixel-identical to before.
+' badge, which are all laid out against the fixed 270x405 slab in XML.
+'
+' This must run on EVERY size change, portrait included. RowList recycles one
+' tile instance across rows, so a square channel cell can be reused for a 2:3
+' movie/series cell; a portrait early-return here left that recycled tile at the
+' previous row's 270x270 geometry — square artwork inside a 2:3 slot, the
+' progress bar stranded mid-tile, the title box scaled for a square. Rebuilding
+' the whole layout every time is what heals the recycle (fresh tiles simply
+' compute the same portrait numbers the XML already laid out).
+'
+' Portrait is the shape the XML authored by hand, and two of its coordinates are
+' not derived: the title's x and the spinner's y. The formula values below drift
+' from the hand-tuned XML (12 vs 18, 180.5 vs 163), so portrait keeps the XML
+' numbers verbatim; a square cell uses the computed origin.
 sub ApplyTileSize()
     w = m.top.width
     h = m.top.height
     if w = invalid or h = invalid then return
     if w <= 0 or h <= 0 then return
-    if w = 270 and h = 405 then return
 
     m.poster.width = w
     m.poster.height = h
@@ -67,13 +77,20 @@ sub ApplyTileSize()
     m.tileBg.height = h
     m.titleText.width = w - 24
     m.titleText.height = h - 16
-    m.titleText.translation = [12, 8]
     m.progressTrack.width = w
     m.progressTrack.translation = [0, h - 8]
     m.progressFill.translation = [0, h - 8]
     m.progressFill.width = w
     m.watchedBadge.translation = [w - 62, 8]
-    m.loadSpinner.translation = [(w - 44) / 2, (h - 44) / 2]
+
+    if w = 270 and h = 405
+        m.titleText.translation = [18, 8]
+        m.loadSpinner.translation = [113, 163]
+    else
+        m.titleText.translation = [12, 8]
+        m.loadSpinner.translation = [(w - 44) / 2, (h - 44) / 2]
+    end if
+
     if m.top.itemContent <> invalid then UpdateOverlays()
 end sub
 
