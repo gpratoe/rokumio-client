@@ -199,8 +199,12 @@ sub Test_Addons_NormalizesObjectResources()
     Harness_Ok(result.ok, "install ok")
     resources = addons.Get("com.example.addon").resources
     Harness_Equal(resources.Count(), 2, "object + string resources kept")
-    Harness_Equal(resources[0], "stream", "object resource reduced to its name")
-    Harness_Equal(resources[1], "meta", "string resource passed through")
+    Harness_Equal(resources[0].name, "stream", "object resource keeps its name")
+    Harness_Equal(resources[0].short, false, "object resource is full (not short)")
+    Harness_Equal(resources[0].types[0], "movie", "object resource types preserved")
+    Harness_Equal(resources[0].idPrefixes[1], "kitsu", "object resource idPrefixes preserved")
+    Harness_Equal(resources[1].name, "meta", "string resource normalized to a descriptor")
+    Harness_Equal(resources[1].short, true, "string resource is short")
 end sub
 
 sub Test_Addons_LoadNormalizesObjectResources()
@@ -223,7 +227,8 @@ sub Test_Addons_LoadNormalizesObjectResources()
 
     resources = addons.Get("com.example.addon").resources
     Harness_Equal(resources.Count(), 1, "one resource after load")
-    Harness_Equal(resources[0], "stream", "object resource normalized to its name")
+    Harness_Equal(resources[0].name, "stream", "object resource normalized to a descriptor")
+    Harness_Equal(resources[0].short, false, "persisted object resources stay full")
 end sub
 
 sub Test_Addons_RejectsInvalidAddress()
@@ -370,9 +375,65 @@ sub Test_Addons_HasType()
     Harness_Ok(addons.HasType(["tv"], "channel"), "tv declared, channel wanted")
     Harness_Ok(addons.HasType(["movie", "channel"], "tv"), "mixed add-on serves the channel family")
 
-    Harness_Ok(addons.HasType(invalid, "movie"), "invalid types are permissive")
-    Harness_Ok(addons.HasType([], "movie"), "empty types are permissive")
+    Harness_Ok(not addons.HasType(invalid, "movie"), "invalid types refused (stremio-core parity)")
+    Harness_Ok(not addons.HasType([], "movie"), "empty types refused (stremio-core parity)")
     Harness_Ok(addons.HasType(["channel"], ""), "blank wanted type is permissive")
+end sub
+
+sub Test_Addons_MatchesIdPrefixes()
+    Harness_Suite("AddonsStore.MatchesIdPrefixes mirrors stremio-core prefix matching")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+
+    Harness_Ok(addons.MatchesIdPrefixes(invalid, "tt1254207"), "absent prefixes accept any id")
+    Harness_Ok(addons.MatchesIdPrefixes(["tt", "kitsu"], "tt1254207"), "tt id matched")
+    Harness_Ok(addons.MatchesIdPrefixes(["tt", "kitsu"], "kitsu:42"), "kitsu id matched")
+    Harness_Ok(not addons.MatchesIdPrefixes(["tt", "kitsu"], "yt_id:abc"), "unlisted prefix refused")
+    Harness_Ok(not addons.MatchesIdPrefixes(["tt"], ""), "empty id matches no prefix")
+    Harness_Ok(not addons.MatchesIdPrefixes([], "tt1"), "present-empty prefixes match nothing")
+    Harness_Ok(not addons.MatchesIdPrefixes([""], "tt1"), "blank prefix cannot match everything")
+end sub
+
+sub Test_Addons_SupportsResource()
+    Harness_Suite("AddonsStore.SupportsResource mirrors stremio-core resource matching")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+
+    ' Torrentio-shaped: a full "stream" resource carrying its own types + idPrefixes.
+    torrentio = [
+        { name: "stream", short: false, types: ["movie", "series", "anime"], idPrefixes: ["tt", "kitsu"] }
+    ]
+    globalTypes = ["movie", "series", "anime", "other"]
+    Harness_Ok(addons.SupportsResource(torrentio, globalTypes, invalid, "stream", "movie", "tt1254207"), "tt movie matched")
+    Harness_Ok(addons.SupportsResource(torrentio, globalTypes, invalid, "stream", "series", "tt1234567:1:1"), "tt episode matched")
+    Harness_Ok(addons.SupportsResource(torrentio, globalTypes, invalid, "stream", "movie", "kitsu:42"), "kitsu movie matched")
+    Harness_Ok(not addons.SupportsResource(torrentio, globalTypes, invalid, "stream", "channel", "cnn1"), "channel never asked (types)")
+    Harness_Ok(not addons.SupportsResource(torrentio, globalTypes, invalid, "stream", "movie", "yt_id:abc"), "foreign id prefix never asked")
+    Harness_Ok(not addons.SupportsResource(torrentio, globalTypes, invalid, "meta", "movie", "tt1"), "other resource name never matched")
+
+    ' Full resource with no idPrefixes: any id, but its own types still apply.
+    anyId = [{ name: "stream", short: false, types: ["movie"], idPrefixes: invalid }]
+    Harness_Ok(addons.SupportsResource(anyId, ["movie"], invalid, "stream", "movie", "whatever"), "absent resource idPrefixes accepts any id")
+    Harness_Ok(not addons.SupportsResource(anyId, ["movie"], invalid, "stream", "series", "tt1"), "resource types override the manifest types")
+
+    ' Full resource with no types: never queried (stremio-core is_some_and).
+    noTypes = [{ name: "stream", short: false, types: invalid, idPrefixes: ["tt"] }]
+    Harness_Ok(not addons.SupportsResource(noTypes, ["movie"], invalid, "stream", "movie", "tt1"), "typeless full resource never queried")
+
+    ' Present-but-empty idPrefixes matches nothing (core any() over []).
+    emptyIds = [{ name: "stream", short: false, types: ["movie"], idPrefixes: [] }]
+    Harness_Ok(not addons.SupportsResource(emptyIds, ["movie"], invalid, "stream", "movie", "tt1"), "present-empty idPrefixes match nothing")
+
+    ' A short resource inherits the manifest's types AND idPrefixes.
+    shortStream = [{ name: "stream", short: true, types: invalid, idPrefixes: invalid }]
+    Harness_Ok(addons.SupportsResource(shortStream, ["movie"], ["tt"], "stream", "movie", "tt9"), "short resource inherits global idPrefixes")
+    Harness_Ok(not addons.SupportsResource(shortStream, ["movie"], ["tt"], "stream", "movie", "kitsu:9"), "short resource respects global idPrefixes")
+    Harness_Ok(not addons.SupportsResource(shortStream, ["movie"], ["tt"], "stream", "series", "tt9"), "short resource respects global types")
+
+    ' A raw manifest resource string behaves as a short resource.
+    Harness_Ok(addons.SupportsResource(["stream"], ["movie"], ["tt"], "stream", "movie", "tt9"), "raw string resource treated as short")
+
+    ' No types declared anywhere: never queried.
+    Harness_Ok(not addons.SupportsResource(shortStream, invalid, invalid, "stream", "movie", "tt9"), "absent manifest types never queried")
+    Harness_Ok(not addons.SupportsResource(invalid, globalTypes, invalid, "stream", "movie", "tt9"), "missing resources never matched")
 end sub
 
 sub Test_Addons_CatalogCapabilities()

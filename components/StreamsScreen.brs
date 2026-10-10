@@ -161,10 +161,13 @@ end sub
 ' provider resolves in parallel — each task answers with its own { streams,
 ' error } the instant that address responds, and onStreamsLoaded routes it into
 ' the matching provider slot. The installed add-ons are read here (registry reads
-' only, no network) so only the addresses that advertise the "stream" resource
-' AND whose declared types cover this media cross into the tasks — a live-TV
-' add-on is never asked for a movie/series stream and a movie/series add-on is
-' never asked for a channel. Failure handling mirrors Home: on total failure the grid
+' only, no network) so only the addresses that can actually serve a stream for
+' this exact media cross into the tasks: the add-on must advertise the "stream"
+' resource and its declared types AND idPrefixes must cover this media (Stremio's
+' own resource matching). A live-TV add-on is never asked for a movie/series
+' stream, a movie/series add-on is never asked for a channel, and an add-on
+' whose idPrefixes exclude this id (say "tt"/"kitsu" on a YouTube id) is never
+' asked at all. Failure handling mirrors Home: on total failure the grid
 ' stays empty, and a hung add-on only delays its own provider, never the others.
 sub LoadStreams(params as object)
     if m.stores = invalid then return
@@ -172,13 +175,11 @@ sub LoadStreams(params as object)
 
     providers = []
     for each addon in m.stores.addons.callFunc("AddonsGetAll")
-        if m.stores.addons.callFunc("AddonsHasResource", addon.resources, "stream")
-            if m.stores.addons.callFunc("AddonsHasType", addon.types, ParamString(params.metaType))
-                if addon.address <> invalid and addon.address <> ""
-                    name = addon.name
-                    if name = invalid or name = "" then name = addon.address
-                    providers.Push({ name: name, address: addon.address, streams: [], error: "" })
-                end if
+        if m.stores.addons.callFunc("AddonsSupportsResource", addon.resources, addon.types, addon.idPrefixes, "stream", ParamString(params.metaType), ParamString(params.videoId))
+            if addon.address <> invalid and addon.address <> ""
+                name = addon.name
+                if name = invalid or name = "" then name = addon.address
+                providers.Push({ name: name, address: addon.address, streams: [], error: "" })
             end if
         end if
     end for

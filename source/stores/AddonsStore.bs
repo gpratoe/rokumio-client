@@ -154,25 +154,53 @@ class AddonsStore
         return base
     end function
 
+    ' A resource's declared types/idPrefixes exactly as the manifest shipped them,
+    ' or invalid when the key is absent. An empty array is preserved on purpose:
+    ' Stremio treats "present but empty" differently from "absent" (see
+    ' MatchesIdPrefixes).
+    function DeclaredList(value as dynamic) as dynamic
+        if Type(value) = "roArray" then return value
+        return invalid
+    end function
+
     ' Manifest resources may be strings or {name, types, idPrefixes} objects per
-    ' the Stremio spec (some manifests return objects). Normalize to a flat array of
-    ' names so every consumer can compare strings safely.
+    ' the Stremio spec. Normalize both to one descriptor shape so the resource
+    ' matcher can tell which filters the add-on actually declared:
+    '
+    '   "catalog"                                -> { name, short: true,  types: invalid, idPrefixes: invalid }
+    '   {name:"stream",types:[...],idPrefixes:[...]} -> { name, short: false, types: [...],  idPrefixes: [...] }
+    '
+    ' A short string inherits the manifest's types AND idPrefixes (Stremio's rule),
+    ' which the matcher reads off `short`; a full object's own types/idPrefixes
+    ' override, and an absent key stays invalid so "declared nothing" is kept
+    ' distinct from "declared empty". Idempotent, so Load() can re-run it over an
+    ' already-normalized registry.
     function NormalizeResources(resources as dynamic) as object
         list = []
         if resources = invalid or Type(resources) <> "roArray" then return list
         for each resource in resources
-            if Type(resource) = "roString" or Type(resource) = "String"
-                name = resource
-                if name <> "" then list.Push(name)
-            else if Type(resource) = "roAssociativeArray" and resource.name <> invalid
-                list.Push(resource.name)
+            kind = Type(resource)
+            if kind = "roString" or kind = "String"
+                if resource <> "" then
+                    list.Push({ name: resource, short: true, types: invalid, idPrefixes: invalid })
+                end if
+            else if kind = "roAssociativeArray" and resource.name <> invalid and resource.name <> ""
+                list.Push({
+                    name: resource.name
+                    short: (resource.short = true)
+                    types: m.DeclaredList(resource.types)
+                    idPrefixes: m.DeclaredList(resource.idPrefixes)
+                })
             end if
         end for
         return list
     end function
 
     ' Whether an add-on's resources advertise a resource name. Tolerant of the
-    ' normalized string names and raw object resources from a live manifest.
+    ' normalized descriptor objects (see NormalizeResources) and the raw strings
+    ' or objects from a live manifest. Name-only on purpose: `catalog` and
+    ' `addon_catalog` are not affected by idPrefixes (Stremio never filters them),
+    ' so callers that only need "does it serve X" stay simple.
     function HasResource(resources as dynamic, name as string) as boolean
         if resources = invalid or Type(resources) <> "roArray" then return false
         for each resource in resources
@@ -185,27 +213,89 @@ class AddonsStore
         return false
     end function
 
-    ' Whether an add-on's declared types cover the media being watched. A
-    ' manifest's `types` is the union of types across everything it serves, so a
-    ' live-TV add-on declares ["channel"] (or the older ["tv"]) and must never be
-    ' asked for a movie or series stream, while a movie/series add-on must never
-    ' be asked for a channel. "channel" and "tv" are one family here, because
-    ' manifests in the wild use either spelling for the same content.
+    ' Whether an add-on's declared types cover the media being watched.
+    ' `types` is the manifest's union (for short resources) or the resource's own
+    ' list (for full objects — see SupportsResource). Matching mirrors
+    ' stremio-core's `types.is_some_and(|types| types.contains(&type))`: a manifest
+    ' that declares no types, or an empty list, is never asked. That is exact
+    ' Stremio behavior, and safe because `types` is a required manifest field —
+    ' Stremio rejects a manifest without it outright.
     '
-    ' Missing or empty declared types are permissive: a manifest that never said
-    ' what it serves is asked for everything rather than silently dropped (the
-    ' same call the resource check makes for a stream-less manifest). A blank
-    ' wanted type is permissive too — a caller with no type to filter on should
-    ' not exclude every provider.
+    ' "channel" and "tv" are one family here, because manifests in the wild use
+    ' either spelling for the same live content and the app models both. A blank
+    ' wanted type is the one permissive case: a caller with no type at all (never a
+    ' real Stremio request) should not be left with no providers.
     function HasType(types as dynamic, metaType as string) as boolean
         if metaType = "" then return true
-        if types = invalid or Type(types) <> "roArray" or types.Count() = 0 then return true
+        if types = invalid or Type(types) <> "roArray" then return false
         wantChannel = (metaType = "channel" or metaType = "tv")
         for each declared in types
             if declared = metaType then return true
             if wantChannel and (declared = "channel" or declared = "tv") then return true
         end for
         return false
+    end function
+
+    ' Whether an id satisfies an add-on's declared idPrefixes, mirroring
+    ' stremio-core: an absent list accepts any id; a present list needs one prefix
+    ' the id starts with (so a present-but-empty list matches nothing). Blank
+    ' prefixes are skipped so a malformed [""] cannot match everything.
+    function MatchesIdPrefixes(idPrefixes as dynamic, id as string) as boolean
+        if idPrefixes = invalid or Type(idPrefixes) <> "roArray" then return true
+        for each prefix in idPrefixes
+            if Type(prefix) = "roString" or Type(prefix) = "String"
+                if prefix <> "" and id.Left(prefix.Len()) = prefix then return true
+            end if
+        end for
+        return false
+    end function
+
+    ' Whether this add-on can serve `name` (a resource) for the given
+    ' (metaType, id) — Stremio's Manifest::is_resource_supported, resource branch,
+    ' used to pick which add-ons to ask for streams.
+    '
+    ' `id` is the RESOURCE id: for streams that is the video id (movie = item id,
+    ' series = "{id}:{season}:{episode}", live tv = the channel id).
+    '
+    ' A short string resource ("stream") inherits the manifest's types AND
+    ' idPrefixes; a full object uses its own and does NOT fall back to the
+    ' manifest's (mirroring the code in stremio-core, not its doc comment). The
+    ' two filters then apply through HasType and MatchesIdPrefixes.
+    '
+    ' Only resources/types/idPrefixes cross the component boundary — never the
+    ' whole add-on record, whose catalogs array can be large.
+    function SupportsResource(resources as dynamic, manifestTypes as dynamic, manifestIdPrefixes as dynamic, name as string, metaType as string, id as string) as boolean
+        if resources = invalid or Type(resources) <> "roArray" then return false
+
+        found = false
+        short = false
+        types = invalid
+        idPrefixes = invalid
+        for each entry in resources
+            if Type(entry) = "roAssociativeArray"
+                if entry.name = name
+                    found = true
+                    short = (entry.short = true)
+                    types = entry.types
+                    idPrefixes = entry.idPrefixes
+                    exit for
+                end if
+            else if entry = name
+                ' A raw manifest resource string, before normalization.
+                found = true
+                short = true
+                exit for
+            end if
+        end for
+        if not found then return false
+
+        if short
+            types = manifestTypes
+            idPrefixes = manifestIdPrefixes
+        end if
+
+        if not m.HasType(types, metaType) then return false
+        return m.MatchesIdPrefixes(idPrefixes, id)
     end function
 
     ' A catalog descriptor's extras, normalized to {name, isRequired, options}.
@@ -383,6 +473,7 @@ class AddonsStore
             name: json.name
             version: json.version
             types: json.types
+            idPrefixes: m.DeclaredList(json.idPrefixes)
             catalogs: m.NormalizeCatalogNames(json.catalogs, json.name)
             resources: m.NormalizeResources(json.resources)
             address: base
@@ -470,6 +561,7 @@ class AddonsStore
             name: manifest.name
             version: manifest.version
             types: manifest.types
+            idPrefixes: m.DeclaredList(manifest.idPrefixes)
             catalogs: m.NormalizeCatalogNames(manifest.catalogs, manifest.name)
             resources: m.NormalizeResources(manifest.resources)
             address: base

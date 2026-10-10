@@ -36,6 +36,7 @@ class CatalogStore
             name: json.name
             version: json.version
             types: json.types
+            idPrefixes: json.idPrefixes
             catalogs: json.catalogs
             resources: json.resources
         }

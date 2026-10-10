@@ -2990,25 +2990,53 @@ function checkStreamTypeGateContract() {
     const host = fs.readFileSync(path.join(projectRoot, 'components', 'StoreHost.brs'), 'utf8');
     const hostXml = fs.readFileSync(path.join(projectRoot, 'components', 'StoreHost.xml'), 'utf8');
 
-    // Stream fetching must be mediatype-specific: a live-TV add-on (types
-    // ["channel"]/["tv"]) is never asked for a movie/series stream, and a
-    // movie/series add-on is never asked for a channel. The gate belongs in the
-    // provider build, alongside the stream-resource check, and it must run
-    // BEFORE the provider is pushed — a provider filtered after Push is still
-    // queried.
+    // Provider selection must mirror Stremio's Manifest::is_resource_supported:
+    // a single id-aware predicate checks the "stream" resource together with the
+    // media type AND the video id against the add-on's declared types and
+    // idPrefixes. The old two-step resource+type gate is gone — an id-agnostic
+    // gate would ask "tt"/"kitsu" add-ons for YouTube ids and vice versa.
     const load = /sub LoadStreams[\s\S]*?end sub/.exec(streams);
     if (!load) {
-        err('StreamsScreen.brs has no LoadStreams() — the provider build is where the media type has to be applied');
+        err('StreamsScreen.brs has no LoadStreams() — the provider build is where the resource match has to be applied');
         return ok;
     }
-    const gate = /AddonsHasType"\s*,\s*addon\.types\s*,\s*ParamString\(params\.metaType\)/.exec(load[0]);
+    const gate = /AddonsSupportsResource"\s*,\s*addon\.resources\s*,\s*addon\.types\s*,\s*addon\.idPrefixes\s*,\s*"stream"\s*,\s*ParamString\(params\.metaType\)\s*,\s*ParamString\(params\.videoId\)/.exec(load[0]);
     if (!gate) {
-        err('StreamsScreen.brs LoadStreams does not gate providers on AddonsHasType(addon.types, ...) — every add-on with a stream resource would be asked for every media type');
-    } else if (load[0].indexOf('providers.Push') !== -1 && load[0].indexOf('AddonsHasType') > load[0].indexOf('providers.Push')) {
-        err('StreamsScreen.brs LoadStreams evaluates the type gate after providers.Push — a provider pushed before the check is still queried, so the type filter has no effect');
+        err('StreamsScreen.brs LoadStreams does not gate providers on AddonsSupportsResource(addon.resources, addon.types, addon.idPrefixes, "stream", metaType, videoId) — add-ons that cannot serve this media would be queried');
+    } else if (load[0].indexOf('providers.Push') !== -1 && load[0].indexOf('AddonsSupportsResource') > load[0].indexOf('providers.Push')) {
+        err('StreamsScreen.brs LoadStreams evaluates the resource gate after providers.Push — a provider pushed before the check is still queried, so the filter has no effect');
     }
-    if (!/AddonsHasResource"\s*,\s*addon\.resources\s*,\s*"stream"/.test(load[0])) {
-        err('StreamsScreen.brs LoadStreams no longer requires the "stream" resource — add-ons that serve no streams would be queried');
+
+    // The predicate itself: it must distinguish short from full resources (short
+    // inherits the manifest filters), apply the type gate, and defer the id match
+    // to MatchesIdPrefixes — the three ways this could silently degrade to "ask
+    // everyone".
+    const supports = /function SupportsResource\([\s\S]*?end function/.exec(store);
+    if (!supports) {
+        err('AddonsStore.bs has no SupportsResource() — the resource/id matcher that mirrors stremio-core is missing');
+    } else {
+        if (!/m\.MatchesIdPrefixes\(/.test(supports[0])) {
+            err('AddonsStore.bs SupportsResource() no longer matches ids against the add-on idPrefixes — a "tt"/"kitsu" add-on would be asked for any id');
+        }
+        if (!/short/.test(supports[0])) {
+            err('AddonsStore.bs SupportsResource() no longer distinguishes short from full resources — a short "stream" would not inherit the manifest types/idPrefixes');
+        }
+        if (!/m\.HasType\(/.test(supports[0])) {
+            err('AddonsStore.bs SupportsResource() no longer applies the type gate — a live-TV add-on would be asked for movie/series streams');
+        }
+    }
+    const prefixes = /function MatchesIdPrefixes\([\s\S]*?end function/.exec(store);
+    if (!prefixes || !/Left\(/.test(prefixes[0])) {
+        err('AddonsStore.bs MatchesIdPrefixes() no longer compares by prefix — the id filter would never match anything');
+    }
+
+    // Both install paths must persist idPrefixes, or the matcher always sees
+    // "any id" and the per-id filter is inert.
+    if (!/idPrefixes: m\.DeclaredList\(json\.idPrefixes\)/.test(store)) {
+        err('AddonsStore.bs Install no longer stores the manifest idPrefixes — the id filter would silently pass every id');
+    }
+    if (!/idPrefixes: m\.DeclaredList\(manifest\.idPrefixes\)/.test(store)) {
+        err('AddonsStore.bs InstallFromDescriptor no longer stores the manifest idPrefixes — the id filter would silently pass every id');
     }
 
     const hasType = /function HasType\(types as dynamic, metaType as string\) as boolean[\s\S]*?channel[\s\S]*?tv[\s\S]*?return false[\s\S]*?end function/.exec(store);
@@ -3016,11 +3044,11 @@ function checkStreamTypeGateContract() {
         err('AddonsStore.bs HasType() no longer treats channel/tv as one family — a "tv"-typed live add-on would be dropped for channel media (and vice versa)');
     }
 
-    if (!host.includes('function AddonsHasType(types as dynamic, metaType as string) as boolean')) {
-        err('StoreHost.brs has no AddonsHasType bridge — StreamsScreen cannot reach the store predicate through m.stores.addons');
+    if (!host.includes('function AddonsSupportsResource(resources as dynamic, types as dynamic, idPrefixes as dynamic, name as string, metaType as string, id as string) as boolean')) {
+        err('StoreHost.brs has no AddonsSupportsResource bridge — StreamsScreen cannot reach the store predicate through m.stores.addons');
     }
-    if (!/<function name="AddonsHasType" \/>/.test(hostXml)) {
-        err('StoreHost.xml is missing <function name="AddonsHasType" /> — callFunc against an undeclared interface function is a silent no-op that returns invalid, which would read as "matches nothing"');
+    if (!/<function name="AddonsSupportsResource" \/>/.test(hostXml)) {
+        err('StoreHost.xml is missing <function name="AddonsSupportsResource" /> — callFunc against an undeclared interface function is a silent no-op that returns invalid, which would read as "matches nothing"');
     }
 
     return ok;

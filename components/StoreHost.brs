@@ -102,6 +102,12 @@ function AddonsHasType(types as dynamic, metaType as string) as boolean
     return m.stores.addons.HasType(types, metaType)
 end function
 
+' addons.SupportsResource — the stream provider gate. Only the fields the
+' matcher needs cross the boundary; the record's catalogs stay behind.
+function AddonsSupportsResource(resources as dynamic, types as dynamic, idPrefixes as dynamic, name as string, metaType as string, id as string) as boolean
+    return m.stores.addons.SupportsResource(resources, types, idPrefixes, name, metaType, id)
+end function
+
 ' addons.CatalogCapabilities
 function AddonsCatalogCapabilities(catalog as dynamic) as object
     return m.stores.addons.CatalogCapabilities(catalog)
