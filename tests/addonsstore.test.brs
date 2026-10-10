@@ -375,6 +375,84 @@ sub Test_Addons_HasType()
     Harness_Ok(addons.HasType(["channel"], ""), "blank wanted type is permissive")
 end sub
 
+sub Test_Addons_CatalogCapabilities()
+    Harness_Suite("AddonsStore.CatalogCapabilities derives search/feed/genre from extras")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+
+    top = {
+        type: "movie"
+        id: "top"
+        name: "Popular"
+        extra: [
+            { name: "search", isRequired: false }
+            { name: "genre", isRequired: false, options: ["Action", "Comedy"] }
+        ]
+    }
+    topCaps = addons.CatalogCapabilities(top)
+    Harness_Ok(topCaps.search, "optional search declares search")
+    Harness_Ok(topCaps.feed, "optional extras keep it feedable")
+    Harness_Ok(topCaps.genre, "genre extra surfaces")
+    Harness_Ok(not topCaps.genreRequired, "genre is optional")
+    Harness_Equal(topCaps.genreOptions.Count(), 2, "genre options carried")
+
+    year = {
+        type: "movie"
+        id: "year"
+        extra: [
+            { name: "genre", isRequired: true, options: ["2026", "2025"] }
+            { name: "skip", isRequired: false }
+        ]
+    }
+    yearCaps = addons.CatalogCapabilities(year)
+    Harness_Ok(not yearCaps.search, "required genre blocks search")
+    Harness_Ok(yearCaps.feed, "required genre is still feedable")
+    Harness_Ok(yearCaps.genreRequired, "genre is required")
+
+    searchOnly = { type: "movie", id: "search", extra: [{ name: "search", isRequired: true }] }
+    searchCaps = addons.CatalogCapabilities(searchOnly)
+    Harness_Ok(searchCaps.search, "search-only catalog is searchable")
+    Harness_Ok(not searchCaps.feed, "search-only catalog is not feedable")
+
+    lastVideos = { type: "movie", id: "last-videos", extra: [{ name: "lastVideosIds", isRequired: true, options: ["tt1"] }] }
+    lastCaps = addons.CatalogCapabilities(lastVideos)
+    Harness_Ok(not lastCaps.feed, "required custom extra blocks feeding")
+    Harness_Ok(not lastCaps.search, "required custom extra blocks search")
+
+    legacy = {
+        type: "movie"
+        id: "legacy"
+        extraSupported: ["search", "genre"]
+        extraRequired: ["genre"]
+        genres: ["Drama", "Horror"]
+    }
+    legacyCaps = addons.CatalogCapabilities(legacy)
+    Harness_Ok(legacyCaps.genre, "legacy extraSupported surfaces genre")
+    Harness_Ok(legacyCaps.genreRequired, "legacy extraRequired marks genre required")
+    Harness_Equal(legacyCaps.genreOptions.Count(), 2, "top-level genres used as options")
+    Harness_Ok(not legacyCaps.search, "required legacy genre blocks search")
+    Harness_Ok(legacyCaps.feed, "legacy required genre still feedable")
+
+    bare = addons.CatalogCapabilities({ type: "movie", id: "bare" })
+    Harness_Ok(bare.feed, "catalog with no extras is feedable")
+    Harness_Ok(not bare.search, "catalog with no extras is not searchable")
+    Harness_Ok(not bare.genre, "catalog with no extras has no genre")
+
+    none = addons.CatalogCapabilities(invalid)
+    Harness_Ok(not none.feed, "invalid catalog is not feedable")
+    Harness_Ok(not none.search, "invalid catalog is not searchable")
+end sub
+
+sub Test_Addons_CatalogTitle()
+    Harness_Suite("AddonsStore.CatalogTitle falls back name -> id -> addon -> Unknown")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+
+    Harness_Equal(addons.CatalogTitle({ name: "Popular", id: "top" }, "Addon"), "Popular", "catalog name wins")
+    Harness_Equal(addons.CatalogTitle({ id: "top" }, "Addon"), "top", "id when name missing")
+    Harness_Equal(addons.CatalogTitle({ id: "top" }, ""), "top", "id when addon blank")
+    Harness_Equal(addons.CatalogTitle(invalid, "Addon"), "Addon", "addon name when catalog invalid")
+    Harness_Equal(addons.CatalogTitle(invalid, invalid), "Unknown", "Unknown when nothing is available")
+end sub
+
 sub Test_Addons_StremioSessionHidesBuiltIns()
     Harness_Suite("AddonsStore stremio session hides the virtual built-in seeds")
     addons = AddonsStore(ScriptedTransport([]), invalid, "stremio")

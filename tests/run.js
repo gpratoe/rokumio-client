@@ -2980,6 +2980,78 @@ function checkStreamTypeGateContract() {
     return ok;
 }
 
+// Discover browses every installed add-on, not just Cinemeta. The failure mode
+// this guards is a silent regression to the built-in catalog: a hardcoded
+// cinemeta id/address, a chart slotted back in, or a task fed a pre-built extra
+// string that skips genre encoding. It also pins that the shared source
+// resolution (CatalogSourcesTask + the AddonsCatalogCapabilities/Title bridges)
+// is actually wired, since a missing StoreHost declaration is a silent no-op.
+function checkDiscoverSourcesContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const read = (...p) => fs.readFileSync(path.join(projectRoot, ...p), 'utf8');
+
+    const screen = read('components', 'DiscoverScreen.brs');
+    const taskXml = read('components', 'DiscoverLoaderTask.xml');
+    const task = read('components', 'DiscoverLoaderTask.brs');
+    const sourcesTask = read('components', 'CatalogSourcesTask.brs');
+    const sourcesXml = read('components', 'CatalogSourcesTask.xml');
+    const host = read('components', 'StoreHost.brs');
+    const hostXml = read('components', 'StoreHost.xml');
+
+    if (/com\.linvo\.cinemeta/.test(screen)) {
+        err('DiscoverScreen.brs still hardcodes the Cinemeta add-on id — Discover must browse every installed catalog add-on');
+    }
+    if (/\bCatalogId\s*\(/.test(screen) || /imdbRating/.test(screen)) {
+        err('DiscoverScreen.brs still maps a chart to a hardcoded catalog id — Discover takes its catalog from the selected source');
+    }
+    if (!/AsyncTask_Launch\(m\.top,\s*"CatalogSourcesTask"/.test(screen) || !/onSourcesLoaded/.test(screen)) {
+        err('DiscoverScreen.brs does not resolve sources through CatalogSourcesTask/onSourcesLoaded');
+    }
+    if (!/AddonsCatalogCapabilities"\s*,\s*descriptor/.test(screen) || !/\.feed\b/.test(screen)) {
+        err('DiscoverScreen.brs does not gate catalogs on AddonsCatalogCapabilities(...).feed');
+    }
+    if (!/m\.selectedCatalog\.address/.test(screen) || !/m\.selectedCatalog\.rawType/.test(screen)) {
+        err('DiscoverScreen.brs does not fetch against the selected catalog (m.selectedCatalog.address/rawType)');
+    }
+    if (!/genre:\s*GenreFilter\(\)/.test(screen)) {
+        err('DiscoverScreen.brs does not pass a raw genre to DiscoverLoaderTask');
+    }
+
+    if (!/<field id="genre" type="string"/.test(taskXml) || /<field id="extra"/.test(taskXml)) {
+        err('DiscoverLoaderTask.xml must expose a raw genre field and no pre-built extra field');
+    }
+    if (!/http\.EncodeQueryValue\(m\.top\.genre\)/.test(task)) {
+        err('DiscoverLoaderTask.brs must percent-encode the manifest-sourced genre before it becomes a URL segment');
+    }
+
+    if (!/for each addon in m\.top\.addons/.test(sourcesTask)) {
+        err('CatalogSourcesTask.brs does not walk m.top.addons');
+    }
+    if (!/catalog\.Manifest\(addon\.address\)/.test(sourcesTask)) {
+        err('CatalogSourcesTask.brs never fetches a manifest for add-ons whose registry entry has no catalogs');
+    }
+    if (!/<script[^>]*CatalogStore\.bs/.test(sourcesXml) || !/<script[^>]*Transport\.bs/.test(sourcesXml)) {
+        err('CatalogSourcesTask.xml is missing the Transport/CatalogStore scripts it instantiates');
+    }
+    if (!/<field id="result" type="assocarray" alwaysNotify="true"\s*\/>/.test(sourcesXml)) {
+        err('CatalogSourcesTask.xml result field must be assocarray alwaysNotify');
+    }
+
+    if (!host.includes('function AddonsCatalogCapabilities(catalog as dynamic) as object')) {
+        err('StoreHost.brs has no AddonsCatalogCapabilities bridge');
+    }
+    if (!host.includes('function AddonsCatalogTitle(catalog as dynamic, addonName as dynamic) as string')) {
+        err('StoreHost.brs has no AddonsCatalogTitle bridge');
+    }
+    if (!/<function name="AddonsCatalogCapabilities" \/>/.test(hostXml) || !/<function name="AddonsCatalogTitle" \/>/.test(hostXml)) {
+        err('StoreHost.xml is missing the AddonsCatalogCapabilities/AddonsCatalogTitle declarations — an undeclared callFunc is a silent no-op returning invalid');
+    }
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -3479,7 +3551,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract()) {
         process.exit(1);
     }
 

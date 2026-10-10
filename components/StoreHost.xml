@@ -7,6 +7,8 @@
              declaration here AND a one-line forwarder in StoreHost.brs for
              every call, and requires the name's store prefix to match the
              m.stores.<store> alias it is reached through. -->
+        <function name="AddonsCatalogCapabilities" />
+        <function name="AddonsCatalogTitle" />
         <function name="AddonsGet" />
         <function name="AddonsGetAll" />
         <function name="AddonsHasResource" />

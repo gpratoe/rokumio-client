@@ -102,6 +102,16 @@ function AddonsHasType(types as dynamic, metaType as string) as boolean
     return m.stores.addons.HasType(types, metaType)
 end function
 
+' addons.CatalogCapabilities
+function AddonsCatalogCapabilities(catalog as dynamic) as object
+    return m.stores.addons.CatalogCapabilities(catalog)
+end function
+
+' addons.CatalogTitle
+function AddonsCatalogTitle(catalog as dynamic, addonName as dynamic) as string
+    return m.stores.addons.CatalogTitle(catalog, addonName)
+end function
+
 ' addons.IsBuiltin
 '
 ' Rank providers on this, never on a record's builtin flag: the account sync

@@ -4,7 +4,7 @@
         <field id="addonAddress" type="string" value="" />
         <field id="metaType" type="string" value="" />
         <field id="catalogId" type="string" value="" />
-        <field id="extra" type="string" value="" />
+        <field id="genre" type="string" value="" />
         <field id="pageOffset" type="integer" value="0" />
         <field id="result" type="assocarray" alwaysNotify="true" />
     </interface>

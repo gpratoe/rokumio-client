@@ -1,15 +1,20 @@
-' DiscoverScreen — Cinemeta browsing by three filters: type (movie/series),
-' chart (Popular / New / Featured) and genre. Each filter is a chip; OK opens a
-' dropdown menu of that chip's options. The dropdown is a Back-friendly menu —
-' Up/Down move, OK picks, Back dismisses without changing anything — so a
-' wrong pick is an instant undo, never a full cycle.
+' DiscoverScreen — browse every installed add-on's catalogs by three filters:
+' type (derived from the catalogs' declared types), catalog (every feed-capable
+' catalog of the chosen type) and genre (the chosen catalog's declared options).
+' Each filter is a chip; OK opens a dropdown menu of that chip's options. The
+' dropdown is a Back-friendly menu — Up/Down move, OK picks, Back dismisses
+' without changing anything — so a wrong pick is an instant undo, never a full
+' cycle.
 '
-' A filter change kicks DiscoverLoaderTask off the render thread against the
-' appropriate Cinemeta catalog (top / year / imdbRating), with the genre (or the
-' current year for New) as a "genre=" extra. Results are chunked into poster
-' rows; OK on a tile pushes DetailsScreen exactly like a Home catalog tile.
-' Filters + results persist across Details round-trips; entry re-focuses the
-' results when there is something to show, otherwise the chips.
+' Sources are resolved once per installed add-on set: CatalogSourcesTask fetches
+' the manifests the registry has none for (the built-in seeds ship catalogs =
+' invalid until a manifest lands) and the result is cached. A filter change
+' kicks DiscoverLoaderTask off the render thread against the chosen
+' (add-on, catalog) pair, with the genre as an encoded "genre=" extra. Results
+' are chunked into poster rows; OK on a tile pushes DetailsScreen exactly like a
+' Home catalog tile. Filters + results persist across Details round-trips; entry
+' re-derives only when the add-on set moved, then re-focuses the results when
+' there is something to show, otherwise the chips.
 
 sub init()
     m.status = m.top.FindNode("discoverStatus")
@@ -30,23 +35,25 @@ sub init()
     m.grid.ObserveField("itemFocused", "onGridFocused")
 
     m.chunk = 6
-    m.type = "movie"
-    m.chart = "Popular"
-    m.genre = "All"
+    m.sources = []
+    m.sourcesSignature = ""
+    m.sourcesTask = invalid
+    m.selectedCatalog = invalid
+    m.typeKey = ""
+    m.genre = ""
     m.metas = []
     m.loaded = false
     m.allLoaded = false
     m.loadTask = invalid
-    m.cinemetaAddress = ""
 end sub
 
 function OnEnter(params as object) as void
-    if m.stores <> invalid
-        addon = m.stores.addons.callFunc("AddonsGet", "com.linvo.cinemeta")
-        if addon <> invalid then m.cinemetaAddress = addon.address
-    end if
-
     if m.filterBar.callFunc("IsMenuOpen") then m.filterBar.callFunc("HideMenu")
+
+    ' The add-on set can move while Discover is off-screen (install/uninstall,
+    ' session swap). Re-derive when it did, so the chips never describe a
+    ' registry that no longer exists.
+    if m.stores <> invalid and CatalogSignature() <> m.sourcesSignature then ResetDiscover()
 
     ' Re-entry after Details: results are still here, just take focus back.
     if m.metas.Count() > 0
@@ -54,13 +61,12 @@ function OnEnter(params as object) as void
         return
     end if
 
-    if not m.loaded then FetchDiscover()
-    SetChips()
-    m.filterBar.callFunc("FocusChips")
+    EnsureSources()
 end function
 
 function OnExit() as void
     CancelLoad()
+    CancelSources()
 end function
 
 function OnBackPressed() as boolean
@@ -70,31 +76,379 @@ end function
 sub BlurFocus()
 end sub
 
+' --- sources (which add-ons serve which catalogs) ---------------------------
+
+' The installed add-on set the current sources were derived from, as a
+' comparable string. Mirrors HomeScreen's signature: derive from live store
+' state, sort so ordering cannot make two equal sets look different, join. No
+' network — a set comparison, not a re-derivation.
+function CatalogSignature() as string
+    if m.stores = invalid then return ""
+    addons = m.stores.addons.callFunc("AddonsGetAll")
+    if addons = invalid then return ""
+    parts = []
+    for each addon in addons
+        if addon.address <> invalid then parts.Push(addon.address)
+    end for
+    parts.Sort("i")
+    return parts.Join(";")
+end function
+
+' Resolve the catalog sources, reusing the cache when the installed set is
+' unchanged. When every add-on already carries its catalog descriptors the
+' sources are built inline; otherwise a CatalogSourcesTask fetches the missing
+' manifests off the UI thread (the built-in seeds are the only packets that
+' need it).
+sub EnsureSources()
+    if m.stores = invalid
+        m.status.text = "Failed to load add-ons."
+        return
+    end if
+
+    signature = CatalogSignature()
+    if signature = m.sourcesSignature and m.sources.Count() > 0 then
+        ReadySources()
+        return
+    end if
+
+    addons = m.stores.addons.callFunc("AddonsGetAll")
+    if addons = invalid then addons = []
+
+    packets = []
+    allKnown = true
+    for each addon in addons
+        if addon.catalogs = invalid or Type(addon.catalogs) <> "roArray" then allKnown = false
+        name = addon.name
+        if name = invalid then name = ""
+        packets.Push({ address: addon.address, name: name, resources: addon.resources, catalogs: addon.catalogs })
+    end for
+
+    m.sourcesSignature = signature
+    if packets.Count() = 0
+        m.sources = []
+        ShowEmpty()
+        return
+    end if
+
+    if allKnown
+        m.sources = packets
+        ReadySources()
+        return
+    end if
+
+    CancelSources()
+    m.status.text = "Loading…"
+    task = AsyncTask_Launch(m.top, "CatalogSourcesTask", "onSourcesLoaded", { addons: packets }, "catalogSources")
+    m.sourcesTask = task
+end sub
+
+' A CatalogSourcesTask result landed. Dropped when it arrived after a cancel
+' (m.sourcesTask was cleared) so a late manifest can never repaint a screen the
+' user already left.
+sub onSourcesLoaded()
+    if m.sourcesTask = invalid then return
+    task = m.sourcesTask
+    m.sourcesTask = invalid
+    AsyncTask_Reap(task, m.top, false)
+
+    result = task.result
+    if result = invalid or result.sources = invalid or Type(result.sources) <> "roArray"
+        m.status.text = "Failed to load add-ons."
+        return
+    end if
+
+    m.sources = result.sources
+    ReadySources()
+end sub
+
+' Sources are in hand: pick a valid selection and fetch.
+sub ReadySources()
+    if not SelectDefaults()
+        ShowEmpty()
+        return
+    end if
+    m.loaded = false
+    FetchDiscover()
+    SetChips()
+    m.filterBar.callFunc("FocusChips")
+end sub
+
+' The catalog type keys present across the sources, in a stable order: the
+' three media families first, then any other declared type alphabetically.
+' Only types that yield at least one feed-capable catalog are listed, so every
+' type chip leads somewhere.
+function TypeGroups() as object
+    groups = []
+    if m.stores = invalid then return groups
+
+    seen = {}
+    otherKeys = []
+    for each source in m.sources
+        if source.catalogs = invalid then continue for
+        for each descriptor in source.catalogs
+            if descriptor = invalid then continue for
+            caps = m.stores.addons.callFunc("AddonsCatalogCapabilities", descriptor)
+            if caps = invalid or not caps.feed then continue for
+            key = TypeKey(descriptor.type)
+            if key = "" then continue for
+            if seen.DoesExist(key) then continue for
+            seen[key] = true
+            if TypeOrder(key) >= 3 then otherKeys.Push(key)
+        end for
+    end for
+
+    otherKeys.Sort("i")
+    ordered = []
+    preferred = ["movie", "series", "channels"]
+    for each key in preferred
+        if seen.DoesExist(key) then ordered.Push(key)
+    end for
+    for each key in otherKeys
+        ordered.Push(key)
+    end for
+    for each key in ordered
+        groups.Push({ key: key, label: TypeLabel(key) })
+    end for
+    return groups
+end function
+
+' The chip entries for the type filter ({ raw, label }).
+function TypeOptions() as object
+    options = []
+    for each group in TypeGroups()
+        options.Push({ raw: group.key, label: group.label })
+    end for
+    return options
+end function
+
+' A catalog type folded into a filter key. movie/series stand alone; channel and
+' tv are one family (manifests use either spelling for the same content);
+' anything else keeps its declared name.
+function TypeKey(raw as dynamic) as string
+    if raw = invalid then return ""
+    if raw = "movie" then return "movie"
+    if raw = "series" then return "series"
+    if raw = "channel" or raw = "tv" then return "channels"
+    return raw
+end function
+
+function TypeOrder(key as string) as integer
+    if key = "movie" then return 0
+    if key = "series" then return 1
+    if key = "channels" then return 2
+    return 3
+end function
+
+function TypeLabel(key as string) as string
+    if key = "movie" then return "Movies"
+    if key = "series" then return "Series"
+    if key = "channels" then return "Channels"
+    if key = "" then return ""
+    return key.Left(1).UCase() + key.Mid(1)
+end function
+
+function TypeMatches(declared as dynamic, key as string) as boolean
+    if declared = invalid then return false
+    if key = "channels" then return declared = "channel" or declared = "tv"
+    return declared = key
+end function
+
+' Every feed-capable catalog of the current type, across all sources. A catalog
+' is feed-capable when nothing beyond skip/genre is required (AddonsStore owns
+' that rule), which keeps odd catalogs like cinemeta's required-id last-videos
+' out without any per-add-on special case.
+function CatalogsForType() as object
+    list = []
+    if m.stores = invalid then return list
+    for each source in m.sources
+        if source.catalogs = invalid then continue for
+        for each descriptor in source.catalogs
+            if descriptor = invalid then continue for
+            if not TypeMatches(descriptor.type, m.typeKey) then continue for
+            caps = m.stores.addons.callFunc("AddonsCatalogCapabilities", descriptor)
+            if caps = invalid or not caps.feed then continue for
+            sourceName = source.name
+            if sourceName = invalid then sourceName = ""
+            list.Push({
+                address: source.address
+                sourceName: sourceName
+                rawType: descriptor.type
+                catalogId: descriptor.id
+                title: m.stores.addons.callFunc("AddonsCatalogTitle", descriptor, source.name)
+                catalog: descriptor
+            })
+        end for
+    end for
+    return list
+end function
+
+' The catalog chip's options. Duplicate catalog names across add-ons are
+' disambiguated with the add-on's name so two "Popular" rows are distinguishable.
+function CatalogOptions() as object
+    catalogs = CatalogsForType()
+    options = []
+    count = catalogs.Count()
+    ' Indexed loops, not nested "for each" over the same array: a Roku device
+    ' gives an roArray ONE internal iterator, so an inner "for each" over the
+    ' same list exhausts it and the outer loop stops after the first element
+    ' (the brs interpreter uses independent iterators, so tests never see it).
+    for i = 0 to count - 1
+        candidate = catalogs[i]
+        label = candidate.title
+        dupes = 0
+        for j = 0 to count - 1
+            other = catalogs[j]
+            if other.title = candidate.title and not SameCatalog(other, candidate) then dupes = dupes + 1
+        end for
+        if dupes > 0 then label = label + " (" + candidate.sourceName + ")"
+        options.Push({ raw: candidate.catalogId, label: label, catalog: candidate })
+    end for
+    return options
+end function
+
+function SameCatalog(a as dynamic, b as dynamic) as boolean
+    if a = invalid or b = invalid then return false
+    return a.address = b.address and a.rawType = b.rawType and a.catalogId = b.catalogId
+end function
+
+function CatalogChipLabel() as string
+    if m.selectedCatalog = invalid then return ""
+    for each option in CatalogOptions()
+        if SameCatalog(option.catalog, m.selectedCatalog) then return option.label
+    end for
+    return m.selectedCatalog.title
+end function
+
+' --- selection defaults -----------------------------------------------------
+
+' Validate the current (type, catalog, genre) against the resolved sources and
+' fall back to the first available value where the old one is gone. Returns
+' false only when no feed-capable catalog exists at all.
+function SelectDefaults() as boolean
+    groups = TypeGroups()
+    if groups.Count() = 0 then return false
+
+    typeFound = false
+    for each group in groups
+        if group.key = m.typeKey then typeFound = true
+    end for
+    if not typeFound then m.typeKey = groups[0].key
+
+    catalogs = CatalogsForType()
+    if catalogs.Count() = 0 then
+        for each group in groups
+            m.typeKey = group.key
+            catalogs = CatalogsForType()
+            if catalogs.Count() > 0 then exit for
+        end for
+    end if
+    if catalogs.Count() = 0 then return false
+
+    keep = false
+    if m.selectedCatalog <> invalid
+        for each candidate in catalogs
+            if SameCatalog(candidate, m.selectedCatalog) then
+                m.selectedCatalog = candidate
+                keep = true
+            end if
+        end for
+    end if
+    if not keep then m.selectedCatalog = catalogs[0]
+
+    EnsureGenre()
+    return true
+end function
+
+sub ShowEmpty()
+    m.status.text = "No catalog add-ons installed."
+    m.filterBar.callFunc("SetChips", [])
+end sub
+
+' --- genre (the chosen catalog's filter) ------------------------------------
+
+function SelectedCapabilities() as object
+    if m.stores = invalid or m.selectedCatalog = invalid then return invalid
+    return m.stores.addons.callFunc("AddonsCatalogCapabilities", m.selectedCatalog.catalog)
+end function
+
+' The genre chip's options: the catalog's declared genres, prefixed with "All"
+' when a genre is optional. A catalog with no genre extra, or with no declared
+' options, gets no genre chip.
+function GenreOptions() as object
+    options = []
+    caps = SelectedCapabilities()
+    if caps = invalid or not caps.genre then return options
+    if caps.genreOptions = invalid or Type(caps.genreOptions) <> "roArray" or caps.genreOptions.Count() = 0 then return options
+    if not caps.genreRequired then options.Push({ raw: "All", label: "All" })
+    for each genre in caps.genreOptions
+        options.Push({ raw: genre, label: genre })
+    end for
+    return options
+end function
+
+' The default genre for the chosen catalog: the current year when a genre is
+' required and the year is one of its options (the "New" catalog's shape), else
+' the first declared option; "All" when a genre is optional.
+function DefaultGenre() as string
+    caps = SelectedCapabilities()
+    if caps = invalid or not caps.genre then return ""
+    options = caps.genreOptions
+    if options = invalid or Type(options) <> "roArray" or options.Count() = 0 then return ""
+    if caps.genreRequired
+        year = CreateObject("roDateTime").GetYear().ToStr()
+        for each option in options
+            if option = year then return year
+        end for
+        return options[0]
+    end if
+    return "All"
+end function
+
+' Keep the genre valid across a catalog/type change: leave it alone when the new
+' catalog still offers it, otherwise fall back to that catalog's default.
+sub EnsureGenre()
+    options = GenreOptions()
+    if options.Count() = 0 then m.genre = "" : return
+    for each option in options
+        if option.raw = m.genre then return
+    end for
+    m.genre = DefaultGenre()
+end sub
+
+' The genre value to send to the server, or "" for no genre filter. Required
+' genres always send their value; optional ones drop the "All" sentinel.
+function GenreFilter() as string
+    caps = SelectedCapabilities()
+    if caps = invalid or not caps.genre then return ""
+    if caps.genreRequired then return m.genre
+    if m.genre = "" or m.genre = "All" then return ""
+    return m.genre
+end function
+
 ' --- filter chips (data) ----------------------------------------------------
 
-' The chip row itself lives in FilterBar; the screen owns the values
-' (m.type/m.chart/m.genre) and their labels. "Type · Movies"-style labels make
-' each chip's role readable; the genre chip is skipped while New is selected
-' (New's only filter is the year). Rebuilt on every pick so the label always
-' reflects the active value.
+' The chip row itself lives in FilterBar; the screen owns the values and their
+' labels. "Type · ..."-style labels make each chip's role readable; the genre
+' chip is omitted when the chosen catalog has no genre filter. Rebuilt on every
+' pick so the label always reflects the active value.
 sub SetChips()
-    entries = [
-        { raw: m.type, label: "Type · " + TypeLabel(m.type) }
-        { raw: m.chart, label: "Chart · " + m.chart }
-    ]
-    if m.chart <> "New" then entries.Push({ raw: m.genre, label: "Genre · " + m.genre })
+    entries = []
+    if TypeGroups().Count() > 0
+        entries.Push({ raw: m.typeKey, label: "Type · " + TypeLabel(m.typeKey) })
+    end if
+    if m.selectedCatalog <> invalid
+        entries.Push({ raw: m.selectedCatalog.catalogId, label: "Catalog · " + CatalogChipLabel() })
+    end if
+    if GenreOptions().Count() > 0
+        label = m.genre
+        if label = "" then label = "All"
+        entries.Push({ raw: m.genre, label: "Genre · " + label })
+    end if
     m.filterBar.callFunc("SetChips", entries)
 end sub
 
-function TypeLabel(metaType as string) as string
-    if metaType = "series" then return "Series"
-    return "Movies"
-end function
-
 ' The chip OK'd in the FilterBar: hand it that chip's options and the index of
-' the current value, and the component opens the dropdown pre-scrolled there —
-' whatever is focused is the value that OK will commit, Back leaves everything
-' untouched.
+' the current value, and the component opens the dropdown pre-scrolled there.
 sub onChipActivated()
     chip = m.filterBar.chipActivated
     if chip < 0 then return
@@ -104,47 +458,32 @@ sub onChipActivated()
 end sub
 
 function OptionsFor(chip as integer) as object
-    options = []
-    if chip = 0
-        options = [
-            { raw: "movie", label: "Movies" }
-            { raw: "series", label: "Series" }
-        ]
-    else if chip = 1
-        options = [
-            { raw: "Popular", label: "Popular" }
-            { raw: "New", label: "New" }
-            { raw: "Featured", label: "Featured" }
-        ]
-    else if chip = 2
-        genres = ["All", "Action", "Adventure", "Animation", "Biography", "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy", "History", "Horror", "Mystery", "Romance", "Sci-Fi", "Sport", "Thriller", "War", "Western"]
-        for each genre in genres
-            options.Push({ raw: genre, label: genre })
-        end for
-    end if
-    return options
+    if chip = 0 then return TypeOptions()
+    if chip = 1 then return CatalogOptions()
+    if chip = 2 then return GenreOptions()
+    return []
 end function
 
 function CurrentOptionIndex(chip as integer) as integer
-    if chip = 0
-        if m.type = "series" then return 1
-        return 0
-    else if chip = 1
-        if m.chart = "New" then return 1
-        if m.chart = "Featured" then return 2
-        return 0
-    end if
     options = OptionsFor(chip)
-    index = 0
-    for i = 0 to options.Count() - 1
-        if options[i].raw = m.genre then index = i
-    end for
-    return index
+    if chip = 0
+        for i = 0 to options.Count() - 1
+            if options[i].raw = m.typeKey then return i
+        end for
+    else if chip = 1
+        for i = 0 to options.Count() - 1
+            if SameCatalog(options[i].catalog, m.selectedCatalog) then return i
+        end for
+    else if chip = 2
+        for i = 0 to options.Count() - 1
+            if options[i].raw = m.genre then return i
+        end for
+    end if
+    return 0
 end function
 
 ' An option OK'd in the FilterBar's dropdown, then re-fetches. Re-picking the
-' current value just closes the menu. The raw value and the commit effect are
-' the screen's; the component reports which chip and which row were picked.
+' current value just closes the menu.
 sub onOptionPicked()
     pick = m.filterBar.optionPicked
     if pick = invalid or pick.chip = invalid or pick.index = invalid then return
@@ -155,11 +494,16 @@ sub onOptionPicked()
     option = options[index]
 
     if chip = 0
-        if option.raw = m.type then m.filterBar.callFunc("HideMenu") : return
-        m.type = option.raw
+        if option.raw = m.typeKey then m.filterBar.callFunc("HideMenu") : return
+        m.typeKey = option.raw
+        catalogs = CatalogsForType()
+        if catalogs.Count() = 0 then m.filterBar.callFunc("HideMenu") : return
+        m.selectedCatalog = catalogs[0]
+        EnsureGenre()
     else if chip = 1
-        if option.raw = m.chart then m.filterBar.callFunc("HideMenu") : return
-        m.chart = option.raw
+        if SameCatalog(option.catalog, m.selectedCatalog) then m.filterBar.callFunc("HideMenu") : return
+        m.selectedCatalog = option.catalog
+        EnsureGenre()
     else if chip = 2
         if option.raw = m.genre then m.filterBar.callFunc("HideMenu") : return
         m.genre = option.raw
@@ -173,38 +517,6 @@ end sub
 
 ' --- fetching ---------------------------------------------------------------
 
-' The chart's catalog id: Popular → top, New → year, Featured → imdbRating.
-function CatalogId() as string
-    if m.chart = "New" then return "year"
-    if m.chart = "Featured" then return "imdbRating"
-    return "top"
-end function
-
-' The catalog "extra" segment for the current filters, without pagination.
-' New's year catalog requires a genre extra whose options are years, so it
-' always sends the current year; Popular and Featured take a real genre when one
-' is chosen. The dropdown genre set is fixed ASCII (a hyphen is the only
-' non-alphanumeric character, and it is RFC 3986 unreserved), so raw values need
-' no encoding.
-function FilterExtra() as string
-    if m.chart = "New"
-        return "genre=" + CreateObject("roDateTime").GetYear().ToStr()
-    end if
-    if m.genre <> "All"
-        return "genre=" + m.genre
-    end if
-    return ""
-end function
-
-' Concatenate the filter extras with a skip offset (extras are k=v pairs joined
-' by '&' in the Stremio protocol). skip counts already-loaded metas, so page 0 is
-' "skip=0" whether or not a genre is pinned.
-function PageExtra(offset as integer) as string
-    filter = FilterExtra()
-    if filter = "" then return "skip=" + offset.ToStr()
-    return filter + "&skip=" + offset.ToStr()
-end function
-
 ' A fresh filter set: start back at page 0.
 sub ResetDiscover()
     m.metas = []
@@ -216,21 +528,21 @@ sub ResetDiscover()
     end if
 end sub
 
-' Kick the filtered catalog off the render thread against Cinemeta. A filter
-' change supersedes whatever page is still in flight (its result is dropped by
-' the offset guard below), so picks never queue behind a stale load. The wanted
-' offset is captured so a page that lands after the user changed filters (or
-' exited) is dropped instead of appended to the wrong list.
+' Kick the chosen catalog off the render thread. A filter change supersedes
+' whatever page is still in flight (its result is dropped by the offset guard
+' below), so picks never queue behind a stale load. The wanted offset is
+' captured so a page that lands after the user changed filters (or exited) is
+' dropped instead of appended to the wrong list.
 sub FetchDiscover()
-    if m.cinemetaAddress = "" then return
+    if m.selectedCatalog = invalid then return
     CancelLoad()
 
     m.status.text = "Loading…"
     task = AsyncTask_Launch(m.top, "DiscoverLoaderTask", "onDiscoverLoaded", {
-        addonAddress: m.cinemetaAddress
-        metaType: m.type
-        catalogId: CatalogId()
-        extra: PageExtra(0)
+        addonAddress: m.selectedCatalog.address
+        metaType: m.selectedCatalog.rawType
+        catalogId: m.selectedCatalog.catalogId
+        genre: GenreFilter()
         pageOffset: 0
     }, "discoverLoader")
     m.loadTask = task
@@ -240,16 +552,16 @@ end sub
 ' (skip = metas already shown) and append. Silent — the grid stays up untouched
 ' until the page lands, so scrolling never blinks.
 sub LoadMore()
-    if m.cinemetaAddress = "" then return
+    if m.selectedCatalog = invalid then return
     if m.loadTask <> invalid then return
     if m.allLoaded then return
     if m.metas.Count() = 0 then return
 
     task = AsyncTask_Launch(m.top, "DiscoverLoaderTask", "onDiscoverLoaded", {
-        addonAddress: m.cinemetaAddress
-        metaType: m.type
-        catalogId: CatalogId()
-        extra: PageExtra(m.metas.Count())
+        addonAddress: m.selectedCatalog.address
+        metaType: m.selectedCatalog.rawType
+        catalogId: m.selectedCatalog.catalogId
+        genre: GenreFilter()
         pageOffset: m.metas.Count()
     }, "discoverLoaderMore")
     m.loadTask = task
@@ -268,8 +580,7 @@ end sub
 
 ' A landing may grab chips focus only when the dropdown is closed — an open
 ' menu keeps its focus through the landing so a load finishing can't yank the
-' user out of a pick (the batch #2 / #4 screen-active rule, plus the menu
-' guard).
+' user out of a pick.
 sub LandingChipsFocus()
     if m.top.screenActive and not m.filterBar.callFunc("IsMenuOpen")
         m.filterBar.callFunc("FocusChips")
@@ -336,10 +647,11 @@ function AppendRestorePosition() as object
     return position
 end function
 
-' The human summary of the current filters, e.g. "Featured · Movies · Sci-Fi".
+' The human summary of the current filters, e.g. "Popular · Movies · Sci-Fi".
 function DiscoverLabel() as string
-    label = m.chart + " · " + TypeLabel(m.type)
-    if m.chart <> "New" and m.genre <> "All" then label = label + " · " + m.genre
+    if m.selectedCatalog = invalid then return ""
+    label = m.selectedCatalog.title + " · " + TypeLabel(TypeKey(m.selectedCatalog.rawType))
+    if m.genre <> "" and m.genre <> "All" then label = label + " · " + m.genre
     return label
 end function
 
@@ -380,11 +692,20 @@ sub CancelLoad()
     end if
 end sub
 
+sub CancelSources()
+    if m.sourcesTask <> invalid
+        task = m.sourcesTask
+        m.sourcesTask = invalid
+        AsyncTask_Reap(task, m.top, true)
+    end if
+end sub
+
 ' --- selection --------------------------------------------------------------
 
 ' A result opens DetailsScreen through the same one-action channel Home and
-' Search use for a catalog tile: full meta + the Cinemeta address.
+' Search use for a catalog tile: full meta + the source add-on's address.
 sub onResultSelected()
+    if m.selectedCatalog = invalid then return
     data = m.grid.rowItemSelected
     if data = invalid or data.Count() < 2 then return
     flat = data[0] * m.chunk + data[1]
@@ -392,7 +713,7 @@ sub onResultSelected()
     m.top.pushRequest = {
         screen: "detailsScreen"
         params: {
-            addonAddress: m.cinemetaAddress
+            addonAddress: m.selectedCatalog.address
             meta: m.metas[flat]
         }
     }

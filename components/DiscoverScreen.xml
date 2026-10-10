@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="DiscoverScreen" extends="Screen">
-    <!-- Discover: browse Cinemeta by filter. Three chips (Type · Chart · Genre)
-         sit above a poster grid. OK on a chip opens a dropdown menu of the
-         chip's options — Up/Down to move, OK to pick, Back to dismiss — so a
-         wrong pick is an instant Back, never a full cycle. OK on a result
-         publishes a pushRequest the Scene routes to Details. Available charts:
-         Popular (top), New (year, this year's releases) and Featured
-         (imdbRating). The genre chip is dropped while New is selected, since
-         New's only filter is the year itself. -->
+    <!-- Discover: browse every installed add-on's catalogs by filter. Three
+         chips (Type · Catalog · Genre) sit above a poster grid. OK on a chip
+         opens a dropdown menu of the chip's options — Up/Down to move, OK to
+         pick, Back to dismiss — so a wrong pick is an instant Back, never a
+         full cycle. OK on a result publishes a pushRequest the Scene routes to
+         Details. The type chip lists every declared catalog type that has a
+         feed-capable catalog; the catalog chip lists every such catalog of the
+         chosen type; the genre chip takes its options from the chosen catalog's
+         manifest (and is omitted when that catalog declares no genre). -->
     <interface>
         <!-- The one action Discover reports upward: a push request. -->
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />

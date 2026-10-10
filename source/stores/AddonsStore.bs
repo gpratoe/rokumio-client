@@ -208,6 +208,114 @@ class AddonsStore
         return false
     end function
 
+    ' A catalog descriptor's extras, normalized to {name, isRequired, options}.
+    ' Manifests in the wild carry them two ways — an `extra` array of objects
+    ' (modern) or, historically, arrays of bare names via `extraSupported`, plus
+    ' a separate `extraRequired` name list. Folding all three into one shape lets
+    ' the capability rules below read a single list instead of guessing the era.
+    function CatalogExtras(catalog as object) as object
+        list = []
+        if catalog = invalid or Type(catalog) <> "roAssociativeArray" then return list
+
+        declared = catalog.extra
+        if declared <> invalid and Type(declared) = "roArray"
+            for each entry in declared
+                if Type(entry) = "roAssociativeArray"
+                    required = false
+                    if entry.isRequired = true then required = true
+                    list.Push({ name: entry.name, isRequired: required, options: entry.options })
+                else if Type(entry) = "roString" or Type(entry) = "String"
+                    list.Push({ name: entry, isRequired: false, options: invalid })
+                end if
+            end for
+        end if
+
+        supported = catalog.extraSupported
+        if supported <> invalid and Type(supported) = "roArray"
+            for each name in supported
+                if Type(name) = "roString" or Type(name) = "String"
+                    found = false
+                    for each existing in list
+                        if existing.name = name then found = true
+                    end for
+                    if not found then list.Push({ name: name, isRequired: false, options: invalid })
+                end if
+            end for
+        end if
+
+        required = catalog.extraRequired
+        if required <> invalid and Type(required) = "roArray"
+            for each name in required
+                for each existing in list
+                    if existing.name = name then existing.isRequired = true
+                end for
+            end for
+        end if
+
+        return list
+    end function
+
+    ' What a catalog descriptor is allowed to be asked for, derived from its
+    ' extras. Three independent answers:
+    '   search — the catalog declares search AND nothing beyond search/skip is
+    '            required (Stremio sends no genre during a search, so a
+    '            required-genre catalog would fail every query).
+    '   feed   — the catalog can be browsed without supplying anything beyond
+    '            skip/genre (genre is handled by the screen's chip). This is what
+    '            keeps required-extra catalogs like cinemeta's last-videos out of
+    '            Discover without any per-add-on hardcoding.
+    '   genre  — the catalog filters by genre, with its declared option list
+    '            (falling back to the top-level `genres` array some manifests
+    '            ship) and whether a genre is required.
+    function CatalogCapabilities(catalog as object) as object
+        caps = { search: false, feed: true, genre: false, genreRequired: false, genreOptions: [] }
+        if catalog = invalid or Type(catalog) <> "roAssociativeArray" then
+            caps.feed = false
+            return caps
+        end if
+
+        searchDeclared = false
+        blocksSearch = false
+        blocksFeed = false
+        for each extra in m.CatalogExtras(catalog)
+            name = extra.name
+            if name = invalid then name = ""
+            if name = "search" then searchDeclared = true
+            if name = "genre"
+                caps.genre = true
+                if extra.options <> invalid and Type(extra.options) = "roArray" then caps.genreOptions = extra.options
+                if extra.isRequired then caps.genreRequired = true
+            end if
+            if extra.isRequired and name <> "skip"
+                if name <> "genre" then blocksFeed = true
+                if name <> "search" then blocksSearch = true
+            end if
+        end for
+
+        if caps.genre and caps.genreOptions.Count() = 0 and catalog.genres <> invalid and Type(catalog.genres) = "roArray" then
+            caps.genreOptions = catalog.genres
+        end if
+
+        caps.search = searchDeclared and not blocksSearch
+        caps.feed = caps.feed and not blocksFeed
+        return caps
+    end function
+
+    ' A catalog's display name. Real manifests ship catalogs with only type/id,
+    ' and an invalid label degrades a chip/row title, so fall back catalog name
+    ' -> catalog id -> addon name -> "Unknown". Duplicate names across add-ons
+    ' are disambiguated by the screen, not here.
+    function CatalogTitle(catalog as object, addonName as dynamic) as string
+        title = ""
+        if catalog <> invalid and Type(catalog) = "roAssociativeArray"
+            if catalog.name <> invalid then title = catalog.name
+            if title = "" and catalog.id <> invalid then title = catalog.id
+        end if
+        if title = "" and addonName <> invalid then title = addonName
+        if title = invalid or title = "" then title = "Unknown"
+        return title
+    end function
+
     ' Catalog manifests may omit a display name — real-world add-ons (Stremio's
     ' own Channels add-on among them) ship catalogs with only type/id. Every
     ' consumer renders the catalog name as a row/chip label, so an invalid name
