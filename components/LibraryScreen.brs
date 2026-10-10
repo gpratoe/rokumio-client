@@ -213,6 +213,9 @@ sub BuildRows()
     end for
     m.grid.content = content
     m.grid.rowItemSize = sizes
+    ' Per-row slot heights (see TileRowHeights): the library grid is uniform today,
+    ' but this keeps the row gap honest if a filter ever mixes tile heights.
+    m.grid.rowHeights = TileRowHeights(sizes)
     if m.items.Count() > 0
         m.grid.numRows = (m.items.Count() + m.chunk - 1) / m.chunk
     else

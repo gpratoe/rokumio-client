@@ -84,3 +84,17 @@ sub Test_TileSize_Columns()
     Harness_Equal(TileColumns(0, 270, 18), 1, "a zero-width row clamps to one")
     Harness_Equal(TileColumns(1780, 0, 18), 1, "a zero-width cell clamps to one")
 end sub
+
+sub Test_TileSize_RowHeights()
+    Harness_Suite("TileRowHeights mirrors each row's tile height for RowList.rowHeights")
+    heights = TileRowHeights([[270, 405]])
+    Harness_Equal(heights.Count(), 1, "one height per size")
+    Harness_Equal(heights[0], 405, "2:3 height")
+    heights = TileRowHeights([[480, 270], [270, 405], [270, 270]])
+    Harness_Equal(heights.Count(), 3, "one height per mixed row")
+    Harness_Equal(heights[0], 270, "landscape row height")
+    Harness_Equal(heights[1], 405, "2:3 row height")
+    Harness_Equal(heights[2], 270, "square row height")
+    Harness_Equal(TileRowHeights([]).Count(), 0, "empty sizes give no heights")
+    Harness_Equal(TileRowHeights(invalid).Count(), 0, "invalid sizes give no heights")
+end sub

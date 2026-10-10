@@ -85,6 +85,23 @@ function TileColumns(gridWidth as integer, cellWidth as integer, spacingX as int
     return cols
 end function
 
+' The values RowList.rowHeights needs, one per row, drawn from a rowItemSize
+' array. RowList sizes a row's SLOT from itemSize.y — a single fixed height for
+' every row — and the tile from rowItemSize, so a tile shorter than that slot (a
+' landscape/square row against the 2:3 itemSize height) leaves phantom space
+' between rows. rowHeights overrides the slot per row: mirror each row's tile
+' height and the gap is exactly itemSpacing. Rows with different shapes stay
+' tight in one grid instead of only the 2:3 rows being right.
+function TileRowHeights(sizes as dynamic) as object
+    heights = []
+    if sizes <> invalid and Type(sizes) = "roArray"
+        for each s in sizes
+            if s <> invalid then heights.Push(s[1])
+        end for
+    end if
+    return heights
+end function
+
 function TileItemWidth(metaType as dynamic) as integer
     if metaType <> invalid and metaType <> ""
         lower = LCase(metaType)

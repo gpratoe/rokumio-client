@@ -507,6 +507,10 @@ sub RenderRows()
     end for
     m.results.content = content
     m.results.rowItemSize = sizes
+    ' Per-row slot heights so a landscape/square catalog row sits tight instead of
+    ' inheriting the 2:3 itemSize height and leaving a phantom gap (see
+    ' TileRowHeights).
+    m.results.rowHeights = TileRowHeights(sizes)
     m.results.numRows = m.rows.Count()
 end sub
 

@@ -153,7 +153,7 @@ sub ApplyCatalogRow(row as object)
     m.catalogRows.Push(descriptor)
     m.gridRows.Push(descriptor)
     m.catalog.numRows = m.gridRows.Count()
-    m.catalog.rowItemSize = RowSizes()
+    ApplyCatalogSizes()
     ResyncRowLabels()
 end sub
 
@@ -205,7 +205,7 @@ sub BuildRows()
     end for
     m.catalog.content = content
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
-    m.catalog.rowItemSize = RowSizes()
+    ApplyCatalogSizes()
 end sub
 
 ' Rebuild the grid from the current add-on set — called by the Scene after a
@@ -303,6 +303,16 @@ function RowSizes() as object
     return sizes
 end function
 
+' Set both the per-row tile sizes and the matching per-row heights. RowList reads
+' a row's slot height from itemSize.y (one value for every row) unless rowHeights
+' overrides it per row, so a landscape/square row taller-than-its-tile case left
+' phantom space under every non-2:3 row. Mirroring the tile heights fixes the gap.
+sub ApplyCatalogSizes()
+    sizes = RowSizes()
+    m.catalog.rowItemSize = sizes
+    m.catalog.rowHeights = TileRowHeights(sizes)
+end sub
+
 ' Paint the shared poster-tile fields — title, hdPosterUrl, progress-bar fraction
 ' and watched glyph — onto an item ContentNode. Overlay fields are always
 ' written a concrete value (""/0 when there is none): they're typed fields on
@@ -391,13 +401,13 @@ sub RefreshContinueWatching()
             content.InsertChild(MakeRowNode(live, invalid), 0)
             m.gridRows.Unshift(live)
             m.catalog.numRows = m.gridRows.Count()
-            m.catalog.rowItemSize = RowSizes()
+            ApplyCatalogSizes()
         end if
     else if haveCw
         content.RemoveChildIndex(0)
         m.gridRows.Delete(0)
         m.catalog.numRows = m.gridRows.Count()
-        m.catalog.rowItemSize = RowSizes()
+        ApplyCatalogSizes()
     end if
 end sub
 

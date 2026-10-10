@@ -699,6 +699,7 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
         end for
     end for
     m.grid.content = content
+    m.grid.itemSize = [m.rowWidth, size[1]]
     m.grid.rowItemSize = [size]
     m.grid.numRows = (m.metas.Count() + m.chunk - 1) / m.chunk
     if rowToShow <> invalid and m.grid.numRows > 0
