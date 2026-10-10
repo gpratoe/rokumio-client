@@ -500,7 +500,10 @@ sub RenderRows()
             if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
             entry.watchedGlyph = glyph
         end for
-        sizes.Push(TileCellSize(row.rawType))
+        ' Each result catalog sizes its own row to its posterShape (folded from
+        ' the metas), so a landscape catalog lands wide rows even among 2:3 ones;
+        ' falls back to the content type when no shape ships.
+        sizes.Push(TileCellSize(row.rawType, TilePosterShape(row.metas)))
     end for
     m.results.content = content
     m.results.rowItemSize = sizes
