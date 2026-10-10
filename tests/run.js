@@ -51,6 +51,8 @@ async function writeCombinedScript() {
         'tests/emojilabel.test.brs',
         'tests/watchstatebuffer.test.brs',
         'tests/stremiolibrarycodec.test.brs',
+        'source/core/TileSize.bs',
+        'tests/tilesize.test.brs',
         'tests/_run.brs'
     ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });

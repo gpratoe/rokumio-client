@@ -138,6 +138,7 @@ sub ApplyCatalogRow(row as object)
         addonAddress: row.addonAddress
         title: row.title
         metaType: row.metaType
+        posterShape: TilePosterShape(row.metas)
         metas: row.metas
     }
     cwOffset = 0
@@ -276,12 +277,19 @@ end function
 
 ' The poster cell for one grid row. Channel-style add-ons (Stremio content types
 ' "channel"/"tv") ship 1:1 posters, so those rows get square cells; everything
-' else keeps the 2:3 poster slab. PosterTile sizes itself from the cell it is
-' handed, so this single array drives both the slot and the tile shape.
+' else keeps the 2:3 poster slab. A catalog-supplied posterShape (folded to the
+' row's majority shape once when the row lands) overrides the type fallback, so
+' a 16:9 catalog gets a wide row instead of letterboxed 2:3 cells. PosterTile
+' sizes itself from the cell it is handed, so this drives both the slot and the
+' tile shape.
 function RowCellSize(row as object) as object
     mt = invalid
-    if row <> invalid then mt = row.metaType
-    return TileCellSize(mt)
+    ps = ""
+    if row <> invalid then
+        mt = row.metaType
+        if row.posterShape <> invalid then ps = row.posterShape
+    end if
+    return TileCellSize(mt, ps)
 end function
 
 ' Per-row item sizes, one vector2d per grid row, in grid order. Rebuilt with the
@@ -334,6 +342,7 @@ function LibraryRow() as dynamic
             type: entry.metaType
             name: entry.name
             poster: entry.poster
+            posterShape: entry.posterShape
             videoId: entry.videoId
             season: entry.season
             episode: entry.episode
@@ -342,7 +351,7 @@ function LibraryRow() as dynamic
             watchedGlyph: m.stores.library.callFunc("LibraryWatchedGlyph", entry.metaId, entry.metaType)
         })
     end for
-    return { source: "library", title: "Continue Watching", metaType: "", metas: metas }
+    return { source: "library", title: "Continue Watching", metaType: "", posterShape: TilePosterShape(metas), metas: metas }
 end function
 
 function ContinueWatchingSignature() as string
