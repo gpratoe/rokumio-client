@@ -3052,6 +3052,108 @@ function checkDiscoverSourcesContract() {
     return ok;
 }
 
+// Search queries every installed add-on, not just Cinemeta. The failure mode
+// this guards is a silent regression to the built-in single-address search: a
+// hardcoded cinemeta id/address, rows keyed by media type instead of catalog
+// descriptor, a Details push fed one shared address, or a task that only asks
+// the default "top" catalog. It also pins the shared source resolution, the
+// per-catalog task loop, and the dynamic rows: only catalogs that return
+// results may occupy a row (nothing is premade for loading or empty catalogs).
+function checkMultiAddonSearchContract() {
+    const fs = require('fs');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const read = (...p) => fs.readFileSync(path.join(projectRoot, ...p), 'utf8');
+
+    const screen = read('components', 'SearchScreen.brs');
+    const screenXml = read('components', 'SearchScreen.xml');
+    const task = read('components', 'SearchLoaderTask.brs');
+    const taskXml = read('components', 'SearchLoaderTask.xml');
+    const store = read('source', 'stores', 'CatalogStore.bs');
+
+    if (/com\.linvo\.cinemeta|cinemetaAddress/.test(screen)) {
+        err('SearchScreen.brs still hardcodes the Cinemeta add-on — Search must fan out to every installed search-capable catalog');
+    }
+    if (/metaType: "movie"|RowForType/.test(screen)) {
+        err('SearchScreen.brs still builds rows by media type — Search is one row per search-capable catalog, not grouped by type');
+    }
+
+    if (!/AsyncTask_Launch\(m\.top,\s*"CatalogSourcesTask"/.test(screen) || !/onSourcesLoaded/.test(screen)) {
+        err('SearchScreen.brs does not resolve sources through CatalogSourcesTask/onSourcesLoaded — sources would never resolve for add-ons the registry has no catalogs for');
+    }
+    if (!/m\.pendingQuery\s*=/.test(screen) || !/FlushPendingQuery/.test(screen)) {
+        err('SearchScreen.brs does not hold a query that arrives before sources land (m.pendingQuery/FlushPendingQuery)');
+    }
+
+    if (!/caps = m\.stores\.addons\.callFunc\("AddonsCatalogCapabilities", descriptor\)/.test(screen) || !/not caps\.search then continue for/.test(screen)) {
+        err('SearchScreen.brs does not gate rows on AddonsCatalogCapabilities(...).search — every catalog would be queried, including ones that declare no search extra');
+    }
+    if (!/AddonsCatalogTitle"\s*,\s*descriptor/.test(screen)) {
+        err('SearchScreen.brs row titles no longer derive from the catalog descriptor (AddonsCatalogTitle)');
+    }
+    if (!/"\|"\s*\+\s*descriptor\.type\s*\+\s*"\|"\s*\+\s*descriptor\.id/.test(screen)) {
+        err('SearchScreen.brs row keys no longer derive from addonKey|rawType|catalogId — a task result cannot be fanned into its row by key');
+    }
+    if (!/" - "\s*\+\s*TypeSearchLabel\(descriptor\.type\)/.test(screen)) {
+        err('SearchScreen.brs row titles are no longer "{Catalog} - {mediaType}"');
+    }
+    if (!/return "Tv channel"/.test(screen)) {
+        err('SearchScreen.brs does not spell the channel/tv media family "Tv channel" in search rows');
+    }
+    if (!/titleCounts\[c\.title\]\s*>\s*1/.test(screen)) {
+        err('SearchScreen.brs no longer prefixes the add-on name when two catalogs would still collide after the title is built');
+    }
+
+    if (/loadState|PlaceholderTitle/.test(screen)) {
+        err('SearchScreen.brs still builds placeholder/premade rows — empty or loading catalogs must not occupy a row; rows appear only with results');
+    }
+    if (!/m\.landed\[/.test(screen) || !/RebuildRows/.test(screen) || !/m\.searchOrder/.test(screen)) {
+        err('SearchScreen.brs does not park landed metas by key and rebuild rows from the discovery order (m.landed/RebuildRows/m.searchOrder) — rows cannot be built dynamically from results');
+    }
+
+    if (!/addonAddress: target\.addonAddress/.test(screen)) {
+        err('SearchScreen.brs onResultSelected does not push the row\'s own addonAddress — every result would open against one shared address');
+    }
+
+    if (!/AsyncTask_Launch\(m\.top,\s*"SearchLoaderTask"/.test(screen) || !/m\.searchTasks\[addonKey\] = task/.test(screen)) {
+        err('SearchScreen.brs does not spawn one SearchLoaderTask per add-on keyed by addonKey');
+    }
+
+    if (!/for each cat in m\.top\.catalogs/.test(task)) {
+        err('SearchLoaderTask.brs does not iterate the catalogs array it was handed — it would only ever search one catalog per add-on');
+    }
+    if (!/catalog\.Search\(m\.top\.addonAddress,\s*cat\.type,\s*m\.top\.query,\s*cat\.id\)/.test(task)) {
+        err('SearchLoaderTask.brs does not pass each catalog\'s own id to CatalogStore.Search — every search would hit the default "top" catalog');
+    }
+    const catches = (task.match(/catch e/g) || []).length;
+    if (catches < 2) {
+        err('SearchLoaderTask.brs has no per-catalog try/catch — one bad catalog answer would kill the rest of that add-on\'s sections');
+    }
+    if (!/sections\.Push\(section\)/.test(task)) {
+        err('SearchLoaderTask.brs no longer publishes a section per requested catalog');
+    }
+
+    if (!/<field id="catalogs" type="array"/.test(taskXml) || !/<field id="addonKey" type="string"/.test(taskXml)) {
+        err('SearchLoaderTask.xml is missing the catalogs/addonKey fields the screen passes');
+    }
+    if (/<field id="metaType"/.test(taskXml)) {
+        err('SearchLoaderTask.xml still exposes metaType — the task is per add-on, not per media type');
+    }
+    if (!/<field id="result" type="assocarray" alwaysNotify="true"\s*\/>/.test(taskXml)) {
+        err('SearchLoaderTask.xml result field must be assocarray alwaysNotify — without it a second landing with the same shape is not observed');
+    }
+
+    if (!/function Search\(addonAddress as string, metaType as string, query as string, catalogId = "top" as string\)/.test(store)) {
+        err('CatalogStore.Search no longer takes a catalogId argument defaulting to "top" — search fan-out cannot target a non-default catalog');
+    }
+
+    if (!/type="assocarray" alwaysNotify="true"/.test(screenXml)) {
+        err('SearchScreen.xml pushRequest must be assocarray alwaysNotify');
+    }
+
+    return ok;
+}
+
 function checkPosterScalingContract() {
     const fs = require('fs');
     let ok = true;
@@ -3551,7 +3653,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkWatchStatePushTaskContract() || !checkLibraryWritePushTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract()) {
         process.exit(1);
     }
 

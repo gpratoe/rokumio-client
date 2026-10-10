@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="SearchScreen" extends="Screen">
-    <!-- Search: Cinemeta only. A KeyboardDialog prompt on entry, then results
-         as poster rows grouped by type (Movies / Series). OK on a result
-         publishes a pushRequest the Scene routes to Details. The * (options)
-         key reopens the keyboard prefilled with the last query. -->
+    <!-- Search: every installed add-on's search-capable catalogs. A
+         KeyboardDialog prompt on entry, then results as poster rows, one per
+         search-capable catalog (Stremio-style). OK on a result publishes a
+         pushRequest the Scene routes to Details. The * (options) key reopens
+         the keyboard prefilled with the last query. -->
     <interface>
         <!-- The one action Search reports upward: a push request. -->
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
@@ -42,10 +43,9 @@
             height="40"
             font="font:SmallSystemFont" />
 
-        <!-- Results grid: poster rows grouped by type. numRows stays 2 for the
-             whole query — each row always exists so navigation works while its
-             results are still loading. A loading row holds one placeholder tile
-             whose own BusySpinner marks it until that type resolves. -->
+        <!-- Results grid: poster rows, one per catalog that returned results.
+             numRows is set from m.rows; a catalog with no matches gets no row,
+             so the grid can start empty and fill in as add-ons answer. -->
         <RowList
             id="searchResults"
             translation="[150, 230]"

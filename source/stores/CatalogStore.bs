@@ -88,13 +88,15 @@ class CatalogStore
         return result
     end function
 
-    ' Search is a catalog call against the add-on's search catalog for one
-    ' type. Cinemeta resolves a query as /catalog/{type}/top/search={query}.json
-    ' — the "top" catalog id with "search=" as the extra segment — so the query
-    ' is percent-encoded before it becomes a URL path segment. Nothing is stored
-    ' locally.
-    function Search(addonAddress as string, metaType as string, query as string) as object
-        return m.Catalog(addonAddress, metaType, "top", "search=" + m.transport.EncodeQueryValue(query))
+    ' Search is a catalog call against one of the add-on's search-capable
+    ' catalogs. Cinemeta resolves a query as
+    ' /catalog/{type}/top/search={query}.json — the "top" catalog id with
+    ' "search=" as the extra segment — so the query is percent-encoded before it
+    ' becomes a URL path segment. The catalog id defaults to "top" for the
+    ' Cinemeta shape but is a caller argument because a search fan-out now asks
+    ' each search-capable catalog the same query. Nothing is stored locally.
+    function Search(addonAddress as string, metaType as string, query as string, catalogId = "top" as string) as object
+        return m.Catalog(addonAddress, metaType, catalogId, "search=" + m.transport.EncodeQueryValue(query))
     end function
 end class
 

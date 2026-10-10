@@ -254,6 +254,27 @@ sub Test_Catalog_Search()
     Harness_Equal(store.transport.log[1].url, address + "/catalog/series/top/search=percy%20jackson.json", "query percent-encoded in the URL")
 end sub
 
+sub Test_Catalog_SearchExplicitCatalogId()
+    Harness_Suite("CatalogStore.Search routes an explicit catalog id")
+    address = "https://v3-cinemeta.strem.io"
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/year/search=matrix.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0133093", type: "movie", name: "The Matrix" } ] }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Search(address, "movie", "matrix", "year")
+
+    Harness_Ok(result.ok, "search with explicit catalog id ok")
+    Harness_Equal(result.metas.Count(), 1, "one meta returned")
+    Harness_Equal(store.transport.log[0].url, address + "/catalog/movie/year/search=matrix.json", "non-default catalog id reaches the URL")
+end sub
+
 sub Test_Catalog_RejectsMissingMetas()
     Harness_Suite("CatalogStore.Catalog rejects a payload without metas")
     script = [
