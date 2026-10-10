@@ -483,6 +483,7 @@ end sub
 ' line says what is happening.
 sub RenderRows()
     content = CreateObject("roSGNode", "ContentNode")
+    sizes = []
     for each row in m.rows
         rowNode = content.CreateChild("ContentNode")
         rowNode.title = row.title
@@ -497,8 +498,10 @@ sub RenderRows()
             if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
             entry.watchedGlyph = glyph
         end for
+        sizes.Push(TileCellSize(row.rawType))
     end for
     m.results.content = content
+    m.results.rowItemSize = sizes
     m.results.numRows = m.rows.Count()
 end sub
 

@@ -678,6 +678,9 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
         end for
     end for
     m.grid.content = content
+    mt = invalid
+    if m.selectedCatalog <> invalid then mt = m.selectedCatalog.rawType
+    m.grid.rowItemSize = [TileCellSize(mt)]
     m.grid.numRows = (m.metas.Count() + m.chunk - 1) / m.chunk
     if rowToShow <> invalid and m.grid.numRows > 0
         m.grid.jumpToRowItem = rowToShow

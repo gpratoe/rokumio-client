@@ -24,6 +24,7 @@
 
     <script type="text/brightscript" uri="pkg:/components/LibraryScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/TileSize.bs" />
 
     <children>
         <Rectangle id="libraryBg" width="1920" height="1080" color="0x0" />

@@ -159,7 +159,10 @@ class LibraryStore
     ' sort is "recent" (saved order, newest first — the default), "az"/"za"
     ' (case-insensitive by name) or "watched" (any saved item with a
     ' continue-watching position first, most recently watched first — the
-    ' positions array is newest-first — then everything else by name).
+    ' positions array is newest-first — then everything else by name). The
+    ' Library filter chips only expose All/Movies/Series, so channel/tv entries
+    ' cannot be filtered into a view — they remain in the saved set (and account
+    ' layer) but never appear in the Library screen grid.
     function LibraryView(typeFilter as string, sort as string) as object
         items = m.SavedItems()
         if typeFilter <> "all"
@@ -167,7 +170,11 @@ class LibraryStore
             for each item in items
                 metaType = item.metaType
                 if metaType = invalid then metaType = ""
-                if metaType = typeFilter then filtered.Push(item)
+                if typeFilter = "channel"
+                    if metaType = "channel" or metaType = "tv" then filtered.Push(item)
+                else
+                    if metaType = typeFilter then filtered.Push(item)
+                end if
             end for
             items = filtered
         end if

@@ -279,10 +279,9 @@ end function
 ' else keeps the 2:3 poster slab. PosterTile sizes itself from the cell it is
 ' handed, so this single array drives both the slot and the tile shape.
 function RowCellSize(row as object) as object
-    if row <> invalid and row.metaType <> invalid and (row.metaType = "channel" or row.metaType = "tv")
-        return [270, 270]
-    end if
-    return [270, 405]
+    mt = invalid
+    if row <> invalid then mt = row.metaType
+    return TileCellSize(mt)
 end function
 
 ' Per-row item sizes, one vector2d per grid row, in grid order. Rebuilt with the

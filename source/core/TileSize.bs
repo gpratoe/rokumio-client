@@ -1,0 +1,19 @@
+' TileSize.bs — shared helpers to determine poster tile cell/item sizes
+' based on the content type. Channel-style (channel/tv) content uses
+' square tiles; everything else uses the standard 2:3 poster slab.
+
+function TileCellSize(metaType as dynamic) as object
+    if metaType <> invalid and metaType <> ""
+        lower = LCase(metaType)
+        if lower = "channel" or lower = "tv" then return [270, 270]
+    end if
+    return [270, 405]
+end function
+
+function TileItemWidth(metaType as dynamic) as integer
+    if metaType <> invalid and metaType <> ""
+        lower = LCase(metaType)
+        if lower = "channel" or lower = "tv" then return 405
+    end if
+    return 270
+end function

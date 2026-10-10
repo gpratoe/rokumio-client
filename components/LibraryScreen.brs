@@ -95,6 +95,7 @@ end sub
 function TypeLabel(typeFilter as string) as string
     if typeFilter = "movie" then return "Movies"
     if typeFilter = "series" then return "Series"
+    if typeFilter = "channel" then return "Channels"
     return "All"
 end function
 
@@ -124,6 +125,7 @@ function OptionsFor(chip as integer) as object
             { raw: "all", label: "All" }
             { raw: "movie", label: "Movies" }
             { raw: "series", label: "Series" }
+            { raw: "channel", label: "Channels" }
         ]
     else if chip = 1
         options = [
@@ -188,6 +190,7 @@ sub BuildRows()
     end if
 
     content = CreateObject("roSGNode", "ContentNode")
+    sizes = []
     for r = 0 to (m.items.Count() - 1) / m.chunk
         row = content.CreateChild("ContentNode")
         for c = 0 to m.chunk - 1
@@ -200,10 +203,13 @@ sub BuildRows()
             tile.title = name
             poster = item.poster
             if poster <> invalid and poster <> "" then tile.hdPosterUrl = poster
+            if item.metaType <> invalid and LCase(item.metaType) = "channel" then tile.watchedGlyph = ""
             TileWatchFields(tile, item.metaId, item.metaType)
         end for
+        sizes.Push(TileCellSize(m.typeFilter))
     end for
     m.grid.content = content
+    m.grid.rowItemSize = sizes
     if m.items.Count() > 0
         m.grid.numRows = (m.items.Count() + m.chunk - 1) / m.chunk
     else
@@ -212,7 +218,11 @@ sub BuildRows()
 
     m.header.text = LibraryLabel()
     if m.items.Count() = 0
-        m.status.text = "Your library is empty. Add movies and series from a title's details screen."
+        if m.typeFilter = "channel"
+            m.status.text = "Your library is empty. Add channels from a title's details screen."
+        else
+            m.status.text = "Your library is empty. Add movies and series from a title's details screen."
+        end if
     else
         m.status.text = ""
     end if
