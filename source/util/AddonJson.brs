@@ -138,7 +138,19 @@ function AddonJsonWalk(value as dynamic, textScalars as object, textArrays as ob
             else if textArrays[key] = true
                 value[key] = AddonJsonArrayAsText(value[key])
             else
-                AddonJsonWalk(value[key], textScalars, textArrays)
+                child = value[key]
+                if child <> invalid
+                    childKind = Type(child)
+                    ' The old walk called itself for every leaf too; most meta
+                    ' fields are scalars, so a large catalog paid a BrightScript
+                    ' function call per field just to discover that the leaf had
+                    ' no children. Only containers can contain another listed
+                    ' field, so recurse only into those and leave scalar leaves
+                    ' exactly as they arrived.
+                    if childKind = "roAssociativeArray" or childKind = "roArray"
+                        AddonJsonWalk(child, textScalars, textArrays)
+                    end if
+                end if
             end if
         end for
         return value
@@ -146,7 +158,13 @@ function AddonJsonWalk(value as dynamic, textScalars as object, textArrays as ob
 
     if kind = "roArray"
         for i = 0 to value.Count() - 1
-            AddonJsonWalk(value[i], textScalars, textArrays)
+            child = value[i]
+            if child <> invalid
+                childKind = Type(child)
+                if childKind = "roAssociativeArray" or childKind = "roArray"
+                    AddonJsonWalk(child, textScalars, textArrays)
+                end if
+            end if
         end for
         return value
     end if

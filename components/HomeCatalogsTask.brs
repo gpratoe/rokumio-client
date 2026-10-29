@@ -1,18 +1,16 @@
 ' HomeCatalogsTask — walk every installed add-on's catalogs off the UI thread.
-' Manifests are resolved here where the registry has none (built-ins), each
-' browsable catalog is fetched, and the growing row set is republished after
-' every completion so the Home grid fills in one row at a time instead of after
-' the whole catalog set has downloaded. Running inside a Task means a hung
-' add-on costs the worker thread, not a frozen channel. The store is built
-' fresh in the task scope; only plain { address, catalogs } descriptors cross
-' the thread boundary from HomeScreen.
+' Manifests are resolved here where the registry has none (built-ins), and each
+' browsable catalog is fetched. One completed catalog is published per result
+' notification; the Task never republishes all previous rows. That keeps
+' cross-thread copies proportional to the catalogs fetched, while Home fills
+' progressively. A hung add-on costs the worker thread, not a frozen channel.
+' Only plain { address, catalogs } descriptors cross in from HomeScreen.
 
 sub init()
     m.top.functionName = "load"
 end sub
 
 sub load()
-    rows = []
     try
         http = Transport()
         catalog = CatalogStore(http)
@@ -31,24 +29,24 @@ sub load()
                     if CatalogBrowsable(descriptor)
                         response = catalog.Catalog(addon.address, descriptor.type, descriptor.id)
                         if response.ok and response.metas <> invalid and response.metas.Count() > 0
-                            rows.Push({
+                            row = {
                                 index: index
                                 addonAddress: addon.address
                                 title: CatalogTitle(descriptor, addon)
                                 metaType: descriptor.type
                                 metas: response.metas
-                            })
+                            }
                             index = index + 1
-                            m.top.result = { rows: rows, done: false }
+                            m.top.result = { row: row, done: false }
                         end if
                     end if
                 end for
             end if
         end for
 
-        m.top.result = { rows: rows, done: true }
+        m.top.result = { done: true }
     catch e
-        m.top.result = { rows: rows, done: true, error: e.message }
+        m.top.result = { done: true, error: e.message }
     end try
 end sub
 

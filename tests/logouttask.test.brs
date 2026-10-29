@@ -2,22 +2,22 @@
 '
 ' Like LinkStremioTask/LibraryPutTask, LogoutTask builds its own Transport on
 ' a worker thread, so its HTTP cannot be injected in the brs interpreter; these
-' tests pin the /api/logout URL, the body shape (authKey + the type tag the api
-' endpoint convention requires) and the envelope semantics through
+' tests pin the /api/logout URL, the body shape (authKey only; the endpoint
+' path identifies the operation) and the envelope semantics through
 ' ScriptedTransport, exactly as the task parses them.
 
-sub Test_Logout_PostsLogoutWithAuthKeyAndType()
-    Harness_Suite("logout POST carries authKey and the Logout type tag")
+sub Test_Logout_PostsLogoutWithAuthKeyOnly()
+    Harness_Suite("logout POST carries only the authKey")
     script = [
         { method: "POST", url: "https://api.strem.io/api/logout", ok: true, status: 200, json: { result: { success: true } } }
     ]
     http = ScriptedTransport(script)
-    res = http.Post("https://api.strem.io/api/logout", { type: "Logout", authKey: "sk_test_key" })
+    res = http.Post("https://api.strem.io/api/logout", { authKey: "sk_test_key" })
     Harness_Ok(res.ok, "request succeeds")
     Harness_Ok(res.json.result.success, "result envelope reports success")
     Harness_Equal(http.log.Count(), 1, "one request logged")
     Harness_Equal(http.log[0].body.authKey, "sk_test_key", "request carries the authKey")
-    Harness_Equal(http.log[0].body.type, "Logout", "request carries the type tag")
+    Harness_Equal(http.log[0].body.type, invalid, "endpoint path identifies logout; no type tag is sent")
 end sub
 
 sub Test_Logout_ErrorEnvelopeSurfacesMessage()
@@ -26,7 +26,7 @@ sub Test_Logout_ErrorEnvelopeSurfacesMessage()
         { method: "POST", url: "https://api.strem.io/api/logout", ok: true, status: 200, json: { error: { code: 1, message: "Session does not exist" } } }
     ]
     http = ScriptedTransport(script)
-    res = http.Post("https://api.strem.io/api/logout", { type: "Logout", authKey: "invalid" })
+    res = http.Post("https://api.strem.io/api/logout", { authKey: "invalid" })
     Harness_Ok(res.ok, "HTTP request succeeds (error envelope)")
     Harness_Equal(res.json.result, invalid, "no success result on the error envelope")
     Harness_Equal(res.json.error.message, "Session does not exist", "error message surfaced")
@@ -38,7 +38,7 @@ sub Test_Logout_NetworkFailure()
         { method: "POST", url: "https://api.strem.io/api/logout", ok: false, status: 0, json: invalid, error: "connection refused" }
     ]
     http = ScriptedTransport(script)
-    res = http.Post("https://api.strem.io/api/logout", { type: "Logout", authKey: "sk_test_key" })
+    res = http.Post("https://api.strem.io/api/logout", { authKey: "sk_test_key" })
     Harness_Ok(not res.ok, "request fails")
     Harness_Equal(res.error, "connection refused", "error surfaced")
 end sub

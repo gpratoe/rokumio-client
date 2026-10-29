@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="LibraryWriteCoordinator" extends="Group">
+    <interface>
+        <!-- StoreHost crosses as a node reference; store instances cannot
+             survive a component boundary because Roku copies their methods. -->
+        <function name="SetStoreHost" />
+        <function name="OnWatchStateUpdate" />
+        <function name="OnLibraryChange" />
+        <function name="OnWatchedChange" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/LibraryWriteCoordinator.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+
+    <children>
+        <!-- Defer watch-state writes one tick off the player's Video state
+             observer. The controller owns both the timer and the pump. -->
+        <Timer id="watchStatePump" duration="1" repeat="false" />
+    </children>
+</component>

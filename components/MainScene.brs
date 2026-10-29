@@ -1,11 +1,9 @@
-' Thin orchestrator.
+' MainScene — the root Scene and integration boundary.
 '
-' MainScene owns exactly three things and nothing else:
-'   1. the ScreenStack,
-'   2. Back routing (top screen first; the stack pops when it declines),
-'   3. store instantiation and action dispatch.
-'
-' Zero business logic lives here. Everything else is in a screen or a store.
+' It owns the ScreenStack, screen routing, the StoreHost node, and cross-screen
+' effects that need Scene authority (session transitions, dialogs, refreshes).
+' Stateful asynchronous workflows live in focused coordinator components; this
+' Scene forwards their inputs/results and keeps the navigation-level decisions.
 sub init()
     m.stack = ScreenStack(m.top)
     m.top.palette = AppPalette()
@@ -70,46 +68,18 @@ sub init()
     m.libraryScreen = m.top.FindNode("libraryScreen")
     m.libraryScreen.ObserveField("pushRequest", "onLibraryAction")
     m.uiRoot = m.top.FindNode("uiRoot")
+    m.faultStrip = m.top.FindNode("faultStrip")
+    m.libraryWriteCoordinator = m.top.FindNode("libraryWriteCoordinator")
+    m.addonWriteCoordinator = m.top.FindNode("addonWriteCoordinator")
+    m.importCoordinator = m.top.FindNode("importCoordinator")
+    m.accountSyncCoordinator = m.top.FindNode("accountSyncCoordinator")
     m.top.FindNode("background").color = Theme().screenBg
 
-    ' "Is an account write-back worker in flight" for the single stremio pump.
-    ' It MUST be initialized here, not lazily, and this is not a style
-    ' preference: a field that was never assigned reads back as invalid, and
-    ' Roku refuses a truthiness test on invalid with &h18 ("Invalid is used in
-    ' IF-clause") on the render thread. The pump reads it on its first line,
-    ' before anything writes it, so an uninitialized flag is a guaranteed crash
-    ' the first time a push runs.
-    '
-    ' The brs test interpreter treats `if invalid` as false, so the suite is
-    ' structurally blind to this and a green run is not evidence either way. That
-    ' is what made the missing initialization survive review: it presented on
-    ' device as an unrecoverable app-wide hang when the player published a
-    ' position on pause or on leave, because the throw landed inside the player's
-    ' Video "state" observer and could not even paint a debugger prompt.
-    m.pushingLibraryWrite = false
-
-    ' Same contract for the addon-collection pump: one flight at a time, and
-    ' the flag exists precisely so an unassigned read can never happen on the
-    ' render thread (see the essay above — the suite cannot catch this).
-    m.pushingAddonWrite = false
-    m.addonWriteTask = invalid
-    m.addonWriteStamp = 0
-
-    ' The watch-state push is launched off a timer, not off the publisher that
-    ' reports it: the publisher is the player's Video "state" observer, and a
-    ' node created on that stack wedges the player (see ScheduleWatchStatePush).
-    m.watchStatePump = m.top.FindNode("watchStatePump")
-    m.watchStatePump.ObserveField("fire", "onWatchStatePumpFire")
     ' Settings can start the link-code flow; logout reuses the pairing worker.
     ' Both flags are session-flow state with no store counterpart.
     m.loginFromSettings = false
     m.logoutTask = invalid
     m.pendingLogout = false
-    ' A library sync asked for while the add-on sync is still running is deferred
-    ' to that sync's completion: both are launched together at startup and the
-    ' device refuses too many NEW concurrent connections. See StartLibrarySync.
-    ' Initialized here for the same &h18 reason as the flags above.
-    m.pendingLibrarySync = false
     ' A revoked-account bounce fires at most once per login: both launch-time
     ' pulls (library + addon) fail together on a dead authKey, and only the
     ' first one tears the session down.
@@ -166,44 +136,10 @@ sub init()
     ' re-targets the session-aware stores in place through SwitchSession.
     m.storeHost = CreateObject("roSGNode", "StoreHost")
     m.top.AppendChild(m.storeHost)
-
-    ' The store-fault strip: a red bar plus its label, both flat children of the
-    ' Scene, created once up front and updated in place. No nesting, no
-    ' FindNode after an append, no string join — every way the first version
-    ' could come up with a blank label while the bar itself still painted. A
-    ' screen that cannot reach the data layer reports the failing hop here (see
-    ' Screen.brs's SetStores) rather than leaving an empty grid and a
-    ' "0 add-ons" that reads like an empty catalog. 0 is impossible with a live
-    ' store: a guest session's GetAll() returns the two built-in seeds.
-    m.faultBar = CreateObject("roSGNode", "Rectangle")
-    m.faultBar.width = 1920
-    m.faultBar.height = 80
-    m.faultBar.translation = [0, 1000]
-    m.faultBar.color = Theme().danger
-    m.faultBar.visible = false
-    m.top.AppendChild(m.faultBar)
-
-    m.faultText = CreateObject("roSGNode", "Label")
-    m.faultText.translation = [40, 1020]
-    m.faultText.width = 1840
-    m.faultText.height = 44
-    m.faultText.font = "font:MediumBoldSystemFont"
-    m.faultText.color = Theme().textWhite
-    m.faultText.visible = false
-    m.top.AppendChild(m.faultText)
-
-    ' Transient faults hold the strip for a few seconds and then dismiss
-    ' themselves, like a toast. A sync warning that outlived its cause read as
-    ' a permanent failure when it is nothing — a flaky connection, a retry the
-    ' next launch heals — which glued red lines to the screen for whole
-    ' sessions. The timer exists once and is restarted by every report, so a
-    ' stream of transient faults dismisses on ONE deadline, not per line; the
-    ' codec set runs on the render thread, where nothing else waits.
-    m.transientFaults = {}
-    m.faultTimer = CreateObject("roSGNode", "Timer")
-    m.faultTimer.duration = 5.0
-    m.faultTimer.repeat = false
-    m.faultTimer.ObserveField("fire", "onFaultTimerFire")
+    m.libraryWriteCoordinator.callFunc("SetStoreHost", m.storeHost)
+    m.addonWriteCoordinator.callFunc("SetDependencies", m.storeHost, m.top)
+    m.importCoordinator.callFunc("SetScene", m.top)
+    m.accountSyncCoordinator.callFunc("SetDependencies", m.storeHost, m.top)
 
     ' The keys the last add-on sync published into the strip. Held so a later
     ' sync can retract exactly what it published: the reason strings carry the
@@ -225,92 +161,18 @@ sub init()
     m.playerScreen.callFunc("SetStores", m.storeHost, m.top)
 end sub
 
-' A screen whose store bind came up short reports it here, and the Scene paints
-' it. Every way that hand-off can fail looks identical from the outside — an
-' empty grid, a "0 add-ons" subtitle, no crash, nothing in the device log — and
-' that silence is what hid two shipping bugs (the callFunc argument that arrived
-' without its methods, then getScene() returning invalid because init() runs
-' before Show()). The Scene owns the strip because it owns the cross-cutting UI
-' and has the palette; a screen that painted its own would need a color literal
-' it deliberately does not depend on.
-'
-' Faults are keyed by reason, not by screen: the four failures are exactly the
-' things worth reading, and a dozen screens hitting the same one should not
-' produce a dozen identical lines. active=false clears.
+' Screens already report store faults through MainScene's interface. Keep this
+' entry point stable; the FaultStrip component owns state, timer and painting.
 sub ReportStoreFault(reason as string, active as boolean)
-    if reason = "" then return
-    if m.storeFaults = invalid then m.storeFaults = {}
-    if active then
-        m.storeFaults[reason] = true
-    else
-        m.storeFaults.Delete(reason)
-    end if
-    RefreshStoreFaultStrip()
+    if m.faultStrip = invalid then return
+    m.faultStrip.callFunc("ReportStoreFault", reason, active)
 end sub
 
-' A transient fault: one the user needs to read once (launch sync failed,
-' an add-on change withheld, the wording of a rejected install) and that
-' heals on its own — the same reason a toast dies after a few seconds.
-' Compared with ReportStoreFault this starts the strip's dismissal timer;
-' a sticky fault arriving while the timer runs is unaffected (those clear
-' through their own active=false reports).
+' Transient reports stay internal to MainScene's sync paths, but use the same
+' component that owns their lease and display.
 sub ReportTransientFault(reason as string)
-    if reason = "" then return
-    m.transientFaults[reason] = true
-    m.faultTimer.control = "start"
-    RefreshStoreFaultStrip()
-end sub
-
-' The transient lease expired: transient lines go, sticky ones stay. The
-' timer's control is "stop" by its own fire, so nothing else to write here —
-' exactly one field write plus the repaint.
-sub onFaultTimerFire()
-    m.transientFaults = {}
-    RefreshStoreFaultStrip()
-end sub
-
-' One bar and one label, both created in init() and updated in place, so this
-' only ever writes two fields on nodes the Scene already holds. Sorted so the
-' same set of faults always reads the same way — an unordered key walk would
-' shuffle the lines between binds. Sticky and transient faults paint merged:
-' the union AA dedupes a wording that arrives in both classes, so one reason
-' is one line no matter who said it.
-'
-' The first version shipped one line that did all three of the things this
-' avoids: strip.FindNode("storeFaultText").text = reasons.Join("     ") — a
-' strip built lazily, a Label written through a FindNode after the append, and
-' the line joined. On device the bar painted and the label stayed blank. Which
-' of the three was at fault was never isolated, so none of the three shapes
-' come back. m.linkLabel.text = link in LinkStremioScreen is the shape known to
-' work here, so this is that shape.
-sub RefreshStoreFaultStrip()
-    shown = {}
-    if m.storeFaults <> invalid
-        for each key in m.storeFaults
-            shown[key] = true
-        end for
-    end if
-    for each key in m.transientFaults
-        shown[key] = true
-    end for
-    reasons = []
-    for each key in shown
-        reasons.Push(key)
-    end for
-    reasons.Sort()
-    line = ""
-    for each reason in reasons
-        if line <> "" then line = line + "     "
-        line = line + reason
-    end for
-    if line = "" then
-        m.faultBar.visible = false
-        m.faultText.visible = false
-        return
-    end if
-    m.faultText.text = line
-    m.faultText.visible = true
-    m.faultBar.visible = true
+    if m.faultStrip = invalid then return
+    m.faultStrip.callFunc("ReportTransientFault", reason)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -383,195 +245,36 @@ sub onStreamsAction()
     m.stack.push(request.screen, request.params)
 end sub
 
-' The player published a position update (pause or leave) through
-' watchStateUpdate. It is one of the three account edits MainScene funnels into
-' the single write-back pump (see PumpLibraryWrites). Here: gate on a stremio
-' session (guest never touches the API), drop a repeat of the last accepted
-' update (same video, same position — nothing new), and record the rest in the
-' pending slot. The packet is read from the shared watch-state buffer, not the
-' player node, so the deferred pump can still build after the player is popped.
+' Screens and the player still publish through their existing fields. MainScene
+' is the event boundary and forwards each plain-data change to the coordinator
+' that owns queueing, serialization, task lifecycle, and the deferred player
+' write.
 sub onWatchStateUpdate()
-    if m.storeHost = invalid then return
-    if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
-    packet = m.storeHost.callFunc("WatchLatest")
-    if packet = invalid then return
-    videoId = packet.videoId
-    if videoId = invalid or videoId = "" then return
-    if packet.position = invalid then return
-    key = videoId + "|" + packet.position.ToStr()
-    if m.lastPacketKey = key then return
-    m.lastPacketKey = key
-    m.pendingWatchState = packet
-    ScheduleWatchStatePush()
+    if m.libraryWriteCoordinator <> invalid then m.libraryWriteCoordinator.callFunc("OnWatchStateUpdate")
 end sub
 
-' The watch-state push is the one account edit the PLAYER triggers from inside a
-' Video "state" observer: pausing reports "paused", leaving reports through
-' SavePosition, and both end up writing the watchStateUpdate field that wakes
-' this handler. So the stack under this call is the OS's own playback
-' transition, and nothing that touches the SceneGraph may run on it.
-'
-' It used to. onWatchStateUpdate called the pump directly, which built a worker
-' with CreateObject + AppendChild + control = "RUN" — inserting a node under a
-' Video node mid-transition, on the render thread. The app stopped answering the
-' remote entirely, and never recovered: pausing froze it, backing out of a
-' frozen pause froze it the same way, and the only way out was killing the
-' channel. It looked like a media or stream fault and was not one at all — it
-' reproduced on a stream from the user's own server, and never in a guest
-' session, because a guest session returns at the AuthGetSession gate above and
-' never reaches the launch. Only a stremio session got far enough to wedge.
-'
-' So the packet is RECORDED here and the push starts one tick later, off the
-' timer, after the transition has settled. That is safe to defer: the pump reads
-' the packet out of m.pendingWatchState, which lives past the player node, so a
-' pump that fires after the player was already torn down still has what it needs.
-sub ScheduleWatchStatePush()
-    if m.watchStatePump = invalid then
-        ' No timer to defer onto. Push inline rather than never — a missing timer
-        ' is a wiring mistake, not a reason to drop the user's watch state.
-        PumpLibraryWrites()
-        return
-    end if
-    m.watchStatePump.control = "stop"
-    m.watchStatePump.control = "start"
-end sub
-
-sub onWatchStatePumpFire()
-    PumpLibraryWrites()
-end sub
-
-' The Details screen published an add/remove toggle through libraryChange.
 sub onLibraryChange()
-    if m.storeHost = invalid then return
-    if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
+    if m.libraryWriteCoordinator = invalid or m.detailsScreen = invalid then return
     change = m.detailsScreen.libraryChange
-    if change = invalid then return
-    m.pendingLibraryChange = change
-    PumpLibraryWrites()
+    if change <> invalid then m.libraryWriteCoordinator.callFunc("OnLibraryChange", change)
 end sub
 
-' The episode browser published a watched-mark/unmark edit through
-' watchedChange. Each change carries the ordered episode-id list plus the meta
-' identity, so the store can re-author the full bitfield and land a well-formed
-' entry for a series the account has never seen.
 sub onWatchedChange()
-    if m.storeHost = invalid then return
-    if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
+    if m.libraryWriteCoordinator = invalid or m.episodesScreen = invalid then return
     change = m.episodesScreen.watchedChange
-    if change = invalid then return
-    m.pendingWatchedChange = change
-    PumpLibraryWrites()
+    if change <> invalid then m.libraryWriteCoordinator.callFunc("OnWatchedChange", change)
 end sub
 
-' ---- the account-library write-back pump ------------------------------------
-'
-' Every stremio account edit — the player's position, the episode browser's
-' watched marks, Details' add/remove toggle — flows through ONE worker and one
-' build path. Two reasons this is a single pipeline and not three:
-'
-'   Serialization. The store commits each built item back into its cached
-'   library (LibraryStore.CommitStremioItem, mirroring stremio-core's
-'   update_and_push_items_to_storage). Two pushes overlapping would both clone
-'   the same stale copy and the later one would revert the earlier — exactly the
-'   bug closed here, where an add-to-library push wiped the watched bitfield a
-'   moment after it was written. One worker at a time means every build reads
-'   what the previous push committed, and it keeps the device's low concurrent-
-'   connection ceiling in view.
-'
-'   Consistency. The three edits differ only in the patch they apply; the
-'   resolve-clone-commit build and the datastorePut worker are identical, so
-'   there is one place to get the write-back right.
-'
-' Position and watched each keep a single pending slot (a newer edit supersedes
-' an unstarted older one); membership keeps the newest toggle. NextLibraryWrite
-' drains them in a fixed order and hands back the built item.
-sub PumpLibraryWrites()
-    if m.pushingLibraryWrite then return
-    if m.storeHost = invalid then return
-    job = NextLibraryWrite()
-    if job = invalid then return
-    task = AsyncTask_Launch(m.top, "LibraryPutTask", "onLibraryWriteResult", {
-        authKey: m.storeHost.callFunc("AuthGetAuthKey")
-        item: job.item
-    }, "libraryPutTask")
-    m.libraryWriteTask = task
-    m.inFlightLibraryWrite = job
-    m.pushingLibraryWrite = true
-end sub
-
-' Consume the next pending edit, highest priority first, and build its
-' LibraryItem through the store (which also commits it into the cached library).
-' Returns { item, kind } or invalid when nothing is pending. A slot whose build
-' comes back invalid (guest session, malformed packet) is simply dropped and the
-' next one tried.
-function NextLibraryWrite() as dynamic
-    if m.pendingWatchState <> invalid
-        packet = m.pendingWatchState
-        m.pendingWatchState = invalid
-        item = m.storeHost.callFunc("LibraryBuildWatchStateItem", packet)
-        if item <> invalid then return { item: item, kind: "watchState" }
-    end if
-    if m.pendingWatchedChange <> invalid
-        change = m.pendingWatchedChange
-        m.pendingWatchedChange = invalid
-        item = m.storeHost.callFunc("LibraryBuildWatchedStateItem", change)
-        if item <> invalid then return { item: item, kind: "watched" }
-    end if
-    if m.pendingLibraryChange <> invalid
-        change = m.pendingLibraryChange
-        m.pendingLibraryChange = invalid
-        item = m.storeHost.callFunc("LibraryBuildLibraryChangeItem", change.metaId, change.metaType, change.name, change.poster, change.added)
-        if item <> invalid then return { item: item, kind: "libraryChange" }
-    end if
-    return invalid
-end function
-
-' One push settled. Free the worker and pump whatever arrived meanwhile.
-' Failures are non-fatal: the store already committed the change to its cached
-' library, so the local view is authoritative and the next account sync
-' re-adopts whatever the server settled on.
-sub onLibraryWriteResult()
-    task = m.libraryWriteTask
-    m.libraryWriteTask = invalid
-    m.pushingLibraryWrite = false
-    if task <> invalid then AsyncTask_Reap(task, m.top, false)
-    m.inFlightLibraryWrite = invalid
-    PumpLibraryWrites()
-end sub
-
-' ---- the account add-on collection write-back pump --------------------------
-'
-' The put REPLACES the account's whole add-on collection, so exactly like the
-' library pump there is one worker and one flight at a time. There is no queue
-' though — there cannot be, the payload of every put is everything — so a
-' change that lands while a put is in flight merely re-mutates the store's
-' mirror and bumps its stamp; when the flight settles, a stamp that no longer
-' matches means the mirror moved during the flight and one more put carries
-' the newest collection. Three puts can never clobber each other because only
-' one can be in the air at all.
+' ---- the account add-on collection write-back -------------------------------
+' The mirror mutation is the Scene's gateway; the writer owns the serialized
+' whole-collection PUT and its task lifecycle.
 sub PumpAddonWrites()
-    if m.pushingAddonWrite then return
-    if m.storeHost = invalid then return
-    if m.storeHost.callFunc("AuthGetSession") <> "stremio" then return
-    addons = m.storeHost.callFunc("AddonsAccountPutAddons")
-    if addons = invalid
-        ' The store has no mirror to write from (launch sync failed, guest
-        ' session, fresh login mid-flight): refuse to author a throwaway
-        ' collection, which would DELETE un-importable account add-ons.
-        return
-    end if
-    m.addonWriteStamp = m.storeHost.callFunc("AddonsAccountStamp")
-    task = AsyncTask_Launch(m.top, "AddonsWriteTask", "onAddonWriteResult", {
-        authKey: m.storeHost.callFunc("AuthGetAuthKey")
-        payload: { addons: addons }
-    }, "addonWriteTask")
-    m.addonWriteTask = task
-    m.pushingAddonWrite = true
+    if m.addonWriteCoordinator <> invalid then m.addonWriteCoordinator.callFunc("Pump")
 end sub
 
 ' THE one gateway every local add-on change flows through, whichever flow
 ' produced it — the add-on manager's screen channels (below) and the import
-' pipeline's own registers (onImportTaskResult) all land here. One place, so
+' coordinator's registered installs land here. One place, so
 ' there is exactly one rule: a stremio-session change happens in the local
 ' registry AND reaches the account through the mirror, or the fault strip
 ' names why it could not. Guest sessions have no account and stay silent;
@@ -627,32 +330,10 @@ sub AddonMirrorFault(outcome as object, what as string)
     end if
 end sub
 
-' The collection put landed. Reap, clear the flight, and let a mirror that
-' moved during it (another install/remove on the same screen) trigger the
-' follow-up put.
-sub onAddonWriteResult()
-    task = m.addonWriteTask
-    if task = invalid then return
-    result = task.result
-    if result = invalid then return
-    m.addonWriteTask = invalid
-    m.pushingAddonWrite = false
-    AsyncTask_Reap(task, m.top, false)
-
-    if result.revokedSession = true
-        HandleRevokedSession()
-        return
-    end if
-    if not result.ok
-        reason = "unknown error"
-        if result.error <> invalid and result.error <> "" then reason = result.error
-        AddAddonSyncFault("addon change failed: " + reason)
-        return
-    end if
-    print "[addons] collection put landed"
-    if m.storeHost <> invalid and m.storeHost.callFunc("AddonsAccountStamp") <> m.addonWriteStamp
-        PumpAddonWrites()
-    end if
+' AddonWriteCoordinator reports failed puts here so MainScene remains the
+' authority for the transient sync-fault lease and its retraction list.
+sub ReportAddonWriteFault(reason as string)
+    AddAddonSyncFault(reason)
 end sub
 
 ' The exit confirm. A StandardMessageDialog, built when it is shown: the same
@@ -981,9 +662,7 @@ end sub
 sub HandleRevokedSession()
     if m.revokedSessionHandled then return
     m.revokedSessionHandled = true
-    ' The session is being torn down; a launch-time library sync deferred behind
-    ' the add-on sync has nothing left to pull.
-    m.pendingLibrarySync = false
+    if m.accountSyncCoordinator <> invalid then m.accountSyncCoordinator.callFunc("CancelPendingLibrarySync")
     ResetToAuthGate()
     ShowSessionRevokedDialog()
 end sub
@@ -1026,75 +705,22 @@ sub onLogoutResult()
     AsyncTask_Reap(task, m.top, false)
 end sub
 
-' Kick the account addon sync for a stremio session. The API answers with the
-' full collection incl. each manifest, so no per-addon fetches follow — the task
-' returns the descriptors and MainScene adopts them through AddonsStore (the
-' single writer for installed records). Created per sync like the pairing task.
-'
-' Runs at BOTH login and relaunch. It used to run only at login, on the strength
-' of "a relaunched stremio session skips this (its addons are already in the
-' stremio_addons registry key from the login that synced them)" — a claim about
-' persisted state that nothing checked and that a single failed login-time sync
-' made permanently false. The consequence was severe and silent: AddonsStore
-' deliberately shows no built-in seeds for a stremio session, so an empty
-' stremio_addons meant no Cinemeta, which meant every AddonsGet("com.linvo.
-' cinemeta") caller got invalid — including MetaAddress(), so the Continue
-' Watching row's Details fetch went out with an empty addon address and rendered
-' a title with no poster and no description. The only recovery was to log out
-' and re-pair the account. One idempotent GET is now the recovery.
+' Start the account pull. The coordinator owns its Task and serializes it with
+' the library pull; the Scene adopts the returned descriptors below. Called at
+' both relaunch and login so a failed earlier pull can recover without re-pairing.
 sub StartAddonSync()
-    fields = {}
-    if m.storeHost <> invalid then fields.authKey = m.storeHost.callFunc("AuthGetAuthKey")
-    task = AsyncTask_Launch(m.top, "AddonSyncTask", "onAddonSyncResult", fields, "addonSyncTask", "onAddonSyncFinished")
-    m.addonSyncTask = task
+    if m.accountSyncCoordinator <> invalid then m.accountSyncCoordinator.callFunc("StartAddonSync")
 end sub
 
-' One sync settled. Register every descriptor through AddonsStore (duplicates
-' are skipped, so re-syncing is idempotent) and rebuild Home's rows from the
-' new catalog set. Partial failures are non-fatal — whatever synced registers
-' and the session proceeds.
-'
-' Every outcome names itself in the fault strip, carrying the transport's own
-' error text where there is one, so the next occurrence is a diagnosis instead of
-' an inference.
-'
-' An empty result is NOT one of those outcomes, and treating it as one is what
-' broke first login. `result` is alwaysNotify with no value, so it can notify
-' before the worker has written anything, and the handler cannot tell "not yet"
-' from "the worker produced nothing" by looking at result alone. This sub used to
-' call AsyncTask_Reap on an empty result — which unobserves the field and removes
-' the node — and CleanupStremioPairTask's own header records that removing a
-' running Task does NOT kill its worker thread. So the real result landed on a
-' node nobody was watching, the account's add-ons were silently dropped, `added`
-' stayed 0, RebuildRows never ran, and Home went on rendering the pre-login rows
-' as though nothing had happened. The app looked healthy and was not.
-'
-' So an empty result is declined here and the node is left alone. The authority
-' on whether the worker really finished without one is onAddonSyncFinished, which
-' can only fire once the task's sentinel says the worker is done.
-sub onAddonSyncResult()
-    task = m.addonSyncTask
-    if task = invalid then return
-    result = task.result
+' Adopt the result produced by AccountSyncCoordinator. The coordinator owns the
+' task and ordering; the Scene owns store adoption's cross-screen effects and
+' the fault strip.
+sub AdoptAddonSyncResult(result as object)
     if result = invalid then return
-
-    m.addonSyncTask = invalid
-    AsyncTask_Reap(task, m.top, false)
-
-    ClearAddonSyncFaults()
-
-    ' Compared, not truthiness-tested: a result packet without the key reads
-    ' back invalid, and `if invalid` is a hard &h18 crash on device.
-    if result.revokedSession = true
-        HandleRevokedSession()
-        return
-    end if
-
     if not result.ok
         reason = "unknown error"
         if result.error <> invalid and result.error <> "" then reason = result.error
         AddAddonSyncFault("addon sync failed: " + reason)
-        PumpPendingLibrarySync()
         return
     end if
 
@@ -1114,15 +740,10 @@ sub onAddonSyncResult()
                 end if
             end if
         end for
-        ' A successful pull is the sync's word for the whole account state, so
-        ' the collection mirror is adopted and the pull half of two-way sync
-        ' runs (see PruneAddonsOutOfAccount): an installed record the account
-        ' never mentions was removed elsewhere and is removed here. The fault
-        ' path above also carries a descriptors array (an empty one), so this
-        ' is gated on ok, not on the array — pruning against a failed pull
-        ' would erase every non-built-in install for nothing.
+        ' Adopt the raw account collection, then prune local non-built-ins the
+        ' successful pull says were removed elsewhere. Never prune on failure.
         pruned = 0
-        if result.ok and m.storeHost <> invalid
+        if m.storeHost <> invalid
             m.storeHost.callFunc("AddonsSyncAccountCollection", result.raw)
             keepIds = []
             for each descriptor in result.descriptors
@@ -1133,96 +754,30 @@ sub onAddonSyncResult()
         if pruned > 0 then print "[addons] sync pruned " ; pruned.ToStr() ; " add-on(s) absent from the account"
     end if
     print "[addons] sync landed — registered " ; added ; ", already had " ; skipped ; ", rejected " ; failed
-    ' Unconditional, and the condition is deliberately NOT "did this sync install
-    ' anything new". A re-sync of an unchanged account installs nothing, so that
-    ' predicate was false on every run after the first and Home kept the catalog
-    ' set it walked at launch — which, in a stremio session, is usually just the
-    ' built-in seeds. Home compares the add-on set itself and rebuilds only if it
-    ' moved, so the common case costs one in-memory set comparison and no catalog
-    ' walk. See HomeScreen.EnsureCurrentRows.
+    ' Unconditional: an unchanged account still tells Home to compare its
+    ' catalog signature, and the common case is one in-memory check.
     if m.homeScreen <> invalid then m.homeScreen.callFunc("EnsureCurrentRows")
-    ' The player snapshotted its subtitle providers when it was entered, which on
-    ' a cold launch is before this loop has run. Same predicate, same reason: tell
-    ' whichever player is up to re-derive, so an account add-on that is only now in
-    ' the registry is still asked for captions. Inert when no play is in progress —
-    ' the player's own m.subtitleParams guard makes it return.
     if m.playerScreen <> invalid then m.playerScreen.callFunc("EnsureSubtitleProviders")
     if failed > 0
         AddAddonSyncFault("addon sync: " + failed.ToStr() + " of " + result.descriptors.Count().ToStr() + " add-ons were rejected")
     end if
-    ' A sync that succeeded and still left the registry empty is the exact state
-    ' that used to require re-pairing. Name it, so a launch in that state is a
-    ' visible fault rather than a session that mysteriously has no catalogs.
     if m.storeHost <> invalid and m.storeHost.callFunc("AddonsGetAll").Count() = 0
         AddAddonSyncFault("addon sync: the account reported no add-ons")
     end if
-    ' The add-on sync is done, so a launch-time library sync that deferred behind
-    ' it can now run without opening a second connection alongside it.
-    PumpPendingLibrarySync()
 end sub
 
-' The worker's sentinel fired. The VALUE of the sentinel decides what that means,
-' and that distinction is the entire reason this sub exists.
-'
-' An alwaysNotify field notifies once at ObserveField time, carrying whatever the
-' field holds then — and field notifications are dispatched on the event loop, not
-' at the moment the observer is attached. So the first "finished" notification is
-' queued while AsyncTask_Launch is still on the stack (the slot is not even filled
-' yet, so that first one is harmless) and is DELIVERED afterwards, by which time
-' the worker is running. An alwaysNotify "result" field behaves the same way; the
-' difference is only that this handler and onAddonSyncResult disagree about how to
-' read it.
-'
-' Concretely, what this sub was doing wrong: it treated the arrival of a
-' "finished" notification as proof the worker was done, reaped the node and
-' reported a fault — while the worker was still blocked inside its HTTP call, on
-' its very first run, every single time. On device that read as
-'   addon sync: the worker finished with no result (stage: request-started)
-' with a stage taken from a task still in flight. Gating on the sentinel's value
-' instead of its arrival is the fix: the real notification carries true, the
-' spurious one carries false, and only the former may conclude anything.
-'
-' Once the value IS true, the worker has run sync() to completion, so an absent
-' result is a real fault and this is the only place that reports it. The stage it
-' stopped at is the diagnosis: "request-started" means the worker is genuinely
-' still in the request or was killed mid-request; "entered-sync" or "init" means
-' sync() effectively did not run; "threw" means the catch path ran but even its
-' error packet never landed. It is written into the fault text AND printed,
-' because the strip is what a fault found later is read from while the print is
-' what a fault being watched for is caught by.
-sub onAddonSyncFinished()
-    task = m.addonSyncTask
-    if task = invalid then return
-
-    ' The spurious alwaysNotify notification. The worker has not finished; its
-    ' real notification is still to come. Touch nothing — reaping here is what
-    ' destroyed the real result.
-    if task.finished <> true then return
-
-    m.addonSyncTask = invalid
-
-    stage = "unknown"
-    if task.stage <> invalid and task.stage <> "" then stage = task.stage
-    AsyncTask_Reap(task, m.top, false)
-
-    ClearAddonSyncFaults()
-    print "[addons] sync worker finished with NO result (stage: " ; stage ; ")"
-    AddAddonSyncFault("addon sync: the worker finished with no result (stage: " + stage + ")")
-    PumpPendingLibrarySync()
-end sub
-
-' Retract exactly the lines the last add-on sync published. Clearing by text
-' would not work: the reasons embed the transport's error string, so a retry
-' that failed differently would leave the previous line up forever.
 sub ClearAddonSyncFaults()
     if m.addonSyncFaults <> invalid
         for each key in m.addonSyncFaults
             ReportStoreFault(key, false)
-            m.transientFaults.Delete(key)
+            if m.faultStrip <> invalid then m.faultStrip.callFunc("ClearTransientFault", key)
         end for
     end if
     m.addonSyncFaults = []
-    RefreshStoreFaultStrip()
+end sub
+
+sub ReportAddonSyncFault(reason as string)
+    AddAddonSyncFault(reason)
 end sub
 
 sub AddAddonSyncFault(reason as string)
@@ -1246,59 +801,16 @@ end sub
 ' so serializing the two account syncs keeps the launch burst under it. Whatever
 ' still slips through is caught by Transport's bounded retry.
 sub StartLibrarySync()
-    if m.addonSyncTask <> invalid
-        m.pendingLibrarySync = true
-        return
-    end if
-    LaunchLibrarySync()
+    if m.accountSyncCoordinator <> invalid then m.accountSyncCoordinator.callFunc("StartLibrarySync")
 end sub
 
-' The actual launch, split out so the deferred path can reuse it unchanged.
-sub LaunchLibrarySync()
-    fields = {}
-    if m.storeHost <> invalid then fields.authKey = m.storeHost.callFunc("AuthGetAuthKey")
-    task = AsyncTask_Launch(m.top, "LibrarySyncTask", "onLibrarySyncResult", fields, "librarySyncTask")
-    m.librarySyncTask = task
-end sub
-
-' Run the library sync that was deferred behind an in-flight add-on sync. Called
-' from every place the add-on sync node is torn down — except revocation, which
-' is dropping the session and has nothing to sync.
-sub PumpPendingLibrarySync()
-    if m.pendingLibrarySync <> true then return
-    m.pendingLibrarySync = false
-    LaunchLibrarySync()
-end sub
-
-' One library sync settled. Reconcile the store with the remote collection and
-' update Home's Continue Watching row in place — the persisted cache (if any)
-' keeps rendering until then. Failures are non-fatal: on a login the CW row
-' just stays empty, on a relaunch the persisted cache keeps rendering.
-sub onLibrarySyncResult()
-    task = m.librarySyncTask
-    m.librarySyncTask = invalid
-    if task = invalid then return
-    result = task.result
-    AsyncTask_Reap(task, m.top, false)
-
-    ' A dead account session (revoked/expired server-side) is authoritative:
-    ' drop to the guest gate instead of silently limping on a key that can no
-    ' longer sync.
-    if result <> invalid and result.revokedSession
-        HandleRevokedSession()
-        return
-    end if
-
-    if result = invalid or not result.ok or result.items = invalid
-        return
-    end if
+' Apply the library snapshot returned by AccountSyncCoordinator. The pull/task
+' lifecycle is elsewhere; this is the Scene-side store and screen adoption.
+sub ApplyLibrarySyncResult(result as object)
+    if result = invalid or not result.ok or result.items = invalid then return
     if m.storeHost = invalid then return
     m.storeHost.callFunc("LibrarySyncFromStremio", result.items)
     if m.homeScreen <> invalid then m.homeScreen.callFunc("RefreshContinueWatching")
-    ' The relaunched-session case can land the sync while the Library screen is
-    ' already up: poke its grid so the freshly synced saved set appears without
-    ' a re-entry (guest sessions never reach this path). Same idempotent rebuild
-    ' as the LibraryScreen's own OnEnter.
     if m.stack.top() <> invalid and m.stack.top().id = "libraryScreen" and m.libraryScreen <> invalid
         m.libraryScreen.callFunc("RefreshRows")
     end if
@@ -1312,27 +824,14 @@ end sub
 ' Rokumio-import runs sequentially — one AddonsInstallTask per manifest URL,
 ' each parked off the render thread (a hung add-on costs a worker, not the UI,
 ' exactly like the Addons screen) — then applies serverAddress and shows a
-' single summary. m.import doubles as the re-entrancy guard: a second deep link
-' while one runs is dropped.
+' single summary. ImportCoordinator owns the re-entrancy guard: a second deep
+' link while one runs is dropped.
 sub HandleDeepLink(args as object)
-    if args = invalid
-        return
-    end if
-    if m.import <> invalid
-        return
-    end if
-
-    keys = ""
-    for each key in args
-        if keys <> "" then keys = keys + ","
-        keys = keys + key
-    end for
+    if args = invalid then return
+    if m.importCoordinator.callFunc("IsBusy") then return
 
     parse = DeepLinkStore().Parse(args)
-
-    if parse.kind = "none"
-        return
-    end if
+    if parse.kind = "none" then return
     if parse.kind = "unknown"
         ShowImportDialog("importTitle", [{ key: "importUnsupported", values: { error: parse.error } }])
         return
@@ -1342,45 +841,17 @@ sub HandleDeepLink(args as object)
         return
     end if
 
-    BeginImport(parse.addons, parse.settings)
+    m.importCoordinator.callFunc("StartImport", parse.addons, parse.settings)
 end sub
 
-' Start an add-on import: seed the single import slot and pump it. Both deep
-' links (above) and the local setup page (ImportFromSetup) land here, so there
-' can never be two import pipelines with two sets of counters and two dialogs
-' racing for the same add-on. Callers guard m.import <> invalid first — the
-' slot holds exactly one import at a time.
-sub BeginImport(addons as object, settings as dynamic)
-    m.import = {
-        pending: []
-        added: 0
-        skipped: 0
-        failed: 0
-        failures: []
-        task: invalid
-        settings: settings
-        requested: addons.Count()
-    }
-    for each url in addons
-        m.import.pending.Push(url)
-    end for
-    PumpImport()
-end sub
-
-' The local setup page (source/util/SetupPage.brs) hands off one manifest URL.
-' Returns whether it was queued: the page answers 200 with a "watch the TV"
-' page, or 409 with a "busy" page — never a dialog on this side (the import
-' summary that lands in ShowImportDialog is the TV's own confirmation).
+' The local setup page hands off one manifest URL. The coordinator owns the
+' same busy slot as HandleDeepLink, so the page can answer 409 while an import
+' is active and otherwise show its "watch the TV" response.
 function ImportFromSetup(url as dynamic) as boolean
-    if m.import <> invalid then return false
-    if url = invalid then return false
-    if url = "" then return false
-    BeginImport([url], invalid)
-    return true
+    if url = invalid or url = "" then return false
+    return m.importCoordinator.callFunc("StartImport", [url], invalid)
 end function
 
-' Address of the local setup page, published by main() at launch. Stored here
-' and pushed to the Add-ons screen, where the install workflow actually lives.
 sub ShowSetupAddress(url as dynamic)
     if url = invalid then return
     if url = "" then return
@@ -1389,109 +860,53 @@ sub ShowSetupAddress(url as dynamic)
 end sub
 
 ' Start the next queued manifest fetch, or finish when the queue is empty.
-sub PumpImport()
-    if m.import = invalid then return
-    if m.import.task <> invalid then return
-    if m.import.pending.Count() > 0
-        url = m.import.pending.Shift()
-        task = AsyncTask_Launch(m.top, "AddonsInstallTask", "onImportTaskResult", { address: url }, "deepLinkInstall")
-        m.import.task = task
-        return
-    end if
-    FinishImport()
-end sub
+' The coordinator registers through this gateway, so imported add-ons reach the
+' same account mirror as AddonsScreen installs. The worker only fetched and
+' validated the manifest; the live AddonsStore remains the duplicate/persistence
+' authority.
+function ImportRegisterAddon(record as object, transportUrl as dynamic, manifest as dynamic) as boolean
+    if m.storeHost = invalid then return false
+    registered = m.storeHost.callFunc("AddonsRegister", record)
+    if registered then AccountAddonInstalled(transportUrl, manifest)
+    return registered
+end function
 
-' One manifest fetch settled. The task validated against a registry-less store,
-' so an already-installed id still comes back ok — the real duplicate gate runs
-' here, in AddonsStore.Register. That orders the counts: added, skipped
-' (duplicate/built-in), or failed.
-sub onImportTaskResult()
-    if m.import = invalid then return
-    task = m.import.task
-    if task = invalid then return
-    m.import.task = invalid
-    result = task.result
-    AsyncTask_Reap(task, m.top, false)
-
-    resultId = ""
-    resultError = ""
-    if result <> invalid
-        if result.id <> invalid then resultId = result.id
-        if result.error <> invalid then resultError = result.error
-    end if
-
-    if result <> invalid and result.ok and result.record <> invalid
-        registered = false
-        if m.storeHost <> invalid
-            registered = m.storeHost.callFunc("AddonsRegister", result.record)
-        end if
-        if registered
-            m.import.added = m.import.added + 1
-            ' The SAME gateway the add-on manager's own installs report
-            ' through: a registered import (deep link, setup page, companion)
-            ' must reach the account too, or the next launch sync would treat
-            ' it as local-only and prune it. No account, no fault — a guest
-            ' import is a device-only install by definition.
-            AccountAddonInstalled(result.transportUrl, result.manifest)
-        else
-            m.import.skipped = m.import.skipped + 1
-        end if
-    else
-        m.import.failed = m.import.failed + 1
-        ' The failure travels as DATA: the add-on's own error is the server's
-        ' text and stays as it came, while the fallback we write ourselves is
-        ' ours to translate — so it is a key, read when the dialog is built.
-        m.import.failures.Push({ id: resultId, error: resultError })
-    end if
-    PumpImport()
-end sub
-
-' All manifest fetches are done. Apply the settings through the same path the
-' Settings screen uses (invalid values are rejected, not stored), then report
-' the outcome in one dialog — the channel is the authority on the result; ECP
-' only ever said "delivered".
-sub FinishImport()
-    if m.import = invalid then return
-
-
+' ImportCoordinator's finished summary. MainScene owns the cross-screen effects:
+' apply the optional server setting, show the localized result dialog, and let
+' Home/player re-derive data that may have changed while the import ran.
+sub ImportFinished(summary as object)
+    if summary = invalid then return
     lines = []
     bullets = []
 
-    if m.import.requested > 0
-        if m.import.failed = 0
-            if m.import.added = 0
+    if summary.requested > 0
+        if summary.failed = 0
+            if summary.added = 0
                 lines.Push({ key: "importAlreadyInstalled" })
             else
-                lines.Push(ImportAddedLine(m.import.added))
+                lines.Push(ImportAddedLine(summary.added))
             end if
         else
             ' What landed and what did not are two lines, not one: "3 add-ons
             ' added, 2 failed." is a sentence that has to be re-ordered (and
             ' re-inflected) in every language, while two lines are two lines
             ' everywhere.
-            addedLine = ImportAddedLine(m.import.added)
+            addedLine = ImportAddedLine(summary.added)
             if addedLine <> invalid then lines.Push(addedLine)
-            if m.import.failed = 1
+            if summary.failed = 1
                 lines.Push({ key: "importFailedOne" })
             else
-                lines.Push({ key: "importFailedMany", values: { count: m.import.failed.ToStr() } })
+                lines.Push({ key: "importFailedMany", values: { count: summary.failed.ToStr() } })
             end if
-            for each failure in m.import.failures
+            for each failure in summary.failures
                 bullets.Push(failure)
             end for
         end if
     end if
 
-    if m.import.settings <> invalid and m.import.settings.serverAddress <> invalid
+    if summary.settings <> invalid and summary.settings.serverAddress <> invalid
         if m.storeHost <> invalid
-            ' This is the ECP entry point for the streaming server, and it used
-            ' to set the address and stop there. The value was live for the rest
-            ' of the session and gone on the next launch, because nothing had
-            ' ever written it to the registry — a wipe with no symptom until the
-            ' relaunch, and no line anywhere saying the value was never saved.
-            ' The store saves itself now, so the only thing left to do here is
-            ' notice when it could not.
-            if m.storeHost.callFunc("SettingsSetServerAddress", m.import.settings.serverAddress)
+            if m.storeHost.callFunc("SettingsSetServerAddress", summary.settings.serverAddress)
                 if m.storeHost.callFunc("SettingsSaveFailed") then
                     lines.Push({ key: "importServerLinkedNotSaved" })
                     ReportStoreFault("settings could not be saved", true)
@@ -1506,27 +921,15 @@ sub FinishImport()
     end if
 
     if lines.Count() = 0 then lines.Push({ key: "importNoChanges" })
-
     ShowImportDialog("importTitle", lines, bullets)
 
-    ' New add-ons may have landed: Home's grid was built from the pre-import
-    ' catalog set, so let it re-derive if its add-on set actually moved. Same
-    ' predicate as the add-on sync, for the same reason — "the import added
-    ' something" is not the question, "is Home's grid current" is, and an import
-    ' that only re-registers what is already there still leaves Home showing
-    ' whatever it walked before. The fill happens off the UI thread behind the
-    ' summary dialog; nothing to block on here.
+    ' The import may have changed catalog providers or subtitle providers. These
+    ' calls are unconditional: the screens compare their actual provider set and
+    ' only rebuild if it moved, so an unchanged/re-registered add-on is harmless.
     if m.homeScreen <> invalid then m.homeScreen.callFunc("EnsureCurrentRows")
     if m.playerScreen <> invalid then m.playerScreen.callFunc("EnsureSubtitleProviders")
-
-    m.import = invalid
 end sub
 
-' The "N add-ons added" line — or invalid when nothing was added, because
-' zero has no line of its own (the summary says "Add-ons already installed."
-' instead). One and many are different words in every language — the noun and
-' the verb have to agree — so the table holds both forms and the code only
-' picks between them.
 function ImportAddedLine(count as integer) as object
     if count = 0 then return invalid
     if count = 1 then return { key: "importAddedOne" }

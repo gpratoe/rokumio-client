@@ -15,7 +15,7 @@
              the event loop rather than at attach, so it arrives while the worker
              is already running. A handler must therefore test this field's VALUE
              (true means done) and never treat the notification's arrival as the
-             fact. See MainScene.onAddonSyncFinished. -->
+              fact. See AccountSyncCoordinator.onAddonFinished. -->
         <field id="finished" type="boolean" value="false" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />

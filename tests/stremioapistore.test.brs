@@ -195,7 +195,7 @@ sub Test_StremioApiStore_AddonCollectionGetMissingAddonsFails()
 end sub
 
 sub Test_StremioApiStore_LogoutSuccessCarriesWireFormat()
-    Harness_Suite("Logout POSTs /api/logout with authKey and the Logout type tag")
+    Harness_Suite("Logout POSTs /api/logout with only the authKey")
     script = [
         { method: "POST", url: "https://api.strem.io/api/logout", ok: true, status: 200, json: { result: { success: true } } }
     ]
@@ -206,7 +206,7 @@ sub Test_StremioApiStore_LogoutSuccessCarriesWireFormat()
     Harness_Equal(res.error, "", "no error on success")
     Harness_Equal(http.log.Count(), 1, "one request logged")
     Harness_Equal(http.log[0].body.authKey, "sk_test_key", "request carries the authKey")
-    Harness_Equal(http.log[0].body.type, "Logout", "request carries the type tag")
+    Harness_Equal(http.log[0].body.type, invalid, "endpoint path identifies logout; no type tag is sent")
 end sub
 
 sub Test_StremioApiStore_LogoutErrorEnvelopeSurfacesMessage()

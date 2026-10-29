@@ -556,83 +556,73 @@ function checkStoreHandoffContract() {
         }
     }
 
-    // --- a reported fault has to be painted ----------------------------------
+    // --- MainScene forwards the stable screen-facing API; FaultStrip owns it.
     if (!/<function\s+name="ReportStoreFault"\s*\/>/.test(sceneXml)) {
-        err('MainScene.xml must declare <function name="ReportStoreFault" /> — callFunc only runs for interface functions, so every screen\'s fault report would go nowhere');
+        err('MainScene.xml must declare ReportStoreFault() — screens report their bind failures through this stable interface');
     }
     const report = mainScene.match(/^sub\s+ReportStoreFault\s*\(/m);
     if (!report) {
-        err('MainScene.brs no longer defines ReportStoreFault — every screen\'s fault report would hit a non-function');
-    } else if (!/^\s*RefreshStoreFaultStrip\(\)\s*$/m.test(mainScene.slice(report.index))) {
-        err('MainScene.brs ReportStoreFault must CALL RefreshStoreFaultStrip — a fault recorded but never shown is the bug, not the fix');
+        err('MainScene.brs no longer defines ReportStoreFault — screens would report into nothing');
+    } else if (!/m\.faultStrip\.callFunc\("ReportStoreFault"/.test(bodyOf(mainScene, report[0]))) {
+        err('MainScene.ReportStoreFault must forward to FaultStrip; MainScene should not own the strip state');
     }
-    const paint = mainScene.match(/^sub\s+RefreshStoreFaultStrip\s*\(\)/m);
+    const sceneInit = mainScene.match(/^sub\s+init\s*\(\)\s*$/m);
+    const sceneInitBody = sceneInit ? bodyOf(mainScene, sceneInit[0]) : '';
+    if (!/m\.faultStrip\s*=\s*m\.top\.FindNode\("faultStrip"\)/.test(sceneInitBody) || !/<FaultStrip\s+id="faultStrip"/.test(sceneXml)) {
+        err('MainScene must hold the declared FaultStrip node — reporting through an absent node silently loses every fault');
+    }
+
+    const faultBrs = fs.readFileSync(path.join(dir, 'FaultStrip.brs'), 'utf8');
+    const faultXml = fs.readFileSync(path.join(dir, 'FaultStrip.xml'), 'utf8');
+    const faultDefined = new Set([...faultBrs.matchAll(/^(?:function|sub)\s+(\w+)\s*\(/gm)].map(m => m[1]));
+    const faultDeclared = new Set([...faultXml.matchAll(/<function\s+name="([^"]+)"/g)].map(m => m[1]));
+    for (const name of ['ReportStoreFault', 'ReportTransientFault', 'ClearTransientFault']) {
+        if (!faultDefined.has(name) || !faultDeclared.has(name)) {
+            err(`FaultStrip must define and declare ${name} — callFunc only reaches functions in the component interface`);
+        }
+    }
+    const faultInit = faultBrs.match(/^sub\s+init\s*\(\)\s*$/m);
+    const faultInitBody = faultInit ? bodyOf(faultBrs, faultInit[0]) : '';
+    if (!/m\.storeFaults\s*=\s*\{\}/.test(faultInitBody) || !/m\.transientFaults\s*=\s*\{\}/.test(faultInitBody)) {
+        err('FaultStrip init must initialize both fault maps — an unassigned AA is invalid, and iterating it is a render-thread crash');
+    }
+    for (const [field, node] of [['m.bar', 'Rectangle'], ['m.label', 'Label']]) {
+        if (!new RegExp(field + '\\s*=\\s*CreateObject\\(\\s*"roSGNode"\\s*,\\s*"' + node + '"').test(faultInitBody) || !new RegExp('m\\.top\\.AppendChild\\(' + field + '\\)').test(faultInitBody)) {
+            err(`FaultStrip init must create and attach ${field} (${node}) once — an unattached node renders nothing`);
+        }
+    }
+    const paint = faultBrs.match(/^sub\s+Refresh\s*\(\)\s*$/m);
     if (!paint) {
-        err('MainScene.brs no longer defines RefreshStoreFaultStrip — a reported fault would never reach the screen');
-        return ok;
-    }
-    const paintBody = bodyOf(mainScene, paint[0]);
-    const initHeader = mainScene.match(/^sub\s+init\s*\(\)\s*$/m);
-    const initBody = initHeader ? bodyOf(mainScene, initHeader[0]) : '';
-    for (const [field, node] of [['m.faultBar', 'Rectangle'], ['m.faultText', 'Label']]) {
-        if (!new RegExp(field + '\\s*=\\s*CreateObject\\(\\s*"roSGNode"\\s*,\\s*"' + node + '"').test(initBody)) {
-            err(`MainScene.brs init must create ${field} (${node}) — the strip is built once, up front`);
+        err('FaultStrip has no Refresh() — a reported fault would never be painted');
+    } else {
+        const paintBody = bodyOf(faultBrs, paint[0]);
+        if (/CreateObject\(|AppendChild\(|FindNode\(|\.Join\(/.test(paintBody)) {
+            err('FaultStrip.Refresh() must update its existing nodes directly, building the line by concatenation');
         }
-        if (!new RegExp('m\\.top\\.AppendChild\\(' + field + '\\)').test(initBody)) {
-            err(`MainScene.brs init must attach ${field} to the Scene — an unattached node renders nothing, which is the exact shape of the bug being fixed`);
+        if (!/m\.label\.text\s*=/.test(paintBody) || !/m\.bar\.visible\s*=/.test(paintBody) || !/m\.label\.visible\s*=/.test(paintBody)) {
+            err('FaultStrip.Refresh() must set the label and both visibility fields — otherwise a fault may paint as a blank bar');
         }
     }
-    // What the first version actually shipped was one line, and it is worth
-    // having on record because it is the shape that painted nothing:
-    //     strip.FindNode("storeFaultText").text = reasons.Join("     ")
-    // — a strip built lazily, a Label written through a FindNode after the
-    // append, and the line joined from an array. On device the bar painted and
-    // the label stayed blank. Which of the three was at fault was never
-    // isolated, so all three stay pinned out: the strip is created in init,
-    // written through the fields themselves, and the line is concatenated.
-    if (/CreateObject\(/.test(paintBody) || /AppendChild\(/.test(paintBody)) {
-        err('MainScene.brs RefreshStoreFaultStrip must only write to the strip nodes init() already built — creating or attaching a node at paint time is one of the three shapes that shipped as a blank label');
-    }
-    if (/FindNode\(/.test(paintBody)) {
-        err('MainScene.brs RefreshStoreFaultStrip must write to m.faultBar / m.faultText directly, not look them up by id — m.linkLabel.text = link in LinkStremioScreen is the shape known to render here');
-    }
-    if (!/m\.faultText\.text\s*=/.test(paintBody)) {
-        err('MainScene.brs RefreshStoreFaultStrip must set m.faultText.text — a bar with no text says nothing');
-    }
-    if (/\.Join\(/.test(paintBody)) {
-        err('MainScene.brs RefreshStoreFaultStrip must build the line by concatenation, not Join() over an array — the third of the three shapes that shipped as a blank label');
-    }
-    // Transient faults paint merged with the sticky ones and dismiss on one
-    // shared deadline. The launch/addon sync reporters route through
-    // ReportTransientFault; a sticky add-on-sync fault would glue a line to
-    // the screen that the next launch heals — the exact UX the transient
-    // class exists to replace.
-    if (!/m\.faultTimer\s*=\s*CreateObject\(\s*"roSGNode"\s*,\s*"Timer"/.test(initBody)) {
-        err('MainScene.brs init must create m.faultTimer (Timer) — the strip owns nothing else');
-    }
-    if (!/m\.transientFaults\s*=\s*\{\}/.test(initBody)) {
-        err('MainScene.brs init must start m.transientFaults = {} — an unassigned AA is invalid, and iterating it is a render-thread crash');
-    }
-    const transient = mainScene.match(/^sub\s+ReportTransientFault\s*\([^)]*\)\s*$/m);
+    const transient = faultBrs.match(/^sub\s+ReportTransientFault\s*\([^)]*\)\s*$/m);
     if (!transient) {
-        err('MainScene.brs no longer defines ReportTransientFault — every transient fault would need its own dismissal logic');
+        err('FaultStrip no longer defines ReportTransientFault');
     } else {
-        const transientBody = bodyOf(mainScene, transient[0]);
-        if (!/m\.faultTimer\.control\s*=\s*"start"/.test(transientBody) || !/RefreshStoreFaultStrip\(\)/.test(transientBody)) {
-            err('MainScene.brs ReportTransientFault must restart the timer and repaint — one deadlined strip for a stream of transient faults');
+        const body = bodyOf(faultBrs, transient[0]);
+        if (!/m\.timer\.control\s*=\s*"start"/.test(body) || !/Refresh\(\)/.test(body)) {
+            err('FaultStrip.ReportTransientFault must restart the shared timer and repaint');
         }
     }
-    const expiry = mainScene.match(/^sub\s+onFaultTimerFire\s*\(\)\s*$/m);
+    const expiry = faultBrs.match(/^sub\s+onDismissTimerFire\s*\(\)\s*$/m);
     if (!expiry) {
-        err('MainScene.brs no longer defines onFaultTimerFire — transient faults would outlive the strip');
+        err('FaultStrip no longer defines onDismissTimerFire — transient faults would outlive their deadline');
     } else {
-        const expiryBody = bodyOf(mainScene, expiry[0]);
-        if (!/m\.transientFaults\s*=\s*\{\}/.test(expiryBody) || !/RefreshStoreFaultStrip\(\)/.test(expiryBody)) {
-            err('MainScene.brs onFaultTimerFire must clear the transient slot and repaint');
+        const expiryBody = bodyOf(faultBrs, expiry[0]);
+        if (!/m\.transientFaults\s*=\s*\{\}/.test(expiryBody) || !/Refresh\(\)/.test(expiryBody)) {
+            err('FaultStrip.onDismissTimerFire must clear transient faults and repaint');
         }
     }
-    if (!/m\.transientFaults/.test(paintBody)) {
-        err('MainScene.brs RefreshStoreFaultStrip must paint the transient faults merged with the sticky ones — a fault line that only some classes reach is a fault line that lies');
+    if (!/m\.storeFaults/.test(faultBrs) || !/m\.transientFaults/.test(faultBrs)) {
+        err('FaultStrip must merge sticky and transient faults in its display');
     }
     const addonFault = mainScene.match(/^sub\s+AddAddonSyncFault\s*\([^)]*\)\s*$/m);
     if (!addonFault) {
@@ -1073,15 +1063,16 @@ function checkStremioProvisioningContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
     const brs = read('components/MainScene.brs');
+    const syncCoordinator = read('components/AccountSyncCoordinator.brs');
     const screen = read('components/Screen.brs');
     const api = read('source/stores/StremioApiStore.bs');
     let ok = true;
 
     const subBody = (source, name) => {
-        const start = source.indexOf(`sub ${name}()`);
-        if (start === -1) return '';
-        const next = source.indexOf('\nsub ', start + 1);
-        return next === -1 ? source.slice(start) : source.slice(start, next);
+        const match = new RegExp(`^[ \\t]*sub ${name}\\s*\\(`, 'm').exec(source);
+        if (!match) return '';
+        const next = source.indexOf('\nsub ', match.index + 1);
+        return next === -1 ? source.slice(match.index) : source.slice(match.index, next);
     };
 
     // 1. A relaunched stremio session must re-pull the collection, not trust
@@ -1119,21 +1110,22 @@ function checkStremioProvisioningContract() {
     // 3. A sync that reports nothing must say so. A transport timeout, an HTTP
     //    error and an empty account all used to fall off the end of the sub
     //    identically, so Home kept rendering pre-login rows looking healthy.
-    const result = subBody(brs, 'onAddonSyncResult');
-    if (!/ClearAddonSyncFaults\(\)/.test(result)) {
-        console.error('MainScene.brs onAddonSyncResult does not retract its previous fault lines — a retry that failed differently would leave stale errors up forever');
+    const result = subBody(syncCoordinator, 'onAddonResult');
+    if (!/callFunc\("ClearAddonSyncFaults"\)/.test(result)) {
+        console.error('AccountSyncCoordinator.onAddonResult does not retract previous fault lines — a retry that failed differently would leave stale errors up forever');
         ok = false;
     }
-    if (!/if\s+not\s+result\.ok\s*\n[\s\S]{0,400}?AddAddonSyncFault\(/.test(result)) {
-        console.error('MainScene.brs onAddonSyncResult still falls off the end when the sync fails — an unreported failed sync is indistinguishable from a healthy one');
+    if (!/callFunc\("AdoptAddonSyncResult",\s*result\)/.test(result) || !/if\s+not\s+result\.ok\s*\n[\s\S]{0,400}?AddAddonSyncFault\(/.test(brs)) {
+        console.error('AccountSyncCoordinator must hand add-on results to MainScene, where failed syncs are reported');
         ok = false;
     }
-    if (!/result\.error/.test(result)) {
-        console.error('MainScene.brs onAddonSyncResult never reads result.error — the transport\'s own reason is discarded instead of shown');
+    const adopt = subBody(brs, 'AdoptAddonSyncResult');
+    if (!/result\.error/.test(adopt)) {
+        console.error('MainScene.AdoptAddonSyncResult must retain the transport error in its displayed fault');
         ok = false;
     }
-    if (!/AddAddonSyncFault\(\s*"addon sync: the account reported no add-ons"/.test(result)) {
-        console.error('MainScene.brs onAddonSyncResult must name the synced-but-empty outcome — that is the exact state that used to require re-pairing');
+    if (!/AddAddonSyncFault\(\s*"addon sync: the account reported no add-ons"/.test(brs)) {
+        console.error('MainScene.AdoptAddonSyncResult must name the synced-but-empty outcome — that is the exact state that used to require re-pairing');
         ok = false;
     }
 
@@ -1408,39 +1400,44 @@ function checkTransportRetryContract() {
 // ordering is pinned structurally.
 function checkStaggeredSyncContract() {
     const fs = require('fs');
-    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
-    const brs = read('components/MainScene.brs');
+    const brs = fs.readFileSync(path.join(projectRoot, 'components', 'AccountSyncCoordinator.brs'), 'utf8');
+    const scene = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8');
     let ok = true;
     const err = (m) => { console.error(m); ok = false; };
 
     const body = (name) => {
-        const start = new RegExp(`^[ \\t]*sub\\s+${name}\\s*\\(`, 'm').exec(brs);
+        const start = new RegExp(`^[ \\t]*(?:sub|function)\\s+${name}\\s*\\(`, 'm').exec(brs);
         if (!start) return null;
         const rest = brs.slice(start.index);
-        const end = rest.slice(1).search(/^[ \t]*end\s+sub\b/m);
+        const end = rest.slice(1).search(/^[ \\t]*end\\s+(?:sub|function)\\b/m);
         return end === -1 ? rest : rest.slice(0, end + 1);
     };
 
     const start = body('StartLibrarySync');
-    if (!start || !/m\.addonSyncTask\s*<>\s*invalid/.test(start) || !/m\.pendingLibrarySync\s*=\s*true/.test(start)) {
-        err('MainScene.brs StartLibrarySync no longer defers behind an in-flight add-on sync — both launch-time pulls would open connections at once, the concurrency that loses transfers');
+    if (!start || !/m\.addonTask\s*<>\s*invalid/.test(start) || !/m\.pendingLibrarySync\s*=\s*true/.test(start)) {
+        err('AccountSyncCoordinator.StartLibrarySync no longer defers behind an in-flight add-on sync — both launch-time pulls would open connections at once');
     }
     if (!/LaunchLibrarySync\(\)/.test(start || '')) {
-        err('MainScene.brs StartLibrarySync no longer launches the library sync when it is free to do so');
+        err('AccountSyncCoordinator.StartLibrarySync no longer launches the library sync when it is free to do so');
     }
     const pump = body('PumpPendingLibrarySync');
     if (!pump || !/m\.pendingLibrarySync\s*<>\s*true\s+then\s+return/.test(pump) || !/LaunchLibrarySync\(\)/.test(pump)) {
-        err('MainScene.brs PumpPendingLibrarySync must run only a deferred sync and launch it exactly once');
+        err('AccountSyncCoordinator.PumpPendingLibrarySync must run only a deferred sync and launch it exactly once');
     }
-    for (const name of ['onAddonSyncResult', 'onAddonSyncFinished']) {
+    for (const name of ['onAddonResult', 'onAddonFinished']) {
         const b = body(name);
         if (!b || !/PumpPendingLibrarySync\(\)/.test(b)) {
-            err(`MainScene.brs ${name} does not pump a deferred library sync — a launch that deferred it would never run it (a silent no-library-sync)`);
+            err(`AccountSyncCoordinator.${name} does not pump a deferred library sync — a launch that deferred it would never run it`);
         }
     }
-    const revoked = body('HandleRevokedSession');
-    if (!revoked || !/m\.pendingLibrarySync\s*=\s*false/.test(revoked)) {
-        err('MainScene.brs HandleRevokedSession must clear a deferred library sync — the session is gone and nothing should pull');
+    const addonResult = body('onAddonResult');
+    const libraryResult = body('onLibraryResult');
+    if (!addonResult || !/m\.pendingLibrarySync\s*=\s*false/.test(addonResult) || !libraryResult || !/m\.pendingLibrarySync\s*=\s*false/.test(libraryResult)) {
+        err('AccountSyncCoordinator must clear any deferred library sync when the account session is revoked');
+    }
+    const revoked = scene.match(/sub HandleRevokedSession\(\)[\s\S]*?\nend sub/);
+    if (!revoked || !/callFunc\("CancelPendingLibrarySync"\)/.test(revoked[0])) {
+        err('MainScene.HandleRevokedSession must cancel a library pull deferred by another coordinator before dropping the account session');
     }
     return ok;
 }
@@ -2236,6 +2233,7 @@ function checkAddonSyncTaskContract() {
     const taskXml = read('components/AddonSyncTask.xml');
     const taskBrs = code(read('components/AddonSyncTask.brs'));
     const main = code(read('components/MainScene.brs'));
+    const coordinator = code(read('components/AccountSyncCoordinator.brs'));
     const async = code(read('source/core/AsyncTask.bs'));
     let ok = true;
     const err = (m) => { console.error(m); ok = false; };
@@ -2314,81 +2312,60 @@ function checkAddonSyncTaskContract() {
         }
     }
 
-    // 3. The defect itself: an empty result must be DECLINED, not reaped. This is
-    //    an ordering check, not a presence check — the reap has to come after the
-    //    bail, and there must be no reap before it.
-    const onResult = body(main, 'onAddonSyncResult');
+    // 3. The defect itself: an empty result must be DECLINED, not reaped. The
+    //    coordinator now owns this task lifecycle; the ordering remains pinned.
+    const onResult = body(coordinator, 'onAddonResult');
     if (!onResult) {
-        err('MainScene.brs has no onAddonSyncResult — the sync result has no entry point');
+        err('AccountSyncCoordinator.brs has no onAddonResult — the sync result has no entry point');
     } else {
         const bailAt = /if\s+result\s*=\s*invalid\s+then\s+return/.exec(onResult);
         if (!bailAt) {
-            err('MainScene.brs onAddonSyncResult no longer declines an empty result — an alwaysNotify result that notifies before the worker wrote one is indistinguishable from a real failure, and reaping on it destroys the answer (THE original bug)');
+            err('AccountSyncCoordinator.onAddonResult no longer declines an empty result — reaping an alwaysNotify initial notification destroys the real answer');
         }
         const reapAt = onResult.indexOf('AsyncTask_Reap(');
-        if (reapAt === -1) {
-            err('MainScene.brs onAddonSyncResult never reaps the task — a finished task node would stay in the tree for the life of the scene');
-        } else if (bailAt && reapAt < bailAt.index) {
-            err('MainScene.brs onAddonSyncResult reaps BEFORE it declines an empty result — the node is unobserved and removed while the worker is still running, so the real result can never land (THE original bug)');
-        }
-        // Reporting must have MOVED, not been duplicated. The old shape reported
-        // the empty result from here; that text is the signature of the bug, so
-        // its absence from this sub is what pins the authority. A presence check
-        // alone would pass on a file that did both.
-        if (/reported no result at all/.test(onResult)) {
-            err('MainScene.brs onAddonSyncResult still reports the empty result itself — that report is premature by construction (it cannot know the worker is done) and it is the original bug; the done-callback owns this outcome');
+        if (reapAt === -1 || (bailAt && reapAt < bailAt.index)) {
+            err('AccountSyncCoordinator.onAddonResult must decline an empty result before reaping the task');
         }
         if (!/if\s+result\.revokedSession\s*=\s*true/.test(onResult)) {
-            err('MainScene.brs onAddonSyncResult truthiness-tests result.revokedSession — a result packet without the key reads back invalid, and `if invalid` is a hard &h18 crash on device');
+            err('AccountSyncCoordinator.onAddonResult must route a revoked session to MainScene without truthiness-testing an absent field');
+        }
+        if (!/callFunc\("AdoptAddonSyncResult",\s*result\)/.test(onResult)) {
+            err('AccountSyncCoordinator.onAddonResult must hand a valid result to MainScene for store adoption and screen refreshes');
         }
     }
 
     // 4. The done-callback is the only authority on "the worker finished with
-    //    nothing", and it has to name the stage. Critically it must establish
-    //    that from the sentinel's VALUE, before it reaps or clears anything.
-    const onFinished = body(main, 'onAddonSyncFinished');
+    //    nothing", and it acts only on the sentinel's VALUE.
+    const onFinished = body(coordinator, 'onAddonFinished');
     if (!onFinished) {
-        err('MainScene.brs has no onAddonSyncFinished — with the empty-result path now declining, the worker-finished-with-no-result outcome has no reporter at all and would be silent');
+        err('AccountSyncCoordinator.brs has no onAddonFinished — a worker finishing without a result would be silent');
     } else {
-        // Arrival means nothing. `finished` notifies once at ObserveField time
-        // with value false, and that notification is dispatched on the event
-        // loop, so it lands while the worker is mid-request. Treating arrival as
-        // "done" reaps a live node and publishes a fault read off a task in
-        // flight — which is exactly what shipped and produced
-        //   (stage: request-started) on every first sync.
         const finTest = /if\s+task\.finished\s*<>\s*true\s+then\s+return/.exec(onFinished);
         if (!finTest) {
-            err('MainScene.brs onAddonSyncFinished does not test task.finished\'s VALUE before acting — an alwaysNotify sentinel also notifies at ObserveField time with value false, and that notification is dispatched on the event loop (i.e. while the worker is still running), so arrival is not proof of completion. Reaping on it destroys the in-flight task and reports a stage read from a task that has not finished.');
+            err('AccountSyncCoordinator.onAddonFinished must test the sentinel value before acting; notification arrival alone does not mean done');
         }
-        // Ordering: the value test must precede every destructive action.
         const finAt = finTest ? finTest.index : -1;
-        for (const [needle, what] of [['AsyncTask_Reap(', 'reaps the task'], ['m.addonSyncTask = invalid', 'clears the task slot'], ['AddAddonSyncFault(', 'publishes a fault']]) {
+        for (const [needle, what] of [['AsyncTask_Reap(', 'reaps the task'], ['m.addonTask = invalid', 'clears the task slot'], ['ReportAddonSyncFault(', 'publishes a fault']]) {
             const at = onFinished.indexOf(needle);
             if (at !== -1 && finAt !== -1 && at < finAt) {
-                err(`MainScene.brs onAddonSyncFinished ${what} before testing task.finished — the spurious alwaysNotify notification would then reap a live worker and report a stage read from a task in flight`);
+                err(`AccountSyncCoordinator.onAddonFinished ${what} before testing task.finished — the spurious alwaysNotify notification could reap a live worker`);
             }
         }
-        if (!/AddAddonSyncFault\(/.test(onFinished)) {
-            err('MainScene.brs onAddonSyncFinished does not report a fault — a worker that completes without a result would be indistinguishable from a healthy one');
-        }
-        if (!/task\.stage/.test(onFinished)) {
-            err('MainScene.brs onAddonSyncFinished does not read task.stage into the fault text — the whole point of the stage field is that the failure names its own hop');
-        }
-        if (!/m\.addonSyncTask\s*=\s*invalid/.test(onFinished)) {
-            err('MainScene.brs onAddonSyncFinished does not clear m.addonSyncTask — a stale node would be left in the tree and the next sync\'s result would be dropped as a duplicate');
-        }
-        if (!/AsyncTask_Reap\(/.test(onFinished)) {
-            err('MainScene.brs onAddonSyncFinished never reaps the task — the finished worker\'s node would stay in the tree for the life of the scene');
+        if (!/task\.stage/.test(onFinished) || !/callFunc\("ReportAddonSyncFault"/.test(onFinished) || !/AsyncTask_Reap\(/.test(onFinished)) {
+            err('AccountSyncCoordinator.onAddonFinished must reap the finished worker and report its diagnostic stage');
         }
     }
 
-    // 5. The wiring. Both observers must be attached before control = "RUN" —
-    //    that assignment is the only point at which the worker can start, so an
-    //    observer attached after it can miss its first notification entirely.
-    const start = body(main, 'StartAddonSync');
-    if (!start || !/AsyncTask_Launch\([\s\S]*?"onAddonSyncResult"[\s\S]*?"onAddonSyncFinished"\s*\)/.test(start)) {
-        err('MainScene.brs StartAddonSync does not pass "onAddonSyncFinished" as AsyncTask_Launch\'s done-callback — the sentinel would be set with nothing observing it');
+    // 5. Both observers are attached before RUN by AsyncTask_Launch, and this
+    //    coordinator owns the launch rather than MainScene.
+    const start = body(coordinator, 'StartAddonSync');
+    if (!start || !/AsyncTask_Launch\([\s\S]*?"onAddonResult"[\s\S]*?"onAddonFinished"\s*\)/.test(start)) {
+        err('AccountSyncCoordinator.StartAddonSync must pass the result and done callbacks to AsyncTask_Launch');
     }
+    if (!/callFunc\("StartAddonSync"\)/.test(main)) {
+        err('MainScene.StartAddonSync must delegate the account pull to AccountSyncCoordinator');
+    }
+
     const launch = body(async, 'AsyncTask_Launch');
     if (!launch) {
         err('source/core/AsyncTask.bs has no AsyncTask_Launch');
@@ -2572,6 +2549,35 @@ function checkTaskTeardownContract() {
     return ok;
 }
 
+// HomeCatalogsTask used to publish { rows: allRowsSoFar } after every catalog.
+// Each field assignment crossed the Task boundary with every previous catalog
+// and its meta array again, so the payload-copy volume grew quadratically as the
+// Home filled. The task now sends one row per result and a small completion
+// packet; the screen applies each row as it arrives.
+function checkHomeCatalogResultsAreIncremental() {
+    const fs = require('fs');
+    const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+    const task = read('components/HomeCatalogsTask.brs');
+    const screen = read('components/HomeScreen.brs');
+    const onResult = screen.match(/^sub onCatalogState\([^\n]*\)[\s\S]*?^end sub/m);
+
+    if (!/m\.top\.result\s*=\s*\{\s*row:\s*row,\s*done:\s*false\s*\}/.test(task)) {
+        err('HomeCatalogsTask must publish one completed row per result, not a snapshot containing every row so far');
+    }
+    if (/m\.top\.result\s*=\s*\{\s*rows\s*:/.test(task) || /rows\.Push\(/.test(task)) {
+        err('HomeCatalogsTask still accumulates/publishes the full catalog row list — that recopies every earlier meta on each result');
+    }
+    if (!/m\.top\.result\s*=\s*\{\s*done:\s*true/.test(task)) {
+        err('HomeCatalogsTask must publish a final completion packet after the last row');
+    }
+    if (!onResult || !/state\.row/.test(onResult[0]) || !/ApplyCatalogRow\(state\.row\)/.test(onResult[0]) || !/state\.done\s*=\s*true/.test(onResult[0])) {
+        err('HomeScreen.onCatalogState must consume each row result and finish on the completion packet');
+    }
+    return ok;
+}
+
 function checkStopSignalContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
@@ -2713,24 +2719,21 @@ function checkHomeCatalogStalenessContract() {
 
     // 4. The call sites must be UNCONDITIONAL. This is the defect itself: a
     //    rebuild gated on an install count is false on every re-sync.
-    const onSync = body(main, 'onAddonSyncResult');
+    const onSync = body(main, 'AdoptAddonSyncResult');
     if (!onSync) {
-        err('MainScene.brs has no onAddonSyncResult()');
+        err('MainScene.brs has no AdoptAddonSyncResult()');
     } else {
         if (!/callFunc\(\s*"EnsureCurrentRows"\s*\)/.test(onSync)) {
-            err('MainScene.brs onAddonSyncResult() no longer calls EnsureCurrentRows() — the sync is the authority on "the add-on set may have moved" and it now tells nobody');
+            err('MainScene.brs AdoptAddonSyncResult() no longer calls EnsureCurrentRows() — the sync is the authority on "the add-on set may have moved" and it now tells nobody');
         }
         if (/if\s+added\s*>/.test(onSync)) {
-            err('MainScene.brs onAddonSyncResult() re-gates the rebuild on `added > 0` — an unchanged account installs nothing, so this is false on every run after the first and Home is never told to re-derive. That is the original bug.');
+            err('MainScene.brs AdoptAddonSyncResult() re-gates the rebuild on `added > 0` — an unchanged account installs nothing, so this is false on every run after the first and Home is never told to re-derive. That is the original bug.');
         }
     }
-    const importSub = body(main, 'FinishImport');
+    const importSub = body(main, 'ImportFinished');
     if (importSub) {
         if (!/callFunc\(\s*"EnsureCurrentRows"\s*\)/.test(importSub)) {
-            err('MainScene.brs FinishImport() no longer calls EnsureCurrentRows() — an import that re-registers add-ons Home already has still leaves Home showing its pre-import catalog set');
-        }
-        if (/if\s+m\.import\.added\s*>/.test(importSub)) {
-            err('MainScene.brs FinishImport() re-gates the rebuild on `m.import.added > 0` — same defect as the sync path: re-registering what is already installed adds nothing and leaves Home permanently stale');
+            err('MainScene.brs ImportFinished() no longer calls EnsureCurrentRows() — an import that re-registers add-ons Home already has still leaves Home showing its pre-import catalog set');
         }
     }
 
@@ -2980,22 +2983,29 @@ function checkAddonsWriteTaskContract() {
         ok = false;
     }
     const mainScene = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8');
-    if (!/sub PumpAddonWrites\(\)/.test(mainScene) || !/m\.pushingAddonWrite then return/.test(mainScene)) {
-        console.error('MainScene.brs must pump one AddonsWriteTask at a time (PumpAddonWrites + the pushingAddonWrite guard) — two collection sets in flight write each other stale');
+    const mainXml = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.xml'), 'utf8');
+    const writer = fs.readFileSync(path.join(projectRoot, 'components', 'AddonWriteCoordinator.brs'), 'utf8');
+    if (!/sub PumpAddonWrites\(\)/.test(mainScene) || !/callFunc\("Pump"\)/.test(mainScene) || !/sub Pump\(\)/.test(writer) || !/if m\.pushing then return/.test(writer)) {
+        console.error('MainScene must delegate collection puts to AddonWriteCoordinator, which must pump one AddonsWriteTask at a time — two collection sets in flight write each other stale');
         ok = false;
     }
-    // Every install/remove change must land on the account exactly once, so
-    // the gateway is the only way in — and the import pipeline (deep link,
-    // setup page, companion) reports through it too: a register there that
-    // stays local would be pruned by the next launch sync for nothing.
-    const importRegion = mainScene.match(/sub onImportTaskResult\b[\s\S]*?\nend sub/);
-    if (!/sub AccountAddonInstalled\(/.test(mainScene) || !importRegion || !/AccountAddonInstalled\(/.test(importRegion[0])) {
-        console.error('MainScene.brs must define sub AccountAddonInstalled and report every imported install through it in onImportTaskResult — two local install flows, one account gateway, or the import installs get pruned by the next sync');
+    // Every import route lands on the same Scene gateway as AddonsScreen, so
+    // a registered import reaches the account mirror before the next pull.
+    const importer = fs.readFileSync(path.join(projectRoot, 'components', 'ImportCoordinator.brs'), 'utf8');
+    const importMain = mainScene.match(/function ImportRegisterAddon\([^)]*\)[\s\S]*?\nend function/);
+    if (!/sub AccountAddonInstalled\(/.test(mainScene) || !/m\.scene\.callFunc\("ImportRegisterAddon"/.test(importer) || !importMain || !/AccountAddonInstalled\(/.test(importMain[0])) {
+        console.error('ImportCoordinator must report successful registrations through MainScene.ImportRegisterAddon and its one AccountAddonInstalled gateway — otherwise a local import is pruned by the next account sync');
         ok = false;
     }
-    if (!/AddonsAccountStamp"\)\s*<>\s*m\.addonWriteStamp/.test(mainScene)) {
-        console.error('MainScene.brs must re-pump when AddonsAccountStamp() no longer matches the stamp it launched with — a mirror change during a set is written by a follow-up set, not by luck');
+    if (!/AddonsAccountStamp"\)\s*<>\s*m\.writeStamp/.test(writer)) {
+        console.error('AddonWriteCoordinator must re-pump when AddonsAccountStamp() no longer matches the stamp it launched with — a mirror change during a set is written by a follow-up set, not by luck');
         ok = false;
+    }
+    for (const callback of ['ReportAddonWriteFault', 'HandleRevokedSession']) {
+        if (!new RegExp(`<function\\s+name="${callback}"\\s*\\/>`).test(mainXml) || !new RegExp(`(?:sub|function) ${callback}\\(`).test(mainScene) || !new RegExp(`callFunc\\("${callback}"`).test(writer)) {
+            console.error(`AddonWriteCoordinator/MainScene callback ${callback} must be defined, declared on MainScene, and called through that interface`);
+            ok = false;
+        }
     }
     if (!/result\.raw/.test(mainScene)) {
         console.error('MainScene.brs must adopt the pull result.raw as the mirror — filtered descriptors would rewrite the account and delete un-importable add-ons on the next set');
@@ -3710,8 +3720,23 @@ function checkSetupServerContract() {
     if (!new RegExp(`sub ShowSetupAddress\\s*\\(`).test(sceneBrs) || !new RegExp(`function ImportFromSetup\\s*\\(`).test(sceneBrs)) {
         err('MainScene.brs must define ShowSetupAddress() and ImportFromSetup() — main() and the setup page call them');
     }
-    if (!new RegExp(`ImportFromSetup\\s*\\([^)]*\\)\\s*[\\s\\S]*\\nend function`).test(sceneBrs) || !/BeginImport\s*\(/.test(sceneBrs)) {
-        err('MainScene.brs ImportFromSetup no longer routes through BeginImport — the deep-link and setup-page paths must share the single import slot');
+    const importCoordinatorBrs = fs.readFileSync(path.join(projectRoot, 'components', 'ImportCoordinator.brs'), 'utf8');
+    const importCoordinatorXml = fs.readFileSync(path.join(projectRoot, 'components', 'ImportCoordinator.xml'), 'utf8');
+    if (!new RegExp(`ImportFromSetup\\s*\\([^)]*\\)\\s*[\\s\\S]*\\nend function`).test(sceneBrs) || !/callFunc\("StartImport"/.test(sceneBrs) || !/callFunc\("StartImport"/.test(sceneBrs.match(/sub HandleDeepLink[\s\S]*?\nend sub/)?.[0] || '')) {
+        err('MainScene must route both setup-page and deep-link imports through ImportCoordinator.StartImport — they share one busy slot');
+    }
+    for (const fn of ['SetScene', 'IsBusy', 'StartImport']) {
+        if (!new RegExp(`<function\\s+name="${fn}"\\s*\\/>`).test(importCoordinatorXml) || !new RegExp(`(?:sub|function) ${fn}\\(`).test(importCoordinatorBrs)) {
+            err(`ImportCoordinator must define and declare ${fn} for its component boundary`);
+        }
+    }
+    for (const fn of ['ImportRegisterAddon', 'ImportFinished']) {
+        if (!declaredScene.has(fn) || !new RegExp(`(?:sub|function) ${fn}\\(`).test(sceneBrs)) {
+            err(`MainScene must define and declare ${fn}, the ImportCoordinator callback interface`);
+        }
+    }
+    if (!/AsyncTask_Launch\(m\.top,\s*"AddonsInstallTask",\s*"onInstallResult"/.test(importCoordinatorBrs) || !/m\.scene\.callFunc\("ImportFinished",\s*summary\)/.test(importCoordinatorBrs)) {
+        err('ImportCoordinator must own the sequential install task and return its plain summary to MainScene');
     }
 
     const declaredAddons = new Set(
@@ -5683,102 +5708,96 @@ function checkWatchStatePushContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, f), 'utf8');
     const main = read('components/MainScene.brs');
-    const xml = read('components/MainScene.xml');
+    const sceneXml = read('components/MainScene.xml');
+    const coordinator = read('components/LibraryWriteCoordinator.brs');
+    const coordinatorXml = read('components/LibraryWriteCoordinator.xml');
     const player = read('components/PlayerScreen.brs');
     let ok = true;
     const err = (m) => { console.error(m); ok = false; };
     const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
-    const brs = code(main);
-    const body = (name) => {
-        const m = new RegExp(`^(?:sub|function) ${name}\\(\\)`, 'm').exec(brs);
+    const sceneCode = code(main);
+    const coordinatorCode = code(coordinator);
+    const body = (src, name) => {
+        const m = new RegExp(`^(?:sub|function) ${name}\\([^\\n]*`, 'm').exec(src);
         if (!m) return '';
-        const lines = brs.slice(m.index).split('\n');
+        const lines = src.slice(m.index).split('\n');
         for (let i = 0; i < lines.length; i++) {
             if (i > 0 && /^end (?:sub|function)\b/.test(lines[i])) return lines.slice(0, i + 1).join('\n');
         }
-        return brs.slice(m.index);
+        return src.slice(m.index);
     };
 
-    // 1. The handler that the player's Video observer feeds must not build a
-    //    node. This is the whole defect.
-    const handler = body('onWatchStateUpdate');
-    if (!handler) {
-        err('MainScene.brs has no onWatchStateUpdate — the watch-state write-back has no entry point');
-    } else {
-        if (/AsyncTask_Launch\s*\(/.test(handler)) {
-            err('MainScene.brs onWatchStateUpdate launches the push worker itself — this handler runs inside the player\'s Video "state" observer, and creating a node on that stack is what froze playback. Go through ScheduleWatchStatePush.');
-        }
-        if (/CreateObject\s*\(/.test(handler)) {
-            err('MainScene.brs onWatchStateUpdate calls CreateObject — nothing on the Video state observer\'s stack may build a node');
-        }
-        if (!/ScheduleWatchStatePush\(\)/.test(handler)) {
-            err('MainScene.brs onWatchStateUpdate does not defer through ScheduleWatchStatePush — the push would start on the Video state observer\'s stack');
-        }
-        // The gate that made this stremio-only, and the reason "works in guest"
-        // proved nothing about it. Matched as a callFunc ARGUMENT — "AuthGet"
-        // followed by a closing paren is a direct call, and this is a string
-        // inside one.
-        if (!/callFunc\(\s*"AuthGetSession"\s*\)\s*<>\s*"stremio"/.test(handler)) {
-            err('MainScene.brs onWatchStateUpdate lost its stremio-session gate — a guest session would now do the write-back this bug lived in');
+    // The Scene is still the field observer, but only forwards the event. The
+    // coordinator owns all account-write state and task creation.
+    const sceneHandler = body(sceneCode, 'onWatchStateUpdate');
+    if (!/m\.libraryWriteCoordinator\.callFunc\("OnWatchStateUpdate"\)/.test(sceneHandler)) {
+        err('MainScene.onWatchStateUpdate must forward to LibraryWriteCoordinator');
+    }
+    for (const forbidden of ['CreateObject', 'AppendChild', 'AsyncTask_Launch']) {
+        if (new RegExp(`\\b${forbidden}\\s*\\(`).test(sceneHandler)) {
+            err(`MainScene.onWatchStateUpdate calls ${forbidden} — the Video state observer must not create or launch work`);
         }
     }
 
-    // 2. The deferral has to be real: a one-shot timer, actually observed, and
-    //    actually restarted per publish (a burst of pause/seek reports must not
-    //    launch a worker per report).
-    const schedule = body('ScheduleWatchStatePush');
-    if (!schedule) {
-        err('MainScene.brs has no ScheduleWatchStatePush — the deferral the player fix depends on is gone');
-    } else {
-        if (!/m\.watchStatePump\.control\s*=\s*"stop"[\s\S]{0,120}?m\.watchStatePump\.control\s*=\s*"start"/.test(schedule)) {
-            err('MainScene.brs ScheduleWatchStatePush does not (re)start the one-shot pump timer — a timer that is never restarted pushes nothing, silently dropping every watch state');
+    // The coordinator reads the buffered packet (not the player node), gates
+    // account-only writes, dedupes, and defers the worker off the Video event.
+    const handler = body(coordinatorCode, 'OnWatchStateUpdate');
+    if (!/callFunc\("AuthGetSession"\)\s*<>\s*"stremio"/.test(handler)) {
+        err('LibraryWriteCoordinator.OnWatchStateUpdate lost its stremio-session gate');
+    }
+    if (!/callFunc\("WatchLatest"\)/.test(handler) || !/m\.pendingWatchState\s*=\s*packet/.test(handler)) {
+        err('LibraryWriteCoordinator must read WatchLatest and retain the packet beyond the player node lifetime');
+    }
+    if (!/ScheduleWatchStatePush\(\)/.test(handler)) {
+        err('LibraryWriteCoordinator.OnWatchStateUpdate must defer task creation off the Video state observer');
+    }
+    const schedule = body(coordinatorCode, 'ScheduleWatchStatePush');
+    if (!/m\.watchStatePump\.control\s*=\s*"stop"[\s\S]{0,120}?m\.watchStatePump\.control\s*=\s*"start"/.test(schedule)) {
+        err('LibraryWriteCoordinator.ScheduleWatchStatePush must restart the one-shot coalescing timer');
+    }
+    if (!/m\.watchStatePump\s*=\s*invalid[\s\S]{0,200}?Pump\(\)/.test(schedule)) {
+        err('LibraryWriteCoordinator must keep the inline fallback if its deferral timer is missing');
+    }
+    if (!/m\.watchStatePump\.ObserveField\(\s*"fire"\s*,\s*"onWatchStatePumpFire"\s*\)/.test(coordinatorCode) || !/Pump\(\)/.test(body(coordinatorCode, 'onWatchStatePumpFire'))) {
+        err('LibraryWriteCoordinator must observe the timer and pump on its fire');
+    }
+    if (!/<Timer\s+id="watchStatePump"[^>]*duration="1"/.test(coordinatorXml) || !/<Timer\s+id="watchStatePump"[^>]*repeat="false"/.test(coordinatorXml)) {
+        err('LibraryWriteCoordinator.xml must declare a one-shot, one-tick watchStatePump timer');
+    }
+    const pump = body(coordinatorCode, 'Pump');
+    if (!/if m\.pushing then return/.test(pump) || !/NextWrite\(\)/.test(pump) || !/AsyncTask_Launch\(m\.top,\s*"LibraryPutTask"/.test(pump)) {
+        err('LibraryWriteCoordinator.Pump must serialize LibraryPutTask launches through the single-flight guard and NextWrite');
+    }
+    if (!/packet\s*=\s*m\.pendingWatchState\b/.test(body(coordinatorCode, 'NextWrite'))) {
+        err('LibraryWriteCoordinator.NextWrite must build the deferred packet from its own pending slot');
+    }
+    if (!/m\.libraryWriteCoordinator\.callFunc\("SetStoreHost",\s*m\.storeHost\)/.test(sceneCode) || !/<function\s+name="SetStoreHost"\s*\/>/.test(coordinatorXml)) {
+        err('MainScene must hand the StoreHost NODE to LibraryWriteCoordinator through its declared setup function');
+    }
+    for (const [handlerName, screenField, method] of [
+        ['onLibraryChange', 'm.detailsScreen.libraryChange', 'OnLibraryChange'],
+        ['onWatchedChange', 'm.episodesScreen.watchedChange', 'OnWatchedChange']
+    ]) {
+        const forwarded = body(sceneCode, handlerName);
+        if (!forwarded.includes(screenField) || !forwarded.includes(`callFunc("${method}"`)) {
+            err(`MainScene.${handlerName} must forward ${screenField} to LibraryWriteCoordinator.${method}`);
         }
-        if (!/m\.watchStatePump\s*=\s*invalid[\s\S]{0,200}?PumpLibraryWrites\(\)/.test(schedule)) {
-            err('MainScene.brs ScheduleWatchStatePush has no inline fallback when the timer is missing — a wiring mistake would drop the user\'s watch state instead of pushing it');
-        }
-    }
-    if (!/PumpLibraryWrites\(\)/.test(body('onWatchStatePumpFire') || '')) {
-        err('MainScene.brs onWatchStatePumpFire does not pump — the deferral would resolve to nothing');
-    }
-    if (!/m\.watchStatePump\.ObserveField\(\s*"fire"\s*,\s*"onWatchStatePumpFire"\s*\)/.test(brs)) {
-        err('MainScene.brs never observes the watchStatePump timer\'s fire field — the deferred push would never run');
-    }
-    if (!/<Timer\s+id="watchStatePump"[^>]*duration="1"/.test(xml)) {
-        err('MainScene.xml has no <Timer id="watchStatePump" duration="1" ... /> — a FindNode miss means the deferral silently degrades to the inline push that froze the player');
-    }
-    if (!/<Timer\s+id="watchStatePump"[^>]*repeat="false"/.test(xml)) {
-        err('MainScene.xml watchStatePump must be repeat="false" — a repeating one-shot pump would re-run forever and keep launching workers');
     }
 
-    // 3. The deferred pump must carry the packet across the gap on state THIS
-    //    scene owns, never on the player node: by the time a deferred pump
-    //    runs, a Back-out may already have popped and destroyed the player.
-    if (!/callFunc\(\s*"WatchLatest"\s*\)/.test(handler)) {
-        err('MainScene.brs onWatchStateUpdate no longer reads the packet out of the shared watch buffer via WatchLatest() — the whole point of the buffer is that it outlives the player node that published it');
-    }
-    if (!/NextLibraryWrite\(\)/.test(body('PumpLibraryWrites') || '')) {
-        err('MainScene.brs PumpLibraryWrites does not drain the pending edits through NextLibraryWrite — the three write-back kinds would have no single build path');
-    }
-    if (!/packet\s*=\s*m\.pendingWatchState\b/.test(body('NextLibraryWrite') || '')) {
-        err('MainScene.brs NextLibraryWrite no longer takes its packet from m.pendingWatchState — a deferred pump cannot re-read the player node, it can only use the slot the handler left it');
-    }
-
-    // 4. The publisher itself must stay trivial. It runs on the Video observer's
-    //    stack, so every line of it is a candidate for the same wedge.
+    // The publisher itself stays trivial: it runs inside the Video observer.
     const publish = /sub PublishWatchState\(\)[\s\S]*?\nend sub/.exec(code(player));
     if (!publish) {
         err('PlayerScreen.brs has no PublishWatchState');
     } else {
         for (const forbidden of ['CreateObject', 'AppendChild', 'AsyncTask_Launch', 'Wait(']) {
             if (new RegExp(`\\b${forbidden.replace('(', '\\(')}`).test(publish[0])) {
-                err(`PlayerScreen.brs PublishWatchState calls ${forbidden} — it runs inside the Video "state" observer, where anything but a local field write is what froze the player`);
+                err(`PlayerScreen.brs PublishWatchState calls ${forbidden} — it runs inside the Video state observer`);
             }
         }
         if (!/m\.top\.watchStateUpdate\s*=/.test(publish[0])) {
-            err('PlayerScreen.brs PublishWatchState no longer publishes through the watchStateUpdate field — MainScene\'s deferred pump is fed by that write');
+            err('PlayerScreen.brs PublishWatchState no longer publishes through watchStateUpdate');
         }
     }
-
     return ok;
 }
 
@@ -5823,7 +5842,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkDeviceCapContract() || !checkCodecPlaybackContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkStopSignalContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkLibraryPutTaskContract() || !checkAddonsWriteTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkSettingsSectionsContract() || !checkTorrentProfileContract() || !checkCacheSizeContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract() || !checkMetaFieldCoercionContract() || !checkStringOfContract() || !checkI18nContract() || !checkNoUntranslatedLiterals() || !checkEpisodeSeriesBatchContract() || !checkStoreAddonValueContract() || !checkAddonJsonContract() || !checkSubtitlePlayGateContract() || !checkPreVideoIndicatorContract() || !checkPreVideoWaitLabelContract() || !checkNativeBufferingSuppressionContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkDeviceCapContract() || !checkCodecPlaybackContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkHomeCatalogResultsAreIncremental() || !checkStopSignalContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkLibraryPutTaskContract() || !checkAddonsWriteTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkSettingsSectionsContract() || !checkTorrentProfileContract() || !checkCacheSizeContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract() || !checkMetaFieldCoercionContract() || !checkStringOfContract() || !checkI18nContract() || !checkNoUntranslatedLiterals() || !checkEpisodeSeriesBatchContract() || !checkStoreAddonValueContract() || !checkAddonJsonContract() || !checkSubtitlePlayGateContract() || !checkPreVideoIndicatorContract() || !checkPreVideoWaitLabelContract() || !checkNativeBufferingSuppressionContract()) {
         process.exit(1);
     }
 
