@@ -1,6 +1,6 @@
 ' HomeCatalogsTask — walk every installed add-on's catalogs off the UI thread.
 ' Manifests are resolved here where the registry has none (built-ins), each
-' browsable catalog is fetched, and the growing row set is republished after
+' browsable catalog is fetched, and each new row is published on its own after
 ' every completion so the Home grid fills in one row at a time instead of after
 ' the whole catalog set has downloaded. Running inside a Task means a hung
 ' add-on costs the worker thread, not a frozen channel. The store is built
@@ -31,24 +31,33 @@ sub load()
                     if CatalogBrowsable(descriptor)
                         response = catalog.Catalog(addon.address, descriptor.type, descriptor.id)
                         if response.ok and response.metas <> invalid and response.metas.Count() > 0
-                            rows.Push({
+                            row = {
                                 index: index
                                 addonAddress: addon.address
                                 title: CatalogTitle(descriptor, addon)
                                 metaType: descriptor.type
                                 metas: response.metas
-                            })
+                            }
+                            rows.Push(row)
                             index = index + 1
-                            m.top.result = { rows: rows, done: false }
+                            ' Publish only the new row, not the whole set. Every
+                            ' assignment deep-copies its value onto the render
+                            ' thread, so republishing the growing set made each
+                            ' update cost more than the last; with many add-ons
+                            ' that tripped the render thread's execution timeout
+                            ' (runtime error &h23 in PaintTileFields) and Roku
+                            ' killed the channel. HomeScreen applies rows by
+                            ' index, so a one-row delta lands in the same slot.
+                            m.top.result = { rows: [row], done: false }
                         end if
                     end if
                 end for
             end if
         end for
 
-        m.top.result = { rows: rows, done: true }
+        m.top.result = { rows: [], done: true }
     catch e
-        m.top.result = { rows: rows, done: true, error: e.message }
+        m.top.result = { rows: [], done: true, error: e.message }
     end try
 end sub
 

@@ -659,6 +659,19 @@ sub onStreamSelected()
     serverAddress = ""
     if m.stores <> invalid then serverAddress = m.stores.settings.callFunc("SettingsGetServerAddress")
 
+    ' m.params.position is the resume point from when this list was opened. If
+    ' the viewer played a stream, it froze, and they came back to pick another
+    ' one, the player has saved a newer point since: use it, whichever stream
+    ' wrote it, so every source picks up where the last one stopped.
+    position = m.params.position
+    if m.stores <> invalid and m.params.metaId <> invalid and m.params.videoId <> invalid
+        saved = m.stores.library.callFunc("LibraryResumeFor", m.params.metaId)
+        if saved <> invalid and saved.videoId = m.params.videoId and saved.position <> invalid and saved.position > 0
+            print "[resume] stream pick: list opened at pos=" ; position ; ", library has pos=" ; saved.position ; " for " ; m.params.videoId ; " — using library"
+            position = saved.position
+        end if
+    end if
+
     m.top.pushRequest = {
         screen: "playerScreen"
         params: {
@@ -669,7 +682,7 @@ sub onStreamSelected()
             videoId: m.params.videoId
             season: m.params.season
             episode: m.params.episode
-            position: m.params.position
+            position: position
             name: m.headTitle.text
             poster: m.params.poster
             posterShape: m.params.posterShape

@@ -117,6 +117,11 @@ sub init()
     ' bounded.
     m.subtitleHoldMaxTicks = 12
     if m.playTimer <> invalid then m.playTimer.ObserveField("fire", "onPlayKickFire")
+    m.stallWatch = m.top.FindNode("stallWatch")
+    if m.stallWatch <> invalid then m.stallWatch.ObserveField("fire", "onStallWatch")
+    m.recoverKick = m.top.FindNode("recoverKick")
+    if m.recoverKick <> invalid then m.recoverKick.ObserveField("fire", "onRecoverKick")
+    ResetRecovery()
 end sub
 
 function OnEnter(params as object) as void
@@ -1213,6 +1218,11 @@ end sub
 sub StartPlayback(url as string, streamFormat = "" as string)
     m.playArmed = false
     CreateVideo()
+    ResetRecovery()
+    if m.stallWatch <> invalid
+        m.stallWatch.control = "stop"
+        m.stallWatch.control = "start"
+    end if
 
     content = CreateObject("roSGNode", "ContentNode")
     content.url = url
@@ -1324,6 +1334,16 @@ sub onVideoStateChanged()
         m.hasPlayed = true
         m.status.text = ""
         HideBuffering()
+    else if state = "error" and m.hasPlayed = true and not NotPlayableOnDevice() and m.recoverCount < STALL_MAX_RECOVERIES()
+        ' Mid-play failure of a stream that was already playing: almost always
+        ' the connection to the host dropping. Reopen at the last good position
+        ' instead of leaving a dead player on screen.
+        LogVideoError()
+        TryRecover("error")
+    else if state = "finished" and EndedEarly()
+        ' The host closed the connection and the platform read that as the end
+        ' of the file. Treat it like a drop, not a real ending.
+        TryRecover("early-finish")
     else if state = "error"
         ' Show the platform's error code on the status line; the diagnosis itself
         ' (category/errcode/dbgmsg) is printed by LogVideoError below. The status
@@ -1498,6 +1518,9 @@ sub ResetVideoNode()
     ' anyway — that is onVideoStateChanged's "The player could not start." — but
     ' it must not also inherit stale text on the way there.
     m.status.text = ""
+    if m.stallWatch <> invalid then m.stallWatch.control = "stop"
+    if m.recoverKick <> invalid then m.recoverKick.control = "stop"
+    ResetRecovery()
     if m.video = invalid then return
     m.video.control = "stop"
     m.video.content = invalid
@@ -1555,6 +1578,16 @@ sub SavePosition()
     duration = m.video.duration
     if position = invalid then position = 0
     if duration = invalid then duration = 0
+    ' A player that errored, ended early or was reset can report 0 (or junk)
+    ' for position. The watchdog's last position that actually played is the
+    ' honest resume point there, so a freeze is never saved as "start over".
+    nodeState = m.video.state
+    if m.lastGoodPos <> invalid and m.lastGoodPos > 0
+        if position <= 0 or nodeState = "error" or (nodeState = "finished" and EndedEarly())
+            print "[resume] node pos=" ; position ; " state=" ; nodeState ; " — saving lastGoodPos=" ; m.lastGoodPos ; " instead"
+            position = m.lastGoodPos
+        end if
+    end if
 
     season = 0
     if params.season <> invalid then season = params.season
@@ -1619,4 +1652,186 @@ sub PublishWatchState()
     ' it reads.
     m.stores.watch.callFunc("WatchRecord", packet)
     m.top.watchStateUpdate = packet
+end sub
+
+' ---------------------------------------------------------------------------
+' Stall recovery.
+'
+' Long streams (debrid links especially) can lose their connection mid-play.
+' The platform then sits buffering forever, reports "error", or reads the
+' closed connection as "finished" well before the real end. Seeking re-opens
+' the stream and it plays on fine, so this does that automatically: a 1s
+' watchdog notes the last position that actually advanced, and on a stall,
+' a mid-play error or an early finish, the same content is re-opened a few
+' seconds before that position. Bounded so a stream that is really gone ends
+' with a message instead of looping.
+' ---------------------------------------------------------------------------
+
+' Seconds without progress while playing/buffering before we reopen.
+function STALL_SECONDS() as integer
+    return 20
+end function
+
+' Reopen attempts before giving up. The count resets after a stretch of
+' healthy playback, so a long film can survive several separate drops.
+function STALL_MAX_RECOVERIES() as integer
+    return 5
+end function
+
+' Healthy playback (seconds) that clears the attempt count.
+function STALL_HEALTHY_RESET_SECONDS() as integer
+    return 120
+end function
+
+sub ResetRecovery()
+    m.lastGoodPos = 0
+    m.lastSeenPos = -1
+    m.lastProgressAt = UpTime(0)
+    m.recoverCount = 0
+    m.recovering = false
+    m.healthySince = UpTime(0)
+    m.lastCheckpointAt = UpTime(0)
+end sub
+
+' How often the resume point is written while a video plays.
+function CHECKPOINT_SECONDS() as integer
+    return 30
+end function
+
+' Write the resume point mid-play. SavePosition only runs on the way out, so
+' a freeze that ends with Roku killing the channel, or a stream abandoned from
+' the stream list, used to leave the old resume point behind. Local write only:
+' the account push still happens once, on exit, via SavePosition.
+sub Checkpoint(position as dynamic)
+    if m.stores = invalid or m.playParams = invalid or m.playParams.videoId = invalid then return
+    if position = invalid or position <= 0 then return
+    params = m.playParams
+    metaType = params.metaType
+    if metaType = invalid then metaType = ""
+    if m.stores.library.callFunc("LibraryIsChannelType", metaType) then return
+    duration = m.video.duration
+    if duration = invalid then duration = 0
+    season = 0
+    if params.season <> invalid then season = params.season
+    episode = 0
+    if params.episode <> invalid then episode = params.episode
+    name = ""
+    if params.name <> invalid then name = params.name
+    poster = ""
+    if params.poster <> invalid then poster = params.poster
+    posterShape = ""
+    if params.posterShape <> invalid then posterShape = params.posterShape
+    metaId = ""
+    if params.metaId <> invalid then metaId = params.metaId
+    m.stores.library.callFunc("LibrarySetPosition", params.videoId, metaId, metaType, season, episode, name, poster, Int(position), Int(duration), posterShape)
+end sub
+
+' "finished" with more than a minute of a known duration left is a dropped
+' connection, not the end of the video.
+function EndedEarly() as boolean
+    if m.video = invalid then return false
+    if m.hasPlayed <> true then return false
+    duration = m.video.duration
+    if duration = invalid or duration <= 0 then return false
+    return m.lastGoodPos > 0 and m.lastGoodPos < duration - 60
+end function
+
+sub onStallWatch()
+    if m.video = invalid or m.recovering then return
+    if m.hasPlayed <> true then return
+    state = m.video.state
+    curPos = m.video.position
+    if curPos = invalid then curPos = 0
+    now = UpTime(0)
+
+    if curPos <> m.lastSeenPos
+        ' Any movement counts, including a seek backwards by the viewer.
+        m.lastSeenPos = curPos
+        m.lastProgressAt = now
+        if state = "playing" then m.lastGoodPos = curPos
+    end if
+
+    if state = "paused" or state = "stopped" or state = "finished" or state = "error"
+        ' A viewer pause is not a stall; neither is a terminal state (those are
+        ' handled by onVideoStateChanged).
+        m.lastProgressAt = now
+        m.healthySince = now
+        return
+    end if
+
+    if state = "playing" and now - m.lastCheckpointAt >= CHECKPOINT_SECONDS()
+        m.lastCheckpointAt = now
+        Checkpoint(curPos)
+    end if
+
+    if state = "playing" and m.recoverCount > 0 and now - m.healthySince >= STALL_HEALTHY_RESET_SECONDS()
+        print "[recover] healthy for " ; STALL_HEALTHY_RESET_SECONDS() ; "s at pos=" ; curPos ; " — attempts reset (was " ; m.recoverCount ; ")"
+        m.recoverCount = 0
+    end if
+
+    stalledFor = now - m.lastProgressAt
+    if stalledFor >= STALL_SECONDS()
+        print "[recover] stall detected: state=" ; state ; " pos=" ; curPos ; " no progress for " ; Int(stalledFor) ; "s buffering=" ; FormatJson(m.video.bufferingStatus)
+        TryRecover("stall-" + state)
+    end if
+end sub
+
+sub TryRecover(reason as string)
+    if m.video = invalid or m.recovering then return
+    content = m.video.content
+    if content = invalid
+        print "[recover] " ; reason ; " — no content on the node, cannot reopen"
+        return
+    end if
+    if m.recoverCount >= STALL_MAX_RECOVERIES()
+        print "[recover] " ; reason ; " — giving up after " ; m.recoverCount ; " attempts at pos=" ; m.lastGoodPos
+        m.status.text = Lang("player", "streamKeptDropping")
+        HideBuffering()
+        if m.stallWatch <> invalid then m.stallWatch.control = "stop"
+        return
+    end if
+
+    m.recovering = true
+    m.recoverCount = m.recoverCount + 1
+    m.healthySince = UpTime(0)
+    ' After a viewer seek the node reports the seek target while it buffers, so
+    ' a stall there resumes from the target, not from before the seek. A
+    ' finished/error node's position is not trusted.
+    base = m.lastGoodPos
+    if Left(reason, 5) = "stall" and m.video.position <> invalid and m.video.position > base then base = m.video.position
+    resumeAt = base - 3
+    if resumeAt < 0 then resumeAt = 0
+    print "[recover] " ; reason ; " — attempt " ; m.recoverCount ; "/" ; STALL_MAX_RECOVERIES() ; " lastGoodPos=" ; m.lastGoodPos ; " nodePos=" ; m.video.position ; " resumeAt=" ; resumeAt ; " dur=" ; m.video.duration ; " up=" ; UpTime(0)
+    ShowToast(Lang("player", "reconnecting"))
+
+    ' A fresh copy of the same ContentNode (url, format, subtitle tracks) so the
+    ' platform treats it as a new open rather than a no-op re-assign.
+    reopened = invalid
+    try
+        reopened = content.Clone(true)
+    catch e
+        print "[recover] clone failed (" ; e.message ; "), reusing the node"
+    end try
+    if reopened = invalid then reopened = content
+    reopened.playStart = resumeAt
+
+    m.video.control = "stop"
+    m.video.content = reopened
+    ' Same reason StartPlayback defers play by a tick: content and control in
+    ' one tick can race.
+    if m.recoverKick <> invalid
+        m.recoverKick.control = "stop"
+        m.recoverKick.control = "start"
+    else
+        onRecoverKick()
+    end if
+end sub
+
+sub onRecoverKick()
+    if m.video = invalid then return
+    print "[recover] play from " ; m.video.content.playStart ; " up=" ; UpTime(0)
+    m.lastProgressAt = UpTime(0)
+    m.lastSeenPos = -1
+    m.video.control = "play"
+    m.recovering = false
 end sub

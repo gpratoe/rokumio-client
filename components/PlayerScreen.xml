@@ -127,5 +127,12 @@
              asks it to play from separate ticks, and this is the boundary. See
              StartPlayback for why the same tick is not good enough. -->
         <Timer id="playKick" duration="0.25" repeat="false" />
+
+        <!-- Stall recovery (see the "Stall recovery" section of PlayerScreen.brs):
+             stallWatch is the 1s progress watchdog, armed by StartPlayback;
+             recoverKick defers the reopened stream's play by a tick, the same
+             way playKick does for the first play. -->
+        <Timer id="stallWatch" duration="1" repeat="true" />
+        <Timer id="recoverKick" duration="0.5" repeat="false" />
     </children>
 </component>
