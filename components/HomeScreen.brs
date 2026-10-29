@@ -127,7 +127,11 @@ sub onCatalogState(event as object)
     if m.catalogRowsBuilt then return
     state = event.GetData()
     if state = invalid then return
-    if state.row <> invalid and state.row.index = m.catalogRows.Count() then ApplyCatalogRow(state.row)
+    ' >= rather than =: a lost or coalesced result message must not wedge the
+    ' walk — with an exact match, one missed row would fail the check forever
+    ' and silently truncate the grid. ApplyCatalogRow slots by row.index, so a
+    ' gapped arrival still lands every later row in its deterministic slot.
+    if state.row <> invalid and state.row.index >= m.catalogRows.Count() then ApplyCatalogRow(state.row)
     if state.done = true then FinishCatalogLoad()
 end sub
 
