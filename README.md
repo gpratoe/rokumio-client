@@ -68,6 +68,10 @@ The build uses BrighterScript (`bsc`) and emits a sideloadable package at
 1. Put the Roku in **[Developer Mode](https://developer.roku.com/dev/docs/developer-setup)**.
 2. **[Sideload the package](https://developer.roku.com/dev/docs/developer-setup#sideloading-apps)**
 
+## Get it from the store
+
+**[Rokumio - Channel store](https://channelstore.roku.com/details/7a7aa68278a6fe01c9b7d7af642b559e:3ddffcc2be935081130c821e0f41cb24/rokumio)**
+
 ## Project layout
 
 ```
