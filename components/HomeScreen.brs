@@ -120,16 +120,18 @@ sub EnsureCurrentRows()
     RebuildRows()
 end sub
 
-' Rows arrive as full result snapshots ({ rows, done }); apply only what is not
-' on the grid yet. The task assigns each row a stable index, so the slot is
+' Each result carries one completed row ({ row, done: false }) or the final
+' completion marker. The task assigns each row a stable index, so the slot is
 ' cwOffset + index whether the Continue Watching row is present or not.
 sub onCatalogState(event as object)
     if m.catalogRowsBuilt then return
     state = event.GetData()
-    if state = invalid or state.rows = invalid or Type(state.rows) <> "roArray" then return
-    for each row in state.rows
-        if row.index >= m.catalogRows.Count() then ApplyCatalogRow(row)
-    end for
+    if state = invalid then return
+    ' >= rather than =: a lost or coalesced result message must not wedge the
+    ' walk — with an exact match, one missed row would fail the check forever
+    ' and silently truncate the grid. ApplyCatalogRow slots by row.index, so a
+    ' gapped arrival still lands every later row in its deterministic slot.
+    if state.row <> invalid and state.row.index >= m.catalogRows.Count() then ApplyCatalogRow(state.row)
     if state.done = true then FinishCatalogLoad()
 end sub
 

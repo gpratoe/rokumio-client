@@ -20,10 +20,22 @@
              import is already running so the page can answer 409. Shares the
              single import slot with HandleDeepLink via BeginImport. -->
         <function name="ImportFromSetup" />
+        <!-- ImportCoordinator returns successful install records through the
+             same account gateway as AddonsScreen and hands its summary here. -->
+        <function name="ImportRegisterAddon" />
+        <function name="ImportFinished" />
+        <!-- AccountSyncCoordinator returns fetched data here; MainScene keeps
+             screen adoption and session navigation at the Scene boundary. -->
+        <function name="AdoptAddonSyncResult" />
+        <function name="ApplyLibrarySyncResult" />
+        <function name="ClearAddonSyncFaults" />
+        <function name="ReportAddonSyncFault" />
         <!-- A screen whose store bind came up short reports the failing hop
              here (Screen.brs's SetStores) and the Scene paints it, so a broken
              store layer can never be mistaken for an empty catalog. -->
         <function name="ReportStoreFault" />
+        <function name="ReportAddonWriteFault" />
+        <function name="HandleRevokedSession" />
     </interface>
 
     <!-- Core + stores are declared here and inherited by the whole subtree, so
@@ -75,12 +87,23 @@
             <PlayerScreen id="playerScreen" visible="false" />
         </Group>
 
-        <!-- One tick of delay between the player reporting a position and the
-             write-back worker being created. The report arrives from inside the
-             player's Video "state" observer, and building a Task node on that
-             stack wedges playback; see ScheduleWatchStatePush in MainScene.brs.
-             One-shot and restarted per publish, so a burst of position reports
-             coalesces into a single launch. -->
-        <Timer id="watchStatePump" duration="1" repeat="false" />
+        <!-- Sticky store faults and short-lived sync warnings. The strip owns
+             its display nodes, state and dismissal timer; MainScene forwards
+             the reporting interface screens already use. -->
+        <FaultStrip id="faultStrip" />
+
+        <!-- Single-flight whole-account collection replacement. -->
+        <AddonWriteCoordinator id="addonWriteCoordinator" />
+
+        <!-- Shared sequential install pipeline for deep links and the setup
+             page; MainScene owns the resulting dialogs and screen refreshes. -->
+        <ImportCoordinator id="importCoordinator" />
+
+        <!-- Serializes launch-time account pulls and owns both Task lifecycles. -->
+        <AccountSyncCoordinator id="accountSyncCoordinator" />
+
+        <!-- The serialized account-library write path owns its pending slots,
+             one-shot player deferral timer, and LibraryPutTask lifecycle. -->
+        <LibraryWriteCoordinator id="libraryWriteCoordinator" />
     </children>
 </component>

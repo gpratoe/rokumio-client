@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="ImportCoordinator" extends="Group">
+    <interface>
+        <function name="SetScene" />
+        <function name="IsBusy" />
+        <function name="StartImport" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/ImportCoordinator.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+</component>

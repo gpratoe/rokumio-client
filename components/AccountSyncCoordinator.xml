@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="AccountSyncCoordinator" extends="Group">
+    <interface>
+        <function name="SetDependencies" />
+        <function name="StartAddonSync" />
+        <function name="StartLibrarySync" />
+        <function name="CancelPendingLibrarySync" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/AccountSyncCoordinator.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+</component>

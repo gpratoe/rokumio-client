@@ -164,7 +164,10 @@ class StremioApiStore
         if m.authKey = invalid or m.authKey = ""
             return { ok: true, error: "" }
         end if
-        res = m.Post("/api/logout", { type: "Logout", authKey: m.authKey })
+        ' The endpoint path identifies the operation. The official Stremio API
+        ' client sends only authKey here; adding a type tag is not part of the
+        ' logout wire contract.
+        res = m.Post("/api/logout", { authKey: m.authKey })
         if m.Success(res)
             return { ok: true, error: "" }
         end if

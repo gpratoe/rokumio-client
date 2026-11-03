@@ -1,18 +1,16 @@
 ' HomeCatalogsTask — walk every installed add-on's catalogs off the UI thread.
-' Manifests are resolved here where the registry has none (built-ins), each
-' browsable catalog is fetched, and each new row is published on its own after
-' every completion so the Home grid fills in one row at a time instead of after
-' the whole catalog set has downloaded. Running inside a Task means a hung
-' add-on costs the worker thread, not a frozen channel. The store is built
-' fresh in the task scope; only plain { address, catalogs } descriptors cross
-' the thread boundary from HomeScreen.
+' Manifests are resolved here where the registry has none (built-ins), and each
+' browsable catalog is fetched. One completed catalog is published per result
+' notification; the Task never republishes all previous rows. That keeps
+' cross-thread copies proportional to the catalogs fetched, while Home fills
+' progressively. A hung add-on costs the worker thread, not a frozen channel.
+' Only plain { address, catalogs } descriptors cross in from HomeScreen.
 
 sub init()
     m.top.functionName = "load"
 end sub
 
 sub load()
-    rows = []
     try
         http = Transport()
         catalog = CatalogStore(http)
@@ -38,26 +36,17 @@ sub load()
                                 metaType: descriptor.type
                                 metas: response.metas
                             }
-                            rows.Push(row)
                             index = index + 1
-                            ' Publish only the new row, not the whole set. Every
-                            ' assignment deep-copies its value onto the render
-                            ' thread, so republishing the growing set made each
-                            ' update cost more than the last; with many add-ons
-                            ' that tripped the render thread's execution timeout
-                            ' (runtime error &h23 in PaintTileFields) and Roku
-                            ' killed the channel. HomeScreen applies rows by
-                            ' index, so a one-row delta lands in the same slot.
-                            m.top.result = { rows: [row], done: false }
+                            m.top.result = { row: row, done: false }
                         end if
                     end if
                 end for
             end if
         end for
 
-        m.top.result = { rows: [], done: true }
+        m.top.result = { done: true }
     catch e
-        m.top.result = { rows: [], done: true, error: e.message }
+        m.top.result = { done: true, error: e.message }
     end try
 end sub
 
