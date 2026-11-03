@@ -3,6 +3,13 @@
 ' add-on's HTTP API (Cinemeta and friends). Search is the add-on's search
 ' catalog for one type: /catalog/{type}/top/search={query}.json.
 
+' Most metas a single catalog page may carry. Stremio catalogs page at ~50-100
+' metas, but some add-ons ignore paging and return their whole library in one
+' response (one real add-on sent 13,159 metas / 2.6 MB). Home builds a tile
+' node per meta on the render thread, so an uncapped page froze the channel
+' until Roku killed it (EXIT_SYSTEM_KILL).
+const CATALOG_MAX_METAS = 100
+
 class CatalogStore
     transport as object
 
@@ -101,6 +108,18 @@ class CatalogStore
             return result
         end if
 
+        ' An add-on that overflows the cap is not paging, so the trimmed page is
+        ' also the last one: asking for skip=N would get the same dump again.
+        capped = false
+        if metas.Count() > CATALOG_MAX_METAS
+            capped = true
+            trimmed = []
+            for i = 0 to CATALOG_MAX_METAS - 1
+                trimmed.Push(metas[i])
+            end for
+            metas = trimmed
+        end if
+
         ' Each row is a meta the grid paints and the Details screen re-reads, so
         ' the boundary pass runs here too — a numeric imdbRating in a catalog row
         ' is the same Cinemeta payload that took Details down from the meta
@@ -111,7 +130,7 @@ class CatalogStore
         ' Explicit boolean read of the server's flag — the chained
         ' `result.hasMore = response.json.hasMore = true` idiom is unambiguous
         ' to mishandle (it IS a comparison), so state it plainly.
-        result.hasMore = (response.json.hasMore = true)
+        result.hasMore = (response.json.hasMore = true) and not capped
         result.ok = true
         return result
     end function

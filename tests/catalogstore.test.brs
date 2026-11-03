@@ -382,3 +382,53 @@ sub Test_Catalog_ManifestRejectsNonTextIdentity()
     store = CatalogStore(ScriptedTransport(textIdentity))
     Harness_Ok(store.Manifest("https://addon.example.com").ok, "text identity still accepted")
 end sub
+sub Test_Catalog_CapsOversizedPage()
+    Harness_Suite("CatalogStore caps a catalog page that ignores paging")
+    address = "https://whole-library.example"
+    metas = []
+    for i = 1 to 13159
+        metas.Push({ id: "tt" + i.ToStr(), type: "movie", name: "Movie " + i.ToStr() })
+    end for
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/all/skip=0.json"
+            ok: true
+            status: 200
+            json: { metas: metas, hasMore: true }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "movie", "all")
+
+    Harness_Ok(result.ok, "oversized page still loads")
+    Harness_Equal(result.metas.Count(), 100, "page trimmed to CATALOG_MAX_METAS")
+    Harness_Equal(result.metas[0].id, "tt1", "trim keeps the add-on's own order")
+    Harness_Equal(result.metas[99].id, "tt100", "trim keeps the first page")
+    Harness_Equal(result.hasMore, false, "a capped page stops pagination even if the server says hasMore")
+end sub
+
+sub Test_Catalog_KeepsPageAtCap()
+    Harness_Suite("CatalogStore leaves a page at the cap untouched")
+    address = "https://v3-cinemeta.strem.io"
+    metas = []
+    for i = 1 to 100
+        metas.Push({ id: "tt" + i.ToStr(), type: "movie", name: "Movie " + i.ToStr() })
+    end for
+    script = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/skip=0.json"
+            ok: true
+            status: 200
+            json: { metas: metas, hasMore: true }
+            error: ""
+        }
+    ]
+    store = CatalogStore(ScriptedTransport(script))
+    result = store.Catalog(address, "movie", "top")
+
+    Harness_Equal(result.metas.Count(), 100, "full page kept")
+    Harness_Equal(result.hasMore, true, "a well-behaved page keeps pagination")
+end sub
