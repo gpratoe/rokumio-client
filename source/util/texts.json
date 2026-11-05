@@ -202,15 +202,7 @@
       "noStreamsForTitle": "No streams found for this title.",
       "noStreamsForProvider": "No streams found for this provider.",
       "loadingStreams": "Loading streams…",
-      "streamFallback": "Stream",
-      "videoCodecSupported": "Video codec: supported",
-      "videoCodecUnsupported": "Video codec: may fail",
-      "videoCodecPartial": "Video: mixed codec hints",
-      "videoCodecUnknown": "Video codec: unknown",
-      "audioCodecSupported": "Audio codec: supported",
-      "audioCodecUnsupported": "Audio codec: may fail",
-      "audioCodecPartial": "Audio: some tracks may fail",
-      "audioCodecUnknown": "Audio codec: unknown"
+      "streamFallback": "Stream"
     },
     "player": {
       "sourceUnavailable": "This source is poorly available or your internet connection is not fast enough.",
@@ -475,15 +467,7 @@
       "noStreamsForTitle": "No se encontraron streams para este título.",
       "noStreamsForProvider": "No se encontraron streams para este proveedor.",
       "loadingStreams": "Cargando streams…",
-      "streamFallback": "Stream",
-      "videoCodecSupported": "Vídeo: códec compatible",
-      "videoCodecUnsupported": "Vídeo: códec puede fallar",
-      "videoCodecPartial": "Vídeo: indicios mixtos",
-      "videoCodecUnknown": "Vídeo: códec desconocido",
-      "audioCodecSupported": "Audio: códec compatible",
-      "audioCodecUnsupported": "Audio: códec puede fallar",
-      "audioCodecPartial": "Audio: algunas pistas fallan",
-      "audioCodecUnknown": "Audio: códec desconocido"
+      "streamFallback": "Stream"
     },
     "player": {
       "sourceUnavailable": "Esta fuente está poco disponible o tu conexión a internet no es lo bastante rápida.",

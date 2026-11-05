@@ -3868,10 +3868,10 @@ function checkDirectPlayContract() {
     if (!/CodecProbeVideo\(di,\s*candidate,\s*false\)/.test(capsTask) || !/CodecProbeAudio\(di,\s*candidate\)/.test(capsTask)) {
         err('DirectPlayCapsTask must use the shared video/audio capability probes');
     }
-    if (!/DirectPlayClassifyHints\(hint,\s*m\.directPlayCapabilities\)/.test(screen) || !/item\.videoCompatibilityState\s*=/.test(screen) || !/item\.audioCompatibilityState\s*=/.test(screen) || !/item\.videoCompatibilityLabel\s*=/.test(screen) || !/item\.audioCompatibilityLabel\s*=/.test(screen)) {
-        err('StreamsScreen must attach separate video/audio compatibility states and localized labels to each stream card');
+    if (!/DirectPlayClassifyHints\(hint,\s*m\.directPlayCapabilities\)/.test(screen) || !/item\.videoCompatibilityState\s*=/.test(screen) || !/item\.audioCompatibilityState\s*=/.test(screen)) {
+        err('StreamsScreen must attach separate video/audio compatibility states to each stream card');
     }
-    if (!/row\.CreateChild\("TileContent"\)/.test(screen) || !/<field\s+id="videoCompatibilityState"\s+type="string"/.test(tileContentXml) || !/<field\s+id="audioCompatibilityState"\s+type="string"/.test(tileContentXml) || !/<field\s+id="videoCompatibilityLabel"\s+type="string"/.test(tileContentXml) || !/<field\s+id="audioCompatibilityLabel"\s+type="string"/.test(tileContentXml)) {
+    if (!/row\.CreateChild\("TileContent"\)/.test(screen) || !/<field\s+id="videoCompatibilityState"\s+type="string"/.test(tileContentXml) || !/<field\s+id="audioCompatibilityState"\s+type="string"/.test(tileContentXml)) {
         err('Stream compatibility metadata must use TileContent fields so Roku forwards it across the RowList boundary');
     }
     if (!/url\.Trim\(\)\s*=\s*""\s+then\s+return hints/.test(detector) || !/if\s+hints\.isDirect\s*<>\s*true[\s\S]*?result\.videoState\s*=\s*"server"[\s\S]*?result\.audioState\s*=\s*"server"/.test(detector) || !/behaviorHints\.filename/.test(detector) || !/DirectPlayUrlHintText\(url\)/.test(detector) || !/carriesFilename/.test(detector)) {
@@ -3890,8 +3890,8 @@ function checkDirectPlayContract() {
     if (!streamEnter || !/if\s+params\s*=\s*invalid[\s\S]*?RestoreFocus\(\)\s+return/.test(streamEnter[0])) {
         err('StreamsScreen must restore its current provider on the player return path without starting a fresh stream fetch');
     }
-    if (!/id="playabilityBadge"/.test(tileXml) || !/UpdatePlayabilityBadge\(\)/.test(tile) || !/videoState\s*=\s*"server"/.test(tile)) {
-        err('StreamTile must show the compatibility badge for direct links and hide it for server-routed streams');
+    if (!/id="playabilityBadge"/.test(tileXml) || !/id="videoCompatibilityIcon"/.test(tileXml) || !/uri="pkg:\/images\/video\.png"/.test(tileXml) || !/id="audioCompatibilityIcon"/.test(tileXml) || !/uri="pkg:\/images\/audio\.png"/.test(tileXml) || !/id="videoCompatibilityStatusIcon"/.test(tileXml) || !/id="audioCompatibilityStatusIcon"/.test(tileXml) || !/videoCompatibilityIcon\.blendColor/.test(tile) || !/audioCompatibilityIcon\.blendColor/.test(tile) || !/CompatibilityStatusIcon\(videoState\)/.test(tile) || !/CompatibilityStatusIcon\(audioState\)/.test(tile) || !/images\/some\.png/.test(tile) || !/images\/x\.png/.test(tile) || !/images\/question\.png/.test(tile) || !/UpdatePlayabilityBadge\(\)/.test(tile) || !/videoState\s*=\s*"server"/.test(tile)) {
+        err('StreamTile must show paired media/status icons, tint them by status, and hide them for server-routed streams');
     }
     return ok;
 }

@@ -21,10 +21,8 @@
         <field id="aired" type="boolean" />
         <!-- SearchScreen loading state consumed by PosterTile's spinner. -->
         <field id="loadState" type="string" />
-        <!-- StreamTile: separate direct-play codec verdicts/copy per media type. -->
+        <!-- StreamTile: separate direct-play codec verdicts per media type. -->
         <field id="videoCompatibilityState" type="string" />
         <field id="audioCompatibilityState" type="string" />
-        <field id="videoCompatibilityLabel" type="string" />
-        <field id="audioCompatibilityLabel" type="string" />
     </interface>
 </component>

@@ -558,8 +558,6 @@ sub RenderActiveProvider()
             compatibility = DirectPlayClassifyHints(hint, m.directPlayCapabilities)
             item.videoCompatibilityState = compatibility.videoState
             item.audioCompatibilityState = compatibility.audioState
-            item.videoCompatibilityLabel = CompatibilityLabel("video", compatibility.videoState)
-            item.audioCompatibilityLabel = CompatibilityLabel("audio", compatibility.audioState)
             lines = StreamTitleLines(stream)
             if lines.Count() > 0
                 description = ""
@@ -593,21 +591,6 @@ sub InvalidateProviderCards()
         provider.content = invalid
     end for
 end sub
-
-' The card owns the visual style; this screen supplies separate localized video
-' and audio copy so an audio mismatch never reads as a video failure.
-function CompatibilityLabel(kind as string, state as string) as string
-    if kind = "video"
-        if state = "supported" then return Lang("streams", "videoCodecSupported")
-        if state = "unsupported" then return Lang("streams", "videoCodecUnsupported")
-        if state = "partial" then return Lang("streams", "videoCodecPartial")
-        return Lang("streams", "videoCodecUnknown")
-    end if
-    if state = "supported" then return Lang("streams", "audioCodecSupported")
-    if state = "unsupported" then return Lang("streams", "audioCodecUnsupported")
-    if state = "partial" then return Lang("streams", "audioCodecPartial")
-    return Lang("streams", "audioCodecUnknown")
-end function
 
 ' The placeholder text for an empty active provider: its own task still running
 ' -> loading; its error -> failure; otherwise nothing found from it.
