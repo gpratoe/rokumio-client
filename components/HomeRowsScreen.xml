@@ -33,7 +33,8 @@
             translation="[80, 240]"
             numRows="6"
             itemWidth="1000"
-            rowHeight="100" />
+            rowHeight="100"
+            rowComponent="HomeCatalogRow" />
 
         <Group id="homeRowsPanel" translation="[1140, 240]">
             <Rectangle id="homeRowsPlate" width="700" height="690" />
@@ -53,6 +54,13 @@
                 vertAlign="top"
                 wrap="true"
                 font="font:SmallSystemFont" />
+            <Label
+                id="homeRowsPanelStatus"
+                translation="[40, 590]"
+                width="620"
+                height="44"
+                horizAlign="center"
+                font="font:MediumBoldSystemFont" />
         </Group>
 
         <Label

@@ -11,6 +11,7 @@ sub init()
     m.list = m.top.FindNode("homeRowsList")
     m.panelTitle = m.top.FindNode("homeRowsPanelTitle")
     m.panelBody = m.top.FindNode("homeRowsPanelBody")
+    m.panelStatus = m.top.FindNode("homeRowsPanelStatus")
 
     palette = Theme()
     m.title.color = palette.accent
@@ -21,6 +22,7 @@ sub init()
     m.panelPlate.color = palette.screenBg
     m.panelTitle.color = palette.accent
     m.panelBody.color = palette.textSecondary
+    m.panelStatus.color = palette.textSecondary
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
     m.list.ObserveField("rowItemFocused", "onRowFocused")
@@ -164,9 +166,10 @@ sub BuildRows()
     content = CreateObject("roSGNode", "ContentNode")
     for each row in m.rows
         entry = content.CreateChild("ContentNode")
-        item = entry.CreateChild("ContentNode")
-        item.title = row.title
+        item = entry.CreateChild("HomeCatalogContent")
+        item.title = CatalogRowTitle(row)
         item.description = RowDescription(row)
+        item.visibleOnHome = IsCatalogVisible(row)
     end for
     m.list.focusRow = 0
     m.list.content = content
@@ -174,10 +177,12 @@ sub BuildRows()
     if m.rows.Count() > 0 then m.list.callFunc("SetListFocus")
 end sub
 
+function CatalogRowTitle(row as object) as string
+    return row.title + " · " + row.addonName
+end function
+
 function RowDescription(row as object) as string
-    visibility = Lang("homeRows", "shown")
-    if not IsCatalogVisible(row) then visibility = Lang("homeRows", "hidden")
-    return Fill(Lang("homeRows", "rowValue"), { addon: row.addonName, visibility: visibility })
+    return VisibilityLabel(row)
 end function
 
 function IsCatalogVisible(row as object) as boolean
@@ -196,16 +201,14 @@ sub UpdatePanel()
     if m.focusedRow >= 0 and m.focusedRow < m.rows.Count()
         row = m.rows[m.focusedRow]
         m.panelTitle.text = row.title
-        m.panelBody.text = Fill(Lang("homeRows", "panelBody"), {
-            addon: row.addonName
-            type: CatalogTypeLabel(row.metaType)
-            catalogId: row.catalogId
-            visibility: VisibilityLabel(row)
-        })
+        m.panelBody.text = Fill(Lang("homeRows", "panelProvider"), { addon: row.addonName })
+        m.panelStatus.text = VisibilityLabel(row)
+        m.panelStatus.color = VisibilityColor(row)
         return
     end if
 
     m.panelTitle.text = Lang("homeRows", "emptyTitle")
+    m.panelStatus.text = ""
     if m.loading
         m.panelBody.text = Lang("homeRows", "loading")
     else if m.loadFailed
@@ -222,10 +225,10 @@ function VisibilityLabel(row as object) as string
     return Lang("homeRows", "hidden")
 end function
 
-function CatalogTypeLabel(metaType as string) as string
-    if metaType = "movie" then return Lang("common", "movies")
-    if metaType = "series" then return Lang("common", "series")
-    return metaType
+function VisibilityColor(row as object) as string
+    palette = Theme()
+    if IsCatalogVisible(row) then return palette.accent
+    return palette.accentWarm
 end function
 
 sub onRowSelected()
@@ -245,7 +248,9 @@ sub onRowSelected()
     m.focusedRow = index
     contentRow = m.list.content.GetChild(index)
     if contentRow <> invalid and contentRow.GetChildCount() > 0
-        contentRow.GetChild(0).description = RowDescription(row)
+        item = contentRow.GetChild(0)
+        item.description = RowDescription(row)
+        item.visibleOnHome = not visible
     end if
     ReportSettingsSaveFault()
     UpdatePanel()
