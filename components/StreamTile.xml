@@ -25,10 +25,33 @@
                  EmojiLabel do the truncating). -->
             <EmojiLabel
                 id="tileTitle"
-                width="1022"
+                width="710"
                 height="40"
                 translation="[18, 32]"
                 vertAlign="center" />
+            <!-- Direct-play compatibility is fixed in the card header rather
+                 than mixed into the scrolling release details. -->
+            <Group id="playabilityBadge" translation="[748, 12]" visible="false">
+                <Rectangle id="playabilityBadgeFace" width="314" height="66" />
+                <Label
+                    id="videoCompatibilityLabel"
+                    translation="[12, 4]"
+                    width="290"
+                    height="27"
+                    horizAlign="left"
+                    vertAlign="center"
+                    font="font:SmallSystemFont"
+                    wrap="false" />
+                <Label
+                    id="audioCompatibilityLabel"
+                    translation="[12, 34]"
+                    width="290"
+                    height="27"
+                    horizAlign="left"
+                    vertAlign="center"
+                    font="font:SmallSystemFont"
+                    wrap="false" />
+            </Group>
             <!-- cardClip is the window and never moves. cardContent is the
                  payload and is the only node that translates: sliding it is what
                  brings the tail of an overflowing line into view. Clipping the

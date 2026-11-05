@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="DirectPlayCapsTask" extends="Task">
+    <interface>
+        <field id="result" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/source/util/CodecProbe.brs" />
+    <script type="text/brightscript" uri="pkg:/components/DirectPlayCapsTask.brs" />
+</component>

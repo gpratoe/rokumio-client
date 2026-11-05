@@ -25,6 +25,7 @@
     <script type="text/brightscript" uri="pkg:/components/StreamsScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/DirectPlay.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
 
     <children>

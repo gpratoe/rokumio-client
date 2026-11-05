@@ -66,22 +66,28 @@ sub init()
     m.activeIndex = -1
     m.segments = []
     m.epMetaTask = invalid
+    m.directPlayCapsTask = invalid
+    m.directPlayCapabilities = invalid
 end sub
 
 function OnEnter(params as object) as void
     ' The language first: the panel's chrome (the action line, the synopsis) is
     ' words, and it survives a visit — so a language change re-applies it.
     RefreshTexts()
-    if m.textsLanguage <> TextsLanguage()
+    languageChanged = m.textsLanguage <> TextsLanguage()
+    if languageChanged
         m.textsLanguage = TextsLanguage()
         if m.params <> invalid then ApplyParamsChrome(m.params)
     end if
     ' Re-entry after the player pops: params is invalid and the Group was given
     ' focus by the stack. The stream list must take it back.
     if params = invalid
+        if languageChanged and m.activeIndex >= 0 then RenderActiveProvider()
         RestoreFocus()
         return
     end if
+
+    StartDirectPlayCapabilities()
 
     ' Same episode, batch still in flight: let it finish instead of restarting
     ' it. This screen is not reaped between visits, and StopStreamsLoad below
@@ -463,6 +469,29 @@ sub CancelEpisodeLoad()
     end if
 end sub
 
+' Probe once for this long-lived picker. The device calls are local and
+' read-only; the resulting capability snapshot is reused across provider and
+' episode changes, then applied when either the snapshot or streams arrive.
+sub StartDirectPlayCapabilities()
+    if m.directPlayCapabilities <> invalid or m.directPlayCapsTask <> invalid then return
+    m.directPlayCapsTask = AsyncTask_Launch(m.top, "DirectPlayCapsTask", "onDirectPlayCapsLoaded", {}, "directPlayCaps")
+end sub
+
+sub onDirectPlayCapsLoaded(event as object)
+    if m.directPlayCapsTask = invalid then return
+    task = event.GetRoSGNode()
+    if task = invalid then return
+    result = task.result
+    if result = invalid or not result.done then return
+
+    m.directPlayCapsTask = invalid
+    AsyncTask_Reap(task, m.top, false)
+    m.directPlayCapabilities = result
+    if m.activeIndex >= 0 and m.providers <> invalid and m.activeIndex < m.providers.Count()
+        if m.providers[m.activeIndex].streams.Count() > 0 then RenderActiveProvider()
+    end if
+end sub
+
 ' Find the video for a (season, episode) inside a fetched series meta. The video
 ' list mirrors the episode tiles EpisodesScreen builds from the same store.
 function EpisodeInMeta(meta as object, season as dynamic, episode as dynamic) as dynamic
@@ -499,12 +528,24 @@ sub RenderActiveProvider()
 
     m.streamsPlaceholder.visible = false
 
+    restorePosition = invalid
+    if m.listFilled and m.streamsList.rowItemFocused <> invalid and m.streamsList.rowItemFocused.Count() >= 2
+        restorePosition = [m.streamsList.rowItemFocused[0], m.streamsList.rowItemFocused[1]]
+    end if
+
     content = CreateObject("roSGNode", "ContentNode")
     for i = 0 to m.streams.Count() - 1
         row = content.CreateChild("ContentNode")
-        item = row.CreateChild("ContentNode")
+        ' ContentNode drops custom fields across the RowList boundary. TileContent
+        ' declares the playability state/label so StreamTile receives its badge.
+        item = row.CreateChild("TileContent")
         stream = m.streams[i]
         item.title = StreamLabel(stream)
+        compatibility = DirectPlayClassify(stream, m.directPlayCapabilities)
+        item.videoCompatibilityState = compatibility.videoState
+        item.audioCompatibilityState = compatibility.audioState
+        item.videoCompatibilityLabel = CompatibilityLabel("video", compatibility.videoState)
+        item.audioCompatibilityLabel = CompatibilityLabel("audio", compatibility.audioState)
         lines = StreamTitleLines(stream)
         if lines.Count() > 0
             description = ""
@@ -521,8 +562,26 @@ sub RenderActiveProvider()
         m.listFilled = true
         m.streamsList.jumpToRowItem = [0, 0]
         if m.top.screenActive then m.streamsList.SetFocus(true)
+    else if restorePosition <> invalid
+        if restorePosition[0] >= m.streams.Count() then restorePosition[0] = m.streams.Count() - 1
+        m.streamsList.jumpToRowItem = restorePosition
     end if
 end sub
+
+' The card owns the visual style; this screen supplies separate localized video
+' and audio copy so an audio mismatch never reads as a video failure.
+function CompatibilityLabel(kind as string, state as string) as string
+    if kind = "video"
+        if state = "supported" then return Lang("streams", "videoCodecSupported")
+        if state = "unsupported" then return Lang("streams", "videoCodecUnsupported")
+        if state = "partial" then return Lang("streams", "videoCodecPartial")
+        return Lang("streams", "videoCodecUnknown")
+    end if
+    if state = "supported" then return Lang("streams", "audioCodecSupported")
+    if state = "unsupported" then return Lang("streams", "audioCodecUnsupported")
+    if state = "partial" then return Lang("streams", "audioCodecPartial")
+    return Lang("streams", "audioCodecUnknown")
+end function
 
 ' The placeholder text for an empty active provider: its own task still running
 ' -> loading; its error -> failure; otherwise nothing found from it.

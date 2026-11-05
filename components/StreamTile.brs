@@ -24,6 +24,10 @@ sub init()
     m.scrollTimer = m.top.FindNode("scrollTimer")
 
     m.title = m.top.FindNode("tileTitle")
+    m.playabilityBadge = m.top.FindNode("playabilityBadge")
+    m.playabilityBadgeFace = m.top.FindNode("playabilityBadgeFace")
+    m.videoCompatibilityLabel = m.top.FindNode("videoCompatibilityLabel")
+    m.audioCompatibilityLabel = m.top.FindNode("audioCompatibilityLabel")
     m.lines = []
     for i = 1 to 5
         m.lines.Push(m.top.FindNode("tileLine" + i.ToStr()))
@@ -121,8 +125,12 @@ sub UpdateLook()
 end sub
 
 sub onItemContentChanged()
-    if m.top.itemContent = invalid then return
+    if m.top.itemContent = invalid
+        if m.playabilityBadge <> invalid then m.playabilityBadge.visible = false
+        return
+    end if
     m.title.text = m.top.itemContent.title
+    UpdatePlayabilityBadge()
     description = m.top.itemContent.description
     if description = invalid then description = ""
     pieces = description.Split(chr(10))
@@ -135,6 +143,30 @@ sub onItemContentChanged()
     m.measureTimer.control = "start"
     UpdateLook()
 end sub
+
+sub UpdatePlayabilityBadge()
+    videoState = m.top.itemContent.videoCompatibilityState
+    audioState = m.top.itemContent.audioCompatibilityState
+    if videoState = invalid or audioState = invalid or videoState = "server"
+        m.playabilityBadge.visible = false
+        return
+    end if
+
+    t = Theme()
+    m.playabilityBadgeFace.color = t.segmentIdle
+    m.videoCompatibilityLabel.text = m.top.itemContent.videoCompatibilityLabel
+    m.audioCompatibilityLabel.text = m.top.itemContent.audioCompatibilityLabel
+    m.videoCompatibilityLabel.color = CompatibilityColor(videoState, t)
+    m.audioCompatibilityLabel.color = CompatibilityColor(audioState, t)
+    m.playabilityBadge.visible = true
+end sub
+
+function CompatibilityColor(state as string, palette as object) as string
+    if state = "supported" then return palette.accentFocus
+    if state = "unsupported" then return palette.accentWarm
+    if state = "partial" then return palette.accentInfo
+    return palette.textSecondary
+end function
 
 sub onItemHasFocusChanged()
     UpdateLook()
