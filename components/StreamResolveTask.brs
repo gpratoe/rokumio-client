@@ -1,7 +1,8 @@
 ' StreamResolveTask — resolve a torrent stream to a playable URL off the UI
 ' thread, and make sure the streaming server will actually serve it.
 '
-' Direct-URL streams never get here (the screen plays them as-is).
+' Direct URLs still play as-is. This task also checks a direct URL's format when
+' its URL extension is unknown or conflicts with the add-on's filename hint.
 '
 ' The task owns the wait, and that is the point of it. Building the URL needs no
 ' request, but the Video node's first request is a cold engine: the server has to
@@ -94,6 +95,24 @@ sub resolve()
         profile = invalid
         if store.IsTorrent(stream) then profile = ResolveCodecProfile()
         resolved = store.ResolvePlayback(m.top.serverAddress, m.top.stream, m.top.season, m.top.episode, profile)
+        ' Direct links with a recognized URL format need no extra request. An
+        ' opaque URL or a conflict between its extension and the add-on filename
+        ' gets a best-effort HEAD / bounded-prefix probe on this worker, using the
+        ' same proxy headers as playback. Probe failure leaves the original guess.
+        if resolved.ok and not store.IsTorrent(stream) and store.NeedsFormatProbe(stream, resolved.url)
+            if m.top.state = "stop" then return
+            try
+                resolved.formatProbe = store.ProbeStreamFormat(resolved.url, resolved.requestHeaders, m.top)
+                if resolved.formatProbe.format <> ""
+                    resolved.streamFormat = resolved.formatProbe.format
+                    print "[resolve] direct stream format=" ; resolved.streamFormat ; " via " ; resolved.formatProbe.source ; " status=" ; resolved.formatProbe.status
+                else
+                    print "[resolve] direct stream format probe inconclusive; keeping " ; resolved.streamFormat
+                end if
+            catch formatProbeError
+                print "[resolve] direct stream format probe failed; keeping " ; resolved.streamFormat ; " error=[" ; formatProbeError.message ; "]"
+            end try
+        end if
         ' The probe gets its own try, and this is the other half of the fix
         ' described above. It is a diagnostic: its job is to ADD what is known,
         ' and a throw in here must not be able to remove the answer. Sharing the

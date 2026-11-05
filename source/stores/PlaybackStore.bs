@@ -74,6 +74,9 @@ const ENGINE_HEAD_TIMEOUT_MS = 4000
 ' that will never answer, because the probe loop behind it is what decides
 ' whether the stream is servable and this must not become the thing that decides.
 const ENGINE_READY_TIMEOUT_MS = 10000
+const FORMAT_PROBE_TIMEOUT_MS = 2500
+const FORMAT_PROBE_RANGE_END = "4095"
+const FORMAT_PROBE_MAX_BODY_BYTES = 65536
 
 class PlaybackStore
     transport as object
@@ -476,11 +479,13 @@ class PlaybackStore
     ' the direct HLS2 route carrying the hints and `fallbackUrl` is the legacy URL
     ' to fall back to if the server predates that route.
     function ResolvePlayback(serverAddress as string, stream as object, season = 0 as integer, episode = 0 as integer, profile = invalid as dynamic) as object
-        result = { ok: false, url: "", error: "", streamFormat: "", fallbackUrl: "" }
+        result = { ok: false, url: "", error: "", streamFormat: "", fallbackUrl: "", requestHeaders: {} }
         if stream = invalid
             result.error = "no stream"
             return result
         end if
+
+        result.requestHeaders = m.StreamRequestHeaders(stream)
 
         ' AsText rather than comparing then Trim()ing the raw field: an add-on
         ' answering `url` with something that is not text has no playable URL, and
@@ -520,6 +525,232 @@ class PlaybackStore
         result.streamFormat = m.StreamFormat(stream, result.url)
         result.ok = true
         return result
+    end function
+
+    ' Whether a direct stream's URL and add-on file hints leave a format
+    ' ambiguity worth checking on the worker. Known manifest suffixes are already
+    ' definitive; unknown URLs and conflicting media extensions are not.
+    function NeedsFormatProbe(stream as object, url as string) as boolean
+        urlFormat = m.FormatFromUrl(url)
+        if urlFormat = "hls" or urlFormat = "dash" then return false
+        if m.LooksLikePlaylistUrl(url) then return true
+        if urlFormat = "" then return true
+
+        hintFormat = m.StreamHintFormat(stream)
+        return hintFormat <> "" and hintFormat <> urlFormat
+    end function
+
+    ' Best-effort format discovery for an ambiguous direct URL. HEAD supplies
+    ' useful MIME/length metadata without downloading the media. A ranged GET is
+    ' used for body signatures only when HEAD confirms the response is small. If
+    ' HEAD has no usable length, a narrow playlist URL pattern may decide the
+    ' format, but we do not risk downloading an unbounded body. The existing format
+    ' guess survives every probe failure, so discovery never prevents playback.
+    function ProbeStreamFormat(url as string, requestHeaders as object, stopNode = invalid as dynamic) as object
+        result = { attempted: true, cancelled: false, status: 0, format: "", source: "", contentType: "", contentLength: -1, error: "" }
+        head = m.transport.Head(url, FORMAT_PROBE_TIMEOUT_MS, requestHeaders)
+        if head <> invalid
+            if head.status <> invalid then result.status = head.status
+            if head.error <> invalid then result.error = head.error
+            result.contentType = m.ResponseHeader(head.responseHeaders, "content-type")
+        end if
+
+        ' HEAD can finish after the user has backed out. Do not launch the body
+        ' request for a playback nobody is waiting on.
+        if m.FormatProbeStopped(stopNode)
+            result.cancelled = true
+            return result
+        end if
+
+        responseHeaders = invalid
+        if head <> invalid then responseHeaders = head.responseHeaders
+        headFormat = m.FormatFromContentType(result.contentType)
+        contentLength = m.ResponseContentLength(responseHeaders)
+        result.contentLength = contentLength
+        likelyPlaylist = m.LooksLikePlaylistUrl(url)
+        mimeConflictsWithPlaylistRoute = likelyPlaylist and headFormat <> "" and headFormat <> "hls"
+        canReadSmallBody = contentLength > 0 and contentLength <= FORMAT_PROBE_MAX_BODY_BYTES and (headFormat = "" or mimeConflictsWithPlaylistRoute)
+
+        if canReadSmallBody
+            raw = m.transport.GetRaw(url, FORMAT_PROBE_TIMEOUT_MS, m.FormatProbeHeaders(requestHeaders))
+            if raw <> invalid
+                if raw.status <> invalid then result.status = raw.status
+                if raw.error <> invalid then result.error = raw.error
+                getContentType = m.ResponseHeader(raw.responseHeaders, "content-type")
+                if getContentType <> "" then result.contentType = getContentType
+                body = ""
+                if raw.body <> invalid then body = raw.body
+                ' A non-compliant server can ignore Range. Do not trust an
+                ' oversized response body as a sniff sample (the HEAD length gate
+                ' above is the primary guard against buffering a media file).
+                if body.Len() <= FORMAT_PROBE_MAX_BODY_BYTES
+                    bodyFormat = m.FormatFromBody(body)
+                    if bodyFormat <> ""
+                        result.format = bodyFormat
+                        result.source = "body"
+                        result.error = ""
+                        return result
+                    end if
+                end if
+            end if
+        end if
+
+        headFormat = m.FormatFromContentType(result.contentType)
+        if headFormat <> ""
+            result.format = headFormat
+            result.source = "content-type"
+            result.error = ""
+            return result
+        end if
+
+        ' Provider-specific URL shapes are a last resort, not a global .txt
+        ' rule: a master.txt under an HLS route is very likely a playlist, while
+        ' an unrelated text download is not.
+        if likelyPlaylist
+            result.format = "hls"
+            result.source = "url-pattern"
+            result.error = ""
+        end if
+        return result
+    end function
+
+    private function FormatProbeStopped(stopNode as dynamic) as boolean
+        if stopNode = invalid then return false
+        state = ""
+        try
+            state = stopNode.state
+        catch unavailableState
+            return false
+        end try
+        return state = "stop"
+    end function
+
+    ' Copy the add-on's headers and replace any existing Range header with our
+    ' small prefix request. Names are compared case-insensitively as HTTP requires.
+    private function FormatProbeHeaders(requestHeaders as object) as object
+        headers = {}
+        if requestHeaders <> invalid and Type(requestHeaders) = "roAssociativeArray"
+            for each name in requestHeaders
+                if LCase(name) <> "range" then headers[name] = requestHeaders[name]
+            end for
+        end if
+        headers["Range"] = "bytes=0-" + FORMAT_PROBE_RANGE_END
+        return headers
+    end function
+
+    ' Get one response header without relying on the server's capitalization.
+    private function ResponseHeader(headers as dynamic, wanted as string) as string
+        if headers = invalid or Type(headers) <> "roAssociativeArray" then return ""
+        for each name in headers
+            if LCase(name) = LCase(wanted) then return m.AsText(headers[name])
+        end for
+        return ""
+    end function
+
+    private function ResponseContentLength(headers as dynamic) as integer
+        value = m.ResponseHeader(headers, "content-length")
+        if value = "" then return -1
+        digits = "0123456789"
+        for i = 0 to value.Len() - 1
+            if digits.InStr(value.Mid(i + 1, 1)) < 0 then return -1
+        end for
+        parsed = -1
+        try
+            parsed = value.ToInt()
+        catch invalidLength
+            return -1
+        end try
+        if parsed < 0 then return -1
+        return parsed
+    end function
+
+    ' MIME types are helpful when present, but octet-stream and text/plain are
+    ' intentionally not treated as formats; those need the body signature or a
+    ' narrowly recognized manifest URL.
+    private function FormatFromContentType(contentType as string) as string
+        mime = LCase(contentType)
+        semicolon = mime.InStr(";")
+        if semicolon >= 0 then mime = mime.Left(semicolon)
+        mime = mime.Trim()
+        if mime = "application/vnd.apple.mpegurl" or mime = "application/x-mpegurl" or mime = "audio/mpegurl" or mime = "audio/x-mpegurl" or mime = "application/mpegurl" then return "hls"
+        if mime = "application/dash+xml" then return "dash"
+        if mime = "video/mp4" or mime = "application/mp4" or mime = "video/quicktime" then return "mp4"
+        if mime = "video/x-matroska" or mime = "application/x-matroska" then return "mkv"
+        return ""
+    end function
+
+    ' Recognize common playlist/container signatures from the first few bytes.
+    ' This identifies the outer transport/container only, not codec playability.
+    private function FormatFromBody(body as string) as string
+        if body = "" then return ""
+        prefix = LCase(body.Left(4096))
+        if prefix.InStr("#extm3u") >= 0 then return "hls"
+        if prefix.InStr("<mpd") >= 0 then return "dash"
+        ' roUrlEvent.GetString may not preserve leading NUL bytes consistently;
+        ' the ftyp marker is distinctive enough when constrained to the first box.
+        if body.Left(16).InStr("ftyp") >= 0 then return "mp4"
+        if body.Len() >= 4
+            ebml = Chr(&h1A) + Chr(&h45) + Chr(&hDF) + Chr(&hA3)
+            if body.Left(4) = ebml then return "mkv"
+        end if
+        return ""
+    end function
+
+    private function LooksLikePlaylistUrl(url as string) as boolean
+        lower = LCase(url)
+        query = lower.InStr("?")
+        if query >= 0 then lower = lower.Left(query)
+        if lower.InStr("/master.") >= 0 and lower.InStr("/hls") >= 0 then return true
+        if lower.InStr("/hls/") >= 0 and lower.InStr("master") >= 0 then return true
+        if lower.InStr("/hls2/") >= 0 and lower.InStr("master") >= 0 then return true
+        if lower.InStr("/hls3/") >= 0 and lower.InStr("master") >= 0 then return true
+        return false
+    end function
+
+    private function StreamHintFormat(stream as object) as string
+        if stream = invalid then return ""
+        hint = m.FormatFromText(m.AddonFilename(stream))
+        if hint <> "" then return hint
+        hint = m.FormatFromText(m.AddonTitle(stream))
+        if hint <> "" then return hint
+        return m.FormatFromText(m.AddonDescription(stream))
+    end function
+
+    ' Headers an add-on asks its Stremio-compatible client to use when fetching
+    ' this stream. Roku's Video node makes the playback request itself, so these
+    ' need to travel with the resolved URL for the player to apply through its
+    ' ifHttpAgent interface. Malformed names/values are ignored rather than
+    ' letting arbitrary JSON break the handoff.
+    function StreamRequestHeaders(stream as object) as object
+        headers = {}
+        if stream = invalid then return headers
+        hints = stream.behaviorHints
+        if hints = invalid or Type(hints) <> "roAssociativeArray" then return headers
+        proxyHeaders = hints.proxyHeaders
+        if proxyHeaders = invalid or Type(proxyHeaders) <> "roAssociativeArray" then return headers
+        request = proxyHeaders.request
+        if request = invalid or Type(request) <> "roAssociativeArray" then return headers
+
+        for each rawName in request
+            name = m.AsText(rawName)
+            value = m.AsText(request[rawName])
+            if name = "" or value = "" then continue for
+            if not m.IsHttpHeaderName(name) then continue for
+            if value.InStr(chr(10)) >= 0 or value.InStr(chr(13)) >= 0 then continue for
+            headers[name] = value
+        end for
+        return headers
+    end function
+
+    ' RFC token characters for an HTTP field name. In particular, do not allow
+    ' whitespace or control characters from untrusted add-on JSON into headers.
+    private function IsHttpHeaderName(name as string) as boolean
+        if name = "" then return false
+        allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~"
+        for i = 0 to name.Len() - 1
+            if allowed.InStr(name.Mid(i + 1, 1)) < 0 then return false
+        end for
+        return true
     end function
 
     ' AsText for the same reason ResolvePlayback uses it: a hash that is not text
@@ -632,6 +863,9 @@ class PlaybackStore
     private function FormatFromText(text as string) as string
         if text = "" then return ""
         lower = LCase(text)
+        ' Deliberately do not classify .txt here: providers use it both for HLS
+        ' master playlists and for ordinary text files. Ambiguous direct links are
+        ' checked by ProbeStreamFormat before this filename fallback reaches Video.
         extensions = [".m3u8", ".m3u", ".mpd", ".mkv", ".mp4", ".m4v", ".mov"]
         formats = ["hls", "hls", "dash", "mkv", "mp4", "mp4", "mp4"]
         bestIndex = -1

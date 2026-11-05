@@ -89,6 +89,7 @@ sub Test_Playback_StreamFormatFromUrl()
     Harness_Equal(store.StreamFormat(invalid, "https://x.example/movie.MKV"), "mkv", "mkv, case-insensitive")
     Harness_Equal(store.StreamFormat(invalid, "https://x.example/master.m3u8"), "hls", "hls")
     Harness_Equal(store.StreamFormat(invalid, "https://x.example/live.m3u"), "hls", "m3u is hls too")
+    Harness_Equal(store.StreamFormat(invalid, "https://x.example/hls3/01/15255/stream/master.txt"), "", "txt alone does not declare a format")
     Harness_Equal(store.StreamFormat(invalid, "https://x.example/manifest.mpd"), "dash", "dash")
     Harness_Equal(store.StreamFormat(invalid, "https://x.example/clip.mov"), "mp4", "mov maps to mp4 per Roku")
     Harness_Equal(store.StreamFormat(invalid, "https://x.example/opaque-object-id"), "", "nothing to go on")
@@ -168,6 +169,114 @@ sub Test_Playback_StreamFormatKeepsManifestsManifests()
     ' does not replace it.
     direct = { url: "https://x.example/live/master.m3u8?token=abc", title: "Show.1080p.mkv" }
     Harness_Equal(store.StreamFormat(direct, direct.url), "hls", "an HLS manifest stays HLS")
+    Harness_Ok(not store.NeedsFormatProbe(direct, direct.url), "a recognized HLS suffix skips the extra request")
+
+    conflict = { url: "https://x.example/download/movie.mp4", behaviorHints: { filename: "Movie.mkv" } }
+    Harness_Ok(store.NeedsFormatProbe(conflict, conflict.url), "conflicting media suffix and filename trigger a probe")
+
+    disguised = { url: "https://x.example/hls3/01/master.mkv", behaviorHints: { filename: "Movie.mkv" } }
+    Harness_Ok(store.NeedsFormatProbe(disguised, disguised.url), "an HLS master route is probed even with a media-looking suffix")
+
+    textPlaylist = {
+        url: "https://x.example/hls3/01/15255/stream/master.txt"
+        behaviorHints: { filename: "Show.1080p.H264.AAC.mkv" }
+    }
+    Harness_Equal(store.StreamFormat(textPlaylist, textPlaylist.url), "mkv", "the source filename is only the pre-probe fallback")
+    Harness_Ok(store.NeedsFormatProbe(textPlaylist, textPlaylist.url), "an extensionless manifest transport gets probed despite its file hint")
+end sub
+
+sub Test_Playback_ProbeStreamFormatUsesHeadersAndPlaylistSignature()
+    Harness_Suite("PlaybackStore probes an ambiguous response using add-on headers")
+    url = "https://video.example/hls3/01/15255/stream/master.txt"
+    script = [
+        { method: "HEAD", url: url, ok: true, status: 200, responseHeaders: { "Content-Type": "text/plain", "Content-Length": "96" }, error: "" }
+        { method: "GET", url: url, ok: true, status: 206, body: "#EXTM3U" + chr(10) + "#EXT-X-VERSION:3" + chr(10), responseHeaders: { "Content-Type": "text/plain" }, error: "" }
+    ]
+    store = PlaybackStore(ScriptedTransport(script))
+    headers = { Referer: "https://source.example/", "User-Agent": "Rokumio test agent" }
+    headTransport = ScriptedTransport(script)
+    headCheck = headTransport.Head(url, 2500, headers)
+    Harness_Equal(headCheck.responseHeaders["Content-Length"], "96", "the mock HEAD response carries its length header")
+    Harness_Equal(store.ResponseHeader(headCheck.responseHeaders, "content-length"), "96", "response header lookup is case-insensitive")
+    Harness_Equal(store.ResponseContentLength(headCheck.responseHeaders), 96, "content length parser accepts the header value")
+    probe = store.ProbeStreamFormat(url, headers)
+
+    Harness_Equal(probe.format, "hls", "the playlist body signature beats text/plain and the .mkv source hint")
+    Harness_Equal(probe.contentLength, 96, "HEAD content length is parsed for the bounded read")
+    Harness_Equal(probe.source, "body", "format source is the response signature")
+    Harness_Equal(store.transport.log.Count(), 2, "small ambiguous body is read after HEAD")
+    Harness_Equal(store.transport.log[0].headers.Referer, headers.Referer, "HEAD carries the add-on Referer")
+    Harness_Equal(store.transport.log[1].headers.Referer, headers.Referer, "range GET carries the add-on Referer")
+    Harness_Equal(store.transport.log[1].headers.Range, "bytes=0-4095", "body probe requests only a prefix")
+end sub
+
+sub Test_Playback_ProbeStreamFormatUsesMimeWithoutReadingLargeBody()
+    Harness_Suite("PlaybackStore uses a known response MIME without fetching a large body")
+    url = "https://video.example/opaque"
+    script = [
+        { method: "HEAD", url: url, ok: true, status: 200, responseHeaders: { "Content-Type": "application/dash+xml", "Content-Length": "8000000" }, error: "" }
+    ]
+    store = PlaybackStore(ScriptedTransport(script))
+    probe = store.ProbeStreamFormat(url, {})
+
+    Harness_Equal(probe.format, "dash", "DASH MIME identifies the transport")
+    Harness_Equal(probe.source, "content-type", "format source is response MIME")
+    Harness_Equal(store.transport.log.Count(), 1, "large response is not fetched for body sniffing")
+
+    smallScript = [
+        { method: "HEAD", url: url, ok: true, status: 200, responseHeaders: { "Content-Type": "video/mp4", "Content-Length": "128" }, error: "" }
+    ]
+    smallStore = PlaybackStore(ScriptedTransport(smallScript))
+    smallProbe = smallStore.ProbeStreamFormat(url, {})
+    Harness_Equal(smallProbe.format, "mp4", "MP4 MIME identifies the container")
+    Harness_Equal(smallStore.transport.log.Count(), 1, "a known MIME avoids a redundant GET even for a small file")
+end sub
+
+sub Test_Playback_ProbeStreamFormatUsesNarrowPlaylistRouteFallback()
+    Harness_Suite("PlaybackStore recognizes the HLS3 master route without an unbounded GET")
+    url = "https://video.example/hls3/01/15255/stream/master.txt"
+    script = [
+        { method: "HEAD", url: url, ok: false, status: 405, body: "", responseHeaders: {}, error: "HTTP 405" }
+    ]
+    store = PlaybackStore(ScriptedTransport(script))
+    probe = store.ProbeStreamFormat(url, {})
+
+    Harness_Equal(probe.format, "hls", "the specific HLS master route is the last-resort signal")
+    Harness_Equal(probe.source, "url-pattern", "route fallback is identified as a heuristic")
+    Harness_Equal(store.transport.log.Count(), 1, "no GET is made when HEAD has no bounded size")
+end sub
+
+sub Test_Playback_ProbeStreamFormatStopsBeforePrefixGet()
+    Harness_Suite("PlaybackStore skips the body probe after playback cancellation")
+    url = "https://video.example/opaque"
+    script = [
+        { method: "HEAD", url: url, ok: true, status: 200, responseHeaders: { "Content-Length": "64" }, error: "" }
+        { method: "GET", url: url, ok: true, status: 206, body: "#EXTM3U", responseHeaders: {}, error: "" }
+    ]
+    store = PlaybackStore(ScriptedTransport(script))
+    stoppedTask = { state: "stop" }
+    probe = store.ProbeStreamFormat(url, {}, stoppedTask)
+
+    Harness_Ok(probe.cancelled, "probe records cancellation")
+    Harness_Equal(store.transport.log.Count(), 1, "no prefix GET after stop")
+end sub
+
+sub Test_Playback_ProbeStreamFormatUsesContainerSignature()
+    Harness_Suite("PlaybackStore identifies an MP4 container from a small response signature")
+    url = "https://video.example/opaque"
+    ' The interpreter drops NUL characters from BrightScript strings, so model
+    ' the visible ftyp marker directly; the production check also tolerates that.
+    body = "ftypisom"
+    script = [
+        { method: "HEAD", url: url, ok: true, status: 200, responseHeaders: { "Content-Type": "application/octet-stream", "Content-Length": body.Len().ToStr() }, error: "" }
+        { method: "GET", url: url, ok: true, status: 206, body: body, responseHeaders: {}, error: "" }
+    ]
+    store = PlaybackStore(ScriptedTransport(script))
+    Harness_Equal(store.FormatFromBody(body), "mp4", "container signature recognizer accepts ftyp")
+    probe = store.ProbeStreamFormat(url, {})
+
+    Harness_Equal(probe.format, "mp4", "ftyp identifies ISO BMFF")
+    Harness_Equal(probe.source, "body", "format source is the byte signature")
 end sub
 
 sub Test_Playback_ResolvePlaybackReportsTheStreamFormat()
@@ -181,6 +290,34 @@ sub Test_Playback_ResolvePlaybackReportsTheStreamFormat()
     refused = store.ResolvePlayback("", { infoHash: "abc123" })
     Harness_Ok(not refused.ok, "a torrent with no server is refused")
     Harness_Equal(refused.streamFormat, "", "a refused stream reports an empty format, never invalid")
+end sub
+
+sub Test_Playback_ResolvePlaybackIncludesProxyRequestHeaders()
+    Harness_Suite("PlaybackStore.ResolvePlayback carries add-on proxy request headers")
+    store = PlaybackStore(ScriptedTransport([]))
+    stream = {
+        url: "https://video.example/master.m3u8"
+        behaviorHints: {
+            proxyHeaders: {
+                request: {
+                    "User-Agent": "Rokumio test agent"
+                    Referer: "https://play.example/"
+                    "X-Invalid": 42
+                    "Bad Header": "ignored"
+                    "X-Newline": "bad" + chr(10) + "value"
+                }
+            }
+        }
+    }
+    result = store.ResolvePlayback("", stream)
+
+    Harness_Ok(result.ok, "direct URL still resolves")
+    Harness_Equal(result.requestHeaders["User-Agent"], "Rokumio test agent", "user-agent retained")
+    Harness_Equal(result.requestHeaders.Referer, "https://play.example/", "referer retained")
+    Harness_Equal(result.requestHeaders.Count(), 2, "malformed names and values are dropped")
+
+    noHeaders = store.ResolvePlayback("", { url: "https://video.example/open.m3u8" })
+    Harness_Equal(noHeaders.requestHeaders.Count(), 0, "streams without proxy headers clear to an empty map")
 end sub
 
 ' --- the file index the stream already carries -----------------------------
