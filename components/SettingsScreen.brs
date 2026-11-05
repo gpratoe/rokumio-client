@@ -121,6 +121,7 @@ sub init()
     m.netDiagTask = invalid
     m.showDeviceCap = false
     m.deviceCapTask = invalid
+    m.restoreStateOnReturn = false
 end sub
 
 function OnEnter(params as object) as void
@@ -144,21 +145,15 @@ function OnEnter(params as object) as void
     m.serverCacheSizeState = ""
     m.pendingCacheSize = invalid
     m.pendingWriteType = ""
-    ' A visit starts from nothing remembered. The screen's fields outlive
-    ' OnEnter — the stack pops the screen but does not destroy it — so what
-    ' the last visit left behind is still here: the section it was on and the
-    ' row the cursor was on.
-    '
-    ' The row is what the side panel describes, and the panel is painted from
-    ' this screen's COPY of the list's focus. The copy survived the visit
-    ' while the list was rebuilt from scratch and put its cursor back on the
-    ' first row, so the panel went on describing the row the user left on —
-    ' a row the cursor was not on — and corrected itself only when the cursor
-    ' moved. Starting each visit with the first section and no row makes the
-    ' entry the same as a first entry, where the panel follows the list's own
-    ' focus.
-    m.activeSection = 0
-    m.focusedRow = -1
+    ' Fresh visits start at General. Returning from the Home Rows picker keeps
+    ' the section and focused row that opened it, so Back lands in the same place.
+    restoreState = false
+    if params = invalid then restoreState = m.restoreStateOnReturn
+    m.restoreStateOnReturn = false
+    if not restoreState
+        m.activeSection = 0
+        m.focusedRow = -1
+    end if
     ' The sections are rebuilt on entry rather than kept: the set of rows
     ' changes under the screen — the diagnostics appear, the account row
     ' changes what it does — and a section built when the screen was opened
@@ -999,6 +994,7 @@ end sub
 ' The catalog picker is a separate screen because its rows are dynamic and can
 ' be numerous; Settings remains a concise list of setting categories.
 sub OpenHomeRows()
+    m.restoreStateOnReturn = true
     m.top.pushRequest = { screen: "homeRowsScreen", params: {} }
 end sub
 
