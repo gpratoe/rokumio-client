@@ -57,6 +57,7 @@ async function writeCombinedScript() {
         'tests/tilesize.test.brs',
         'tests/devicecap.test.brs',
         'tests/codechints.test.brs',
+        'tests/directplay.test.brs',
         'tests/torrentprofile.test.brs',
         'tests/cachesize.test.brs',
         'tests/textsstore.test.brs',
@@ -91,6 +92,7 @@ const transpiled = [
     path.join(stagingDir, 'source', 'util', 'Regex.brs'),
     path.join(stagingDir, 'source', 'util', 'SetupPage.brs'),
     path.join(stagingDir, 'source', 'util', 'CodecProbe.brs'),
+    path.join(stagingDir, 'source', 'util', 'DirectPlay.brs'),
     path.join(stagingDir, 'source', 'util', 'TorrentProfile.brs'),
     path.join(stagingDir, 'source', 'util', 'CacheSize.brs'),
     path.join(stagingDir, 'source', 'util', 'Utilities.brs'),
@@ -1672,6 +1674,9 @@ function checkCodecPlaybackContract() {
     if (!/profile\s*=\s*ResolveCodecProfile\s*\(/.test(taskBrs)) {
         err('StreamResolveTask.brs resolve() never builds a codec profile — the advertise list is the whole feature, and without it the URL falls back to the server defaults this work exists to improve on');
     }
+    if (!/if\s+store\.IsTorrent\(stream\)\s+then\s+profile\s*=\s*ResolveCodecProfile\(\)/.test(body(taskBrs, 'resolve'))) {
+        err('StreamResolveTask must only probe device codecs for torrent/server-transcoded streams — direct URLs bypass the server converter and should resolve without that work');
+    }
     if (!/ResolvePlayback\([^)]*\bprofile\b\s*\)/.test(taskBrs)) {
         err('StreamResolveTask.brs resolve() does not pass the profile to ResolvePlayback — the profile is built and then dropped, so the hint route is never taken');
     }
@@ -1805,8 +1810,10 @@ function checkCodecPlaybackContract() {
         if (!/accepted\.Push\(candidate\.codec\)/.test(profiler)) {
             err('StreamResolveTask.brs ResolveCodecProfile does not collect the probe answers — the advertised list would be the floor whatever the device claims');
         }
-        if (!/CanDecodeAudio\(\{[^}]*passthru:/.test(taskBrs)) {
-            err('StreamResolveTask.brs does not send a passthru filter — the plain probe answers for the Roku AND the attached HDMI device at once, which is not a question either switch can act on');
+        const audioProbe = body(probe, 'CodecProbeAudio');
+        const filterProbe = body(taskBrs, 'ResolveProbeFilter');
+        if (!/request\.passthru\s*=\s*passthru/.test(audioProbe) || !/CodecProbeAudio\(di,\s*candidate,\s*filter\)/.test(filterProbe)) {
+            err('StreamResolveTask must keep using the shared CodecProbeAudio helper with its Roku/HDMI filter — the direct-play snapshot and server hints must share probe semantics without changing the two switch questions');
         }
         if (!/CodecAudioHints\(/.test(profiler)) {
             err('StreamResolveTask.brs ResolveCodecProfile does not build the list with CodecAudioHints() — the floor must survive the addition, or the server evicts its own defaults and re-encodes aac and mp3');
@@ -3833,6 +3840,62 @@ function checkStreamFormatQueryContract() {
     return ok;
 }
 
+function checkDirectPlayContract() {
+    const fs = require('fs');
+    const read = (file) => fs.readFileSync(path.join(projectRoot, file), 'utf8');
+    const code = (src) => src.split('\n').map(line => line.split("'")[0]).join('\n');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    const screen = code(read('components/StreamsScreen.brs'));
+    const screenXml = read('components/StreamsScreen.xml');
+    const capsTask = code(read('components/DirectPlayCapsTask.brs'));
+    const capsXml = read('components/DirectPlayCapsTask.xml');
+    const detector = code(read('source/util/DirectPlay.brs'));
+    const tile = code(read('components/StreamTile.brs'));
+    const tileXml = read('components/StreamTile.xml');
+    const tileContentXml = read('components/TileContent.xml');
+    const loader = code(read('components/StreamsLoaderTask.brs'));
+    const loaderXml = read('components/StreamsLoaderTask.xml');
+    const streamEnter = /function OnEnter\([^\n]*\)[\s\S]*?end function/.exec(screen);
+
+    if (!/source\/util\/DirectPlay\.brs/.test(screenXml) || !/AsyncTask_Launch\(m\.top,\s*"DirectPlayCapsTask"/.test(screen)) {
+        err('StreamsScreen must load the direct-play classifier and launch its device-capability snapshot off the UI thread');
+    }
+    if (!/<field\s+id="result"\s+type="assocarray"/.test(capsXml) || !/source\/util\/CodecProbe\.brs/.test(capsXml)) {
+        err('DirectPlayCapsTask must expose a typed result and include the shared CodecProbe helpers');
+    }
+    if (!/CodecProbeVideo\(di,\s*candidate,\s*false\)/.test(capsTask) || !/CodecProbeAudio\(di,\s*candidate\)/.test(capsTask)) {
+        err('DirectPlayCapsTask must use the shared video/audio capability probes');
+    }
+    if (!/DirectPlayClassifyHints\(hint,\s*m\.directPlayCapabilities\)/.test(screen) || !/item\.videoCompatibilityState\s*=/.test(screen) || !/item\.audioCompatibilityState\s*=/.test(screen)) {
+        err('StreamsScreen must attach separate video/audio compatibility states to each stream card');
+    }
+    if (!/row\.CreateChild\("TileContent"\)/.test(screen) || !/<field\s+id="videoCompatibilityState"\s+type="string"/.test(tileContentXml) || !/<field\s+id="audioCompatibilityState"\s+type="string"/.test(tileContentXml)) {
+        err('Stream compatibility metadata must use TileContent fields so Roku forwards it across the RowList boundary');
+    }
+    if (!/url\.Trim\(\)\s*=\s*""\s+then\s+return hints/.test(detector) || !/if\s+hints\.isDirect\s*<>\s*true[\s\S]*?result\.videoState\s*=\s*"server"[\s\S]*?result\.audioState\s*=\s*"server"/.test(detector) || !/behaviorHints\.filename/.test(detector) || !/DirectPlayUrlHintText\(url\)/.test(detector) || !/carriesFilename/.test(detector)) {
+        err('DirectPlay must exclude server-routed streams and inspect add-on filenames plus direct URLs for codec hints');
+    }
+    if (!/source\/util\/DirectPlay\.brs/.test(loaderXml) || !/parsedHints\.Push\(DirectPlayHints\(stream\)\)/.test(loader) || !/directPlayHints:\s*parsedHints/.test(loader)) {
+        err('StreamsLoaderTask must parse each stream hint once off the UI thread and return it alongside the stream');
+    }
+    if (!/if\s+provider\.content\s*=\s*invalid[\s\S]*?provider\.content\s*=\s*content[\s\S]*?m\.streamsList\.content\s*=\s*provider\.content/.test(screen)) {
+        err('StreamsScreen must cache each provider card tree for the current visit instead of rebuilding it on every provider switch');
+    }
+    const onExit = /function OnExit\(\)[\s\S]*?end function/.exec(screen);
+    if (!onExit || !/m\.providers\s*=\s*invalid/.test(onExit[0])) {
+        err('StreamsScreen.OnExit must release per-visit stream/card caches; the player return path does not call OnExit');
+    }
+    if (!streamEnter || !/if\s+params\s*=\s*invalid[\s\S]*?RestoreFocus\(\)\s+return/.test(streamEnter[0])) {
+        err('StreamsScreen must restore its current provider on the player return path without starting a fresh stream fetch');
+    }
+    if (!/id="playabilityBadge"/.test(tileXml) || !/id="videoCompatibilityIcon"/.test(tileXml) || !/uri="pkg:\/images\/video\.png"/.test(tileXml) || !/id="audioCompatibilityIcon"/.test(tileXml) || !/uri="pkg:\/images\/audio\.png"/.test(tileXml) || !/id="videoCompatibilityStatusIcon"/.test(tileXml) || !/id="audioCompatibilityStatusIcon"/.test(tileXml) || !/videoCompatibilityIcon\.blendColor/.test(tile) || !/audioCompatibilityIcon\.blendColor/.test(tile) || !/CompatibilityStatusIcon\(videoState\)/.test(tile) || !/CompatibilityStatusIcon\(audioState\)/.test(tile) || !/images\/some\.png/.test(tile) || !/images\/x\.png/.test(tile) || !/images\/question\.png/.test(tile) || !/UpdatePlayabilityBadge\(\)/.test(tile) || !/videoState\s*=\s*"server"/.test(tile)) {
+        err('StreamTile must show paired media/status icons, tint them by status, and hide them for server-routed streams');
+    }
+    return ok;
+}
+
 function checkChannelCwPolicyContract() {
     const fs = require('fs');
     let ok = true;
@@ -5842,6 +5905,7 @@ async function main() {
     // callFunc only invokes functions declared in a component's interface, and
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
+    if (!checkDirectPlayContract()) process.exit(1);
     if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkDeviceCapContract() || !checkCodecPlaybackContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkHomeCatalogResultsAreIncremental() || !checkStopSignalContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkLibraryPutTaskContract() || !checkAddonsWriteTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkSettingsSectionsContract() || !checkTorrentProfileContract() || !checkCacheSizeContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract() || !checkMetaFieldCoercionContract() || !checkStringOfContract() || !checkI18nContract() || !checkNoUntranslatedLiterals() || !checkEpisodeSeriesBatchContract() || !checkStoreAddonValueContract() || !checkAddonJsonContract() || !checkSubtitlePlayGateContract() || !checkPreVideoIndicatorContract() || !checkPreVideoWaitLabelContract() || !checkNativeBufferingSuppressionContract()) {
         process.exit(1);
     }

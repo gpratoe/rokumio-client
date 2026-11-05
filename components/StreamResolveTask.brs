@@ -88,12 +88,11 @@ sub resolve()
         http = Transport()
         store = PlaybackStore(http)
         stream = m.top.stream
-        ' The device's codec answer, read HERE because roDeviceInfo is Task-only.
-        ' The store cannot ask for it: it runs in whatever component includes it
-        ' (five of them) and only this one is guaranteed a Task scope. Nothing in
-        ' this call touches the network, so a failure costs nothing — an empty
-        ' profile simply leaves the legacy URL in place.
-        profile = ResolveCodecProfile()
+        ' Device codec probing is only needed for server-transcoded torrents,
+        ' where the result configures the HLS converter. A direct URL bypasses
+        ' that converter, so probing there only delays the player handoff.
+        profile = invalid
+        if store.IsTorrent(stream) then profile = ResolveCodecProfile()
         resolved = store.ResolvePlayback(m.top.serverAddress, m.top.stream, m.top.season, m.top.episode, profile)
         ' The probe gets its own try, and this is the other half of the fix
         ' described above. It is a diagnostic: its job is to ADD what is known,
@@ -336,13 +335,8 @@ end function
 ' passthrough), 0 asks about the Roku itself (the decoder that would decode a
 ' copy the server does not re-encode). Every failure answers "no".
 function ResolveProbeFilter(di as object, candidate as object, filter as integer) as boolean
-    raw = invalid
-    try
-        raw = di.CanDecodeAudio({ codec: candidate.codec, passthru: filter })
-    catch e
-        return false
-    end try
-    return CodecResult(raw)
+    probe = CodecProbeAudio(di, candidate, filter)
+    return probe.ok
 end function
 
 ' roDeviceInfo is Task-only, hence this file. Failure to create it is not an
@@ -363,20 +357,10 @@ function ResolveProbeVideo(di as object, candidate as object) as object
     return ResolveProbe(di, candidate.codec, request)
 end function
 
-' One probe, reduced to the only two facts a request needs: which codec, and
-' whether the reply was an explicit yes. The raw reply is deliberately dropped —
-' it was the spike's whole point and is not a request's. Video-only now: the
-' audio probe went with the audio half (see ResolveCodecProfile), so a
-' can-decode-audio branch here would be a path nothing calls.
+' Shared video probe used by the hint profile. The helper retains whether Roku
+' gave an explicit boolean; request construction still consumes only `ok`, while
+' the direct-play classifier also needs `known` to distinguish a no from a
+' failed or malformed probe.
 function ResolveProbe(di as object, codec as string, request as object) as object
-    result = { codec: codec, ok: false }
-    raw = invalid
-    try
-        raw = di.CanDecodeVideo(request)
-    catch e
-        return result
-    end try
-    result.ok = CodecResult(raw)
-    return result
+    return CodecProbeVideoRequest(di, codec, request)
 end function
-

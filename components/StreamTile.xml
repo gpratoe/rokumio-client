@@ -25,10 +25,47 @@
                  EmojiLabel do the truncating). -->
             <EmojiLabel
                 id="tileTitle"
-                width="1022"
+                width="830"
                 height="40"
                 translation="[18, 32]"
                 vertAlign="center" />
+            <!-- Compact top-right pairs: media type icon, then state marker. -->
+            <Group id="playabilityBadge" translation="[870, 18]" visible="false">
+                <Poster
+                    id="videoCompatibilityIcon"
+                    translation="[0, 2]"
+                    width="40"
+                    height="40"
+                    loadWidth="40"
+                    loadHeight="40"
+                    loadDisplayMode="limitSize"
+                    uri="pkg:/images/video.png" />
+                <Poster
+                    id="videoCompatibilityStatusIcon"
+                    translation="[42, 4]"
+                    width="32"
+                    height="32"
+                    loadWidth="32"
+                    loadHeight="32"
+                    loadDisplayMode="limitSize" />
+                <Poster
+                    id="audioCompatibilityIcon"
+                    translation="[98, 2]"
+                    width="40"
+                    height="40"
+                    loadWidth="40"
+                    loadHeight="40"
+                    loadDisplayMode="limitSize"
+                    uri="pkg:/images/audio.png" />
+                <Poster
+                    id="audioCompatibilityStatusIcon"
+                    translation="[140, 4]"
+                    width="32"
+                    height="32"
+                    loadWidth="32"
+                    loadHeight="32"
+                    loadDisplayMode="limitSize" />
+            </Group>
             <!-- cardClip is the window and never moves. cardContent is the
                  payload and is the only node that translates: sliding it is what
                  brings the tail of an overflowing line into view. Clipping the

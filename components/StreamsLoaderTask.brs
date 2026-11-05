@@ -16,11 +16,13 @@ sub load()
         playback = PlaybackStore(http)
 
         streams = []
+        parsedHints = []
         error = ""
         answer = playback.Streams(m.top.addonAddress, m.top.metaType, m.top.videoId)
         if answer.ok and answer.streams <> invalid
             for each stream in answer.streams
                 streams.Push(stream)
+                parsedHints.Push(DirectPlayHints(stream))
             end for
         else if answer.error <> invalid and answer.error <> ""
             error = answer.error
@@ -28,6 +30,7 @@ sub load()
 
         m.top.result = {
             streams: streams
+            directPlayHints: parsedHints
             error: error
             providerIndex: m.top.providerIndex
             providerName: m.top.providerName
@@ -35,6 +38,7 @@ sub load()
     catch e
         m.top.result = {
             streams: []
+            directPlayHints: []
             error: e.message
             providerIndex: m.top.providerIndex
             providerName: m.top.providerName

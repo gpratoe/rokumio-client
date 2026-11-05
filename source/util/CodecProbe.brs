@@ -75,12 +75,66 @@ function CodecAudioCandidates() as object
         { codec: "mp3" },
         { codec: "ac3" },
         { codec: "eac3" },
+        { codec: "truehd" },
         { codec: "dts" },
         { codec: "flac" },
         { codec: "alac" },
         { codec: "opus" },
         { codec: "vorbis" }
     ]
+end function
+
+' Shared device probes. Server-hint generation and the direct-play indicator
+' must use the same Roku answers rather than growing separate capability rules.
+' `strictProfile` keeps the server's full-profile check intact; direct-play
+' classification asks whether the device recognizes the codec family at all.
+function CodecProbeVideo(di as object, candidate as object, strictProfile = true as boolean) as object
+    request = { codec: candidate.codec }
+    if strictProfile
+        if candidate.profile <> "" then request.profile = candidate.profile
+        if candidate.level <> "" then request.level = candidate.level
+    end if
+    return CodecProbeVideoRequest(di, candidate.codec, request)
+end function
+
+function CodecProbeVideoRequest(di as object, codec as string, request as object) as object
+    probe = { codec: codec, ok: false, known: false }
+    raw = invalid
+    try
+        raw = di.CanDecodeVideo(request)
+    catch e
+        return probe
+    end try
+    flag = CodecFlag(raw)
+    if flag = "true"
+        probe.ok = true
+        probe.known = true
+    else if flag = "false"
+        probe.known = true
+    end if
+    return probe
+end function
+
+' A negative passthru value omits the filter and asks the platform's general
+' codec question; 0/1 retain the existing Roku-versus-HDMI queries.
+function CodecProbeAudio(di as object, candidate as object, passthru = -1 as integer) as object
+    probe = { codec: candidate.codec, ok: false, known: false }
+    request = { codec: candidate.codec }
+    if passthru >= 0 then request.passthru = passthru
+    raw = invalid
+    try
+        raw = di.CanDecodeAudio(request)
+    catch e
+        return probe
+    end try
+    flag = CodecFlag(raw)
+    if flag = "true"
+        probe.ok = true
+        probe.known = true
+    else if flag = "false"
+        probe.known = true
+    end if
+    return probe
 end function
 
 ' The codecs the two audio options may offer: Dolby Digital and Dolby Digital

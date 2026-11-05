@@ -9,7 +9,7 @@
 '
 ' The title sits outside the scroll and truncates with an ellipsis. The five
 ' description lines live in `cardContent`, which sits inside `cardClip` — a
-' window that never moves. If any single line overflows 1022 px, `cardContent`
+' window that never moves. If a line overflows the card's current text column, `cardContent`
 ' slides left as one unit while the card holds focus (0.6s dwell before the first
 ' slide, 80 px/s, 1s dwell at the end, then snaps back). Unfocused cards stay
 ' pinned at x=0. Each line is an EmojiLabel (text in Open Sans, emoji as inline
@@ -24,6 +24,12 @@ sub init()
     m.scrollTimer = m.top.FindNode("scrollTimer")
 
     m.title = m.top.FindNode("tileTitle")
+    m.playabilityBadge = m.top.FindNode("playabilityBadge")
+    m.videoCompatibilityIcon = m.top.FindNode("videoCompatibilityIcon")
+    m.audioCompatibilityIcon = m.top.FindNode("audioCompatibilityIcon")
+    m.videoCompatibilityStatusIcon = m.top.FindNode("videoCompatibilityStatusIcon")
+    m.audioCompatibilityStatusIcon = m.top.FindNode("audioCompatibilityStatusIcon")
+    m.cardTitleWidth = 830
     m.lines = []
     for i = 1 to 5
         m.lines.Push(m.top.FindNode("tileLine" + i.ToStr()))
@@ -121,8 +127,13 @@ sub UpdateLook()
 end sub
 
 sub onItemContentChanged()
-    if m.top.itemContent = invalid then return
+    if m.top.itemContent = invalid
+        if m.playabilityBadge <> invalid then m.playabilityBadge.visible = false
+        SetCardTitleLayout(false)
+        return
+    end if
     m.title.text = m.top.itemContent.title
+    UpdatePlayabilityBadge()
     description = m.top.itemContent.description
     if description = invalid then description = ""
     pieces = description.Split(chr(10))
@@ -135,6 +146,54 @@ sub onItemContentChanged()
     m.measureTimer.control = "start"
     UpdateLook()
 end sub
+
+sub UpdatePlayabilityBadge()
+    videoState = m.top.itemContent.videoCompatibilityState
+    audioState = m.top.itemContent.audioCompatibilityState
+    if videoState = invalid or audioState = invalid or videoState = "server"
+        m.playabilityBadge.visible = false
+        SetCardTitleLayout(false)
+        return
+    end if
+
+    SetCardTitleLayout(true)
+    t = Theme()
+    videoStatusColor = CompatibilityColor(videoState, t)
+    audioStatusColor = CompatibilityColor(audioState, t)
+    m.videoCompatibilityIcon.blendColor = videoStatusColor
+    m.audioCompatibilityIcon.blendColor = audioStatusColor
+    m.videoCompatibilityStatusIcon.uri = CompatibilityStatusIcon(videoState)
+    m.audioCompatibilityStatusIcon.uri = CompatibilityStatusIcon(audioState)
+    m.videoCompatibilityStatusIcon.blendColor = videoStatusColor
+    m.audioCompatibilityStatusIcon.blendColor = audioStatusColor
+    m.playabilityBadge.visible = true
+end sub
+
+' The media-type icon identifies the row; a separate status glyph keeps the
+' result understandable without relying on color alone.
+function CompatibilityStatusIcon(state as string) as string
+    if state = "supported" then return "pkg:/images/check.png"
+    if state = "partial" then return "pkg:/images/some.png"
+    if state = "unsupported" then return "pkg:/images/x.png"
+    return "pkg:/images/question.png"
+end function
+
+' Direct-play cards reserve a small part of the title row for status icons.
+' Server-routed streams have no device status, so their title uses the full row.
+sub SetCardTitleLayout(showCompatibility as boolean)
+    width = 1022
+    if showCompatibility then width = 830
+    if m.cardTitleWidth = width then return
+    m.cardTitleWidth = width
+    m.title.width = width
+end sub
+
+function CompatibilityColor(state as string, palette as object) as string
+    if state = "supported" then return palette.accentFocus
+    if state = "unsupported" then return palette.accentWarm
+    if state = "partial" then return palette.accentInfo
+    return palette.textSecondary
+end function
 
 sub onItemHasFocusChanged()
     UpdateLook()
@@ -168,8 +227,8 @@ sub onMeasureTick()
         widest = EstimateContentWidth()
     end if
 
-    ' Lines are inset 18 px and the window is 1022 px wide, so 18 + widest - 1022
-    ' is the travel that puts the last glyph fully inside the card edge.
+    ' Descriptions use the full card width; only the title yields space to the
+    ' compact compatibility glyphs.
     widthCap = 1022
     m.overflow = widest - widthCap
 
