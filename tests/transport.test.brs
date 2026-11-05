@@ -13,10 +13,12 @@ function ScriptedHttpClient(script as object, log as object) as object
         m._log.Push({ method: method, url: url, headers: headers, body: body, timeoutMs: timeoutMs })
         for each entry in m._script
             if entry.method = method and (entry.url = invalid or entry.url = url)
-                return { ok: entry.ok, status: entry.status, body: entry.body, error: entry.error }
+                responseHeaders = invalid
+                if entry.responseHeaders <> invalid then responseHeaders = entry.responseHeaders
+                return { ok: entry.ok, status: entry.status, body: entry.body, responseHeaders: responseHeaders, error: entry.error }
             end if
         end for
-        return { ok: false, status: 0, body: "", error: "no scripted response" }
+        return { ok: false, status: 0, body: "", responseHeaders: invalid, error: "no scripted response" }
     end function
     client.requestLong = function(method as string, url as string, headers = invalid as dynamic, body = invalid as dynamic) as object
         return m.request(method, url, headers, body)
@@ -250,6 +252,21 @@ sub Test_Transport_Head_ForwardsTimeout()
     ' on top of the probe loop that is already waiting behind it.
     Harness_Equal(log[0].timeoutMs, 8000, "the warm-up's timeout reaches the client")
     Harness_Equal(log[1].timeoutMs, 15000, "no timeout given keeps the 15s default, so every other caller is unchanged")
+end sub
+
+sub Test_Transport_HeadForwardsRequestHeaders()
+    Harness_Suite("Transport.Head forwards playback headers for format probes")
+    log = []
+    script = [
+        { method: "HEAD", ok: true, status: 200, body: "", responseHeaders: { "Content-Type": "text/plain", "Content-Length": "42" }, error: "" }
+    ]
+    transport = Transport(ScriptedHttpClient(script, log))
+    result = transport.Head("https://video.example/master.txt", 3000, { Referer: "https://source.example/" })
+
+    Harness_Ok(result.ok, "HEAD probe succeeds")
+    Harness_Equal(result.responseHeaders["Content-Type"], "text/plain", "response headers are surfaced raw")
+    Harness_Equal(log[0].headers.Referer, "https://source.example/", "proxy Referer reaches the format probe")
+    Harness_Equal(log[0].timeoutMs, 3000, "format probe timeout reaches the client")
 end sub
 
 sub Test_Transport_EndpointUrl()

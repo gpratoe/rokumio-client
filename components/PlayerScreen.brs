@@ -171,9 +171,8 @@ function OnEnter(params as object) as void
     StartSubtitles(params)
 end function
 
-' Kick the stream resolution off the render thread. The task frees the UI as the
-' create/torrent warm-up parks (up to the long timeout); a direct URL resolves
-' instantly through the same path.
+' Kick stream resolution off the render thread. The task frees the UI while the
+' torrent engine warms or an ambiguous direct URL gets a short format probe.
 '
 ' Season and episode go across as INTEGERS, not as the name fragments the server
 ' will match release names against. Two reasons, and the second is the one that
@@ -369,7 +368,7 @@ sub onResolveResult()
             return
         end if
 
-        StartPlayback(result.url, result.streamFormat)
+        StartPlayback(result.url, result.streamFormat, result.requestHeaders)
     catch e
         ' Printed on purpose: this catch used to swallow the failure in silence,
         ' which is how a dead player came to look exactly like one still
@@ -1205,19 +1204,20 @@ sub CreateVideo()
     CustomizeVideoNode()
 end sub
 
-' The resolved URL is the only thing that ever touches the Video node: build the
-' content (title, resume offset, resolved stream format), then play. Captions do
-' not arrive mid-play: whatever the drain has delivered rides the content
-' pre-play, and a result that lands after `control = "play"` is dropped rather
-' than written (see onSubtitleResult).
+' The resolved URL and request headers are the stream-specific data handed to the
+' Video node: apply headers, build the content (title, resume offset, resolved
+' stream format), then play. Captions do not arrive mid-play: whatever the drain
+' has delivered rides the content pre-play, and a result that lands after
+' `control = "play"` is dropped rather than written (see onSubtitleResult).
 '
 ' The format is resolved by PlaybackStore and rides the resolve result, the same
 ' one path a direct URL and a torrent take. It must not be re-sniffed here: Roku
 ' defaults an unset streamFormat to MP4, so an MKV or an HLS manifest handed over
 ' with nothing declared buffers and then errors.
-sub StartPlayback(url as string, streamFormat = "" as string)
+sub StartPlayback(url as string, streamFormat = "" as string, requestHeaders = invalid as dynamic)
     m.playArmed = false
     CreateVideo()
+    ApplyPlaybackHeaders(requestHeaders)
     ResetRecovery()
     if m.stallWatch <> invalid
         m.stallWatch.control = "stop"
@@ -1272,6 +1272,27 @@ sub StartPlayback(url as string, streamFormat = "" as string)
         StopPreVideoPulse()
         m.video.control = "play"
     end if
+end sub
+
+' Replace the Video node's request headers for every play. SetHeaders is on the
+' node's ifHttpAgent interface and applies to the native player's URL requests;
+' replacing with an empty map also prevents one stream's headers leaking into
+' the next. A header API failure must not prevent ordinary direct playback.
+sub ApplyPlaybackHeaders(requestHeaders as dynamic)
+    if m.video = invalid then return
+    if requestHeaders = invalid then requestHeaders = {}
+    if Type(requestHeaders) <> "roAssociativeArray" then requestHeaders = {}
+
+    try
+        applied = m.video.SetHeaders(requestHeaders)
+        if applied <> true
+            print "[video] SetHeaders returned false; continuing with " ; requestHeaders.Count() ; " add-on header(s)"
+        else if requestHeaders.Count() > 0
+            print "[video] applied " ; requestHeaders.Count() ; " add-on playback header(s)"
+        end if
+    catch e
+        print "[video] SetHeaders failed (continuing without add-on headers): " ; e.message
+    end try
 end sub
 
 ' The deferred half of StartPlayback, and where playback waits for captions.

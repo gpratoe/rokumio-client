@@ -5,10 +5,11 @@
 ' on a message port with Wait); tests inject a fake client so every store,
 ' Transport itself included, runs in the brs interpreter with no device calls.
 '
-' The client seam returns a raw result { ok, status, body, error }. Transport
-' normalizes that into { ok, status, json, error }: it parses the body as JSON
-' and treats an unparseable body on an otherwise-successful response as a
-' failure. Stores read result.json and never care where the bytes came from.
+' The client seam returns a raw result { ok, status, body, responseHeaders,
+' error }. Transport normalizes that into { ok, status, json, error }: it parses
+' the body as JSON and treats an unparseable body on an otherwise-successful
+' response as a failure. Stores read result.json and never care where the bytes
+' came from.
 '
 ' Helpers live as instance methods: Roku scopes user-defined global functions
 ' per component, so a bare global called from a method that is invoked from
@@ -135,7 +136,7 @@ function CreateSyncHttpClient() as object
     ' resolve to invalid when a caller from another component invokes the
     ' request functions — anything user-defined must be reachable through m.
     client._attempt = function(request as object) as object
-        result = { ok: false, status: 0, body: "", error: "" }
+        result = { ok: false, status: 0, body: "", responseHeaders: {}, error: "" }
         transfer = CreateObject("roUrlTransfer")
         transfer.SetUrl(request.url)
         if request.headers <> invalid then transfer.SetHeaders(request.headers)
@@ -192,6 +193,13 @@ function CreateSyncHttpClient() as object
 
         result.body = event.GetString()
         result.status = event.GetResponseCode()
+        try
+            responseHeaders = event.GetResponseHeaders()
+            if responseHeaders <> invalid then result.responseHeaders = responseHeaders
+        catch ignoredResponseHeaders
+            ' A response without available HTTP headers is still a valid body/status
+            ' result; format detection simply falls back to the other clues.
+        end try
         result.ok = result.status >= 200 and result.status < 300
         if not result.ok
             ' A negative status is the transfer never completing — refused
@@ -319,20 +327,18 @@ class Transport
 
     ' A GET whose body comes back as text instead of being parsed as JSON.
     '
-    ' Only for the streaming server's HLS manifest, which is not JSON. Through
-    ' Get a perfectly good playlist reads back as "invalid JSON response" — the
-    ' one response whose text is the entire diagnosis would be the one response
-    ' thrown away.
+    ' Used for text responses such as HLS manifests and format-sniff prefixes,
+    ' which are not JSON. Through Get, a perfectly good playlist reads back as
+    ' "invalid JSON response" — the one response whose text is the diagnosis
+    ' would be the one response thrown away.
     ' timeoutMs is a parameter because the one caller that polls — the playlist
     ' readiness probe — wants a timeout of its own, and at the default 15s a dead
     ' server would let its four attempts stretch the player's wait past a minute.
     ' The default keeps every other caller's behaviour untouched.
     '
-    ' headers is here for the one GET that must not read the whole response: the
-    ' streaming server's torrent route serves a feature-sized body, so asking it
-    ' for a byte range through a Range header is what turns a readiness check into
-    ' 64KB instead of a buffered film. Kept optional so the probe's existing
-    ' two-argument call is untouched.
+    ' headers supports ranged reads (torrent warm-up and ambiguous-format sniffing)
+    ' and per-stream proxy requirements. Callers that need a prefix pass Range;
+    ' callers that need add-on authentication pass the corresponding headers.
     function GetRaw(url as string, timeoutMs = REQUEST_TIMEOUT_MS as integer, headers = invalid as dynamic) as object
         return m.client.request("GET", url, headers, invalid, timeoutMs)
     end function
@@ -341,9 +347,10 @@ class Transport
     '
     ' Raw rather than m.Result(), for the same reason GetRaw is: there is no body
     ' to parse, and running "" through Parse would manufacture an "invalid JSON
-    ' response" failure out of a request that actually succeeded.
-    function Head(url as string, timeoutMs = REQUEST_TIMEOUT_MS as integer) as object
-        return m.client.request("HEAD", url, invalid, invalid, timeoutMs)
+    ' response" failure out of a request that actually succeeded. Optional custom
+    ' headers let stream-format probes honor the add-on's proxyHeaders.
+    function Head(url as string, timeoutMs = REQUEST_TIMEOUT_MS as integer, headers = invalid as dynamic) as object
+        return m.client.request("HEAD", url, headers, invalid, timeoutMs)
     end function
 
     function Post(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object

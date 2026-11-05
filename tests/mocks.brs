@@ -51,11 +51,13 @@ function ScriptedTransport(script as object) as object
         for each entry in m._script
             if (entry.method = invalid or entry.method = method) and (entry.url = invalid or entry.url = url)
                 m.log.Push({ method: method, url: url, headers: headers, timeoutMs: timeoutMs, body: entry.body })
-                return { ok: entry.ok, status: entry.status, body: entry.body, error: entry.error }
+                responseHeaders = invalid
+                if entry.responseHeaders <> invalid then responseHeaders = entry.responseHeaders
+                return { ok: entry.ok, status: entry.status, body: entry.body, responseHeaders: responseHeaders, error: entry.error }
             end if
         end for
         m.log.Push({ method: method, url: url, headers: headers, timeoutMs: timeoutMs, body: invalid })
-        return { ok: false, status: 0, body: invalid, error: "no scripted response" }
+        return { ok: false, status: 0, body: invalid, responseHeaders: invalid, error: "no scripted response" }
     end function
     ' timeoutMs is accepted and logged, not just ignored, matching Transport's real
     ' signatures. A mock that swallows it cannot show that two requests were given
@@ -69,8 +71,8 @@ function ScriptedTransport(script as object) as object
     ' The HEAD twin: raw-shaped, because a HEAD carries no body to parse and
     ' Transport.Head returns the client's raw result for the same reason
     ' GetRaw does.
-    transport.Head = function(url as string, timeoutMs = invalid as dynamic) as object
-        return m._respondRaw("HEAD", url, invalid, timeoutMs)
+    transport.Head = function(url as string, timeoutMs = invalid as dynamic, headers = invalid as dynamic) as object
+        return m._respondRaw("HEAD", url, headers, timeoutMs)
     end function
     transport.Post = function(url as string, body = invalid as dynamic, headers = invalid as dynamic) as object
         return m._respond("POST", url, body, headers)

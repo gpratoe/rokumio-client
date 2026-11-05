@@ -163,6 +163,42 @@ function checkDeferredVideoPlayContract() {
     return ok;
 }
 
+function checkPlaybackProxyHeadersContract() {
+    const fs = require('fs');
+    const store = fs.readFileSync(path.join(projectRoot, 'source', 'stores', 'PlaybackStore.bs'), 'utf8');
+    const transport = fs.readFileSync(path.join(projectRoot, 'source', 'stores', 'Transport.bs'), 'utf8');
+    const player = fs.readFileSync(path.join(projectRoot, 'components', 'PlayerScreen.brs'), 'utf8');
+    const task = fs.readFileSync(path.join(projectRoot, 'components', 'StreamResolveTask.brs'), 'utf8');
+    const code = (src) => src.split('\n').map((line) => line.split("'")[0]).join('\n');
+    let ok = true;
+    const err = (m) => { console.error(m); ok = false; };
+
+    if (!/function\s+StreamRequestHeaders\(/.test(code(store)) || !/result\.requestHeaders\s*=\s*m\.StreamRequestHeaders\(stream\)/.test(code(store))) {
+        err('PlaybackStore.ResolvePlayback does not carry add-on proxyHeaders.request through to playback');
+    }
+    if (!/StartPlayback\(result\.url\s*,\s*result\.streamFormat\s*,\s*result\.requestHeaders\s*\)/.test(code(player))) {
+        err('PlayerScreen drops resolved add-on request headers before handing the stream to Roku');
+    }
+    const start = code(player).split(/^[ \t]*sub\s+StartPlayback\s*\(/m)[1];
+    if (!start || !/ApplyPlaybackHeaders\(requestHeaders\)/.test(start.split(/^[ \t]*end\s+sub\b/m)[0])) {
+        err('PlayerScreen.StartPlayback does not configure Video request headers for this play');
+    }
+    const apply = code(player).split(/^[ \t]*sub\s+ApplyPlaybackHeaders\s*\(/m)[1];
+    if (!apply || !/m\.video\.SetHeaders\(requestHeaders\)/.test(apply.split(/^[ \t]*end\s+sub\b/m)[0])) {
+        err('PlayerScreen does not apply proxyHeaders through the Video node HTTP agent');
+    }
+    if (!/event\.GetResponseHeaders\(\)/.test(code(transport)) || !/responseHeaders\s*:\s*\{\}/.test(code(transport))) {
+        err('Transport drops response headers, so format discovery cannot use the server Content-Type');
+    }
+    if (!/function\s+NeedsFormatProbe\(/.test(code(store)) || !/function\s+ProbeStreamFormat\(/.test(code(store)) || !/m\.transport\.Head\(/.test(code(store)) || !/m\.transport\.GetRaw\(/.test(code(store))) {
+        err('PlaybackStore lacks the conditional HEAD/ranged-prefix format probe');
+    }
+    if (!/store\.NeedsFormatProbe\(stream,\s*resolved\.url\)/.test(code(task)) || !/store\.ProbeStreamFormat\(resolved\.url,\s*resolved\.requestHeaders,\s*m\.top\)/.test(code(task)) || !/resolved\.streamFormat\s*=\s*resolved\.formatProbe\.format/.test(code(task))) {
+        err('StreamResolveTask does not run the ambiguous-format probe and apply its detected format');
+    }
+    return ok;
+}
+
 function checkScreenRuntimeHazards() {
     const fs = require('fs');
     const dir = path.join(projectRoot, 'components');
@@ -3833,7 +3869,7 @@ function checkStreamFormatQueryContract() {
     if (/function\s+DetectStreamFormat\s*\(/.test(player)) {
         err('PlayerScreen.brs still defines DetectStreamFormat() — PlaybackStore owns stream-format detection now, so the player must consume the resolved value');
     }
-    if (!/StartPlayback\(\s*result\.url\s*,\s*result\.streamFormat\s*\)/.test(player)) {
+    if (!/StartPlayback\(\s*result\.url\s*,\s*result\.streamFormat\s*(?:,\s*result\.requestHeaders\s*)?\)/.test(player)) {
         err('PlayerScreen.brs does not forward result.streamFormat into StartPlayback — the Video node would fall back to the default MP4 container');
     }
 
@@ -5906,6 +5942,7 @@ async function main() {
     // the suite mocks callFunc, so a missing declaration would pass tests but
     // silently no-op on device. Guard the contract here.
     if (!checkDirectPlayContract()) process.exit(1);
+    if (!checkPlaybackProxyHeadersContract()) process.exit(1);
     if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkDeviceCapContract() || !checkCodecPlaybackContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkHomeCatalogResultsAreIncremental() || !checkStopSignalContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkLibraryPutTaskContract() || !checkAddonsWriteTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkSettingsSectionsContract() || !checkTorrentProfileContract() || !checkCacheSizeContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract() || !checkMetaFieldCoercionContract() || !checkStringOfContract() || !checkI18nContract() || !checkNoUntranslatedLiterals() || !checkEpisodeSeriesBatchContract() || !checkStoreAddonValueContract() || !checkAddonJsonContract() || !checkSubtitlePlayGateContract() || !checkPreVideoIndicatorContract() || !checkPreVideoWaitLabelContract() || !checkNativeBufferingSuppressionContract()) {
         process.exit(1);
     }
