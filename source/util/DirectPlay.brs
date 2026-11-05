@@ -127,41 +127,32 @@ function DirectPlayHints(stream as dynamic) as object
     video = []
     audio = []
     alternatives = []
+    hasAc3 = false
+    hasEac3 = false
+    hasTruehd = false
+    hasAtmos = false
 
-    if DirectPlayHasAny(normalized, ["h264", "h 264", "avc", "avc1", "x264"])
-        DirectPlayPushUnique(video, "h264")
-    end if
-    if DirectPlayHasAny(normalized, ["h265", "h 265", "hevc", "x265"])
-        DirectPlayPushUnique(video, "hevc")
-    end if
-    if DirectPlayHas(normalized, "av1") then DirectPlayPushUnique(video, "av1")
-    if DirectPlayHas(normalized, "vp9") then DirectPlayPushUnique(video, "vp9")
-    if DirectPlayHasAny(normalized, ["mpeg4", "mpeg 4", "xvid"])
-        DirectPlayPushUnique(video, "mpeg4")
-    end if
+    for each rule in DirectPlayCodecRules()
+        if not DirectPlayRuleMatches(normalized, rule) then continue for
+        if rule.family = "video"
+            DirectPlayPushUnique(video, rule.codec)
+        else if rule.family = "audioAlternative"
+            hasAtmos = true
+        else if rule.codec = "ac3"
+            ' Resolve this after E-AC-3 so the shorter Dolby Digital alias can
+            ' never shadow Dolby Digital Plus in the same release label.
+            hasAc3 = true
+        else
+            DirectPlayPushUnique(audio, rule.codec)
+            if rule.codec = "eac3" then hasEac3 = true
+            if rule.codec = "truehd" then hasTruehd = true
+        end if
+    end for
 
-    hasDolbyPlus = DirectPlayHasDolbyDigitalPlus(normalized)
-    hasEac3 = DirectPlayHasAny(normalized, ["eac3", "eac 3", "e ac3", "e ac 3", "ec3", "ec 3"]) or hasDolbyPlus
-    hasAtmos = DirectPlayHasAny(normalized, ["atmos", "dolby atmos"])
-    hasTruehd = DirectPlayHasAny(normalized, ["truehd", "true hd", "dolby truehd"])
-    if hasEac3 then DirectPlayPushUnique(audio, "eac3")
+    if hasAc3 and not hasEac3 and not hasAtmos then DirectPlayPushUnique(audio, "ac3")
     if hasAtmos and not hasEac3 and not hasTruehd
         alternatives.Push({ codecs: ["eac3", "truehd"] })
     end if
-
-    ' Check the enhanced Dolby label first so "Dolby Digital Plus" is never
-    ' reduced to AC-3 by its shorter "Dolby Digital" prefix.
-    hasAc3 = DirectPlayHasAc3(normalized)
-    if hasAc3 and not hasEac3 and not hasAtmos then DirectPlayPushUnique(audio, "ac3")
-
-    if hasTruehd then DirectPlayPushUnique(audio, "truehd")
-    if DirectPlayHasAny(normalized, ["aac", "he aac"]) then DirectPlayPushUnique(audio, "aac")
-    if DirectPlayHasAny(normalized, ["mp3", "mpeg audio layer 3"]) then DirectPlayPushUnique(audio, "mp3")
-    if DirectPlayHasAny(normalized, ["dts", "dts hd", "dts x"]) then DirectPlayPushUnique(audio, "dts")
-    if DirectPlayHas(normalized, "flac") then DirectPlayPushUnique(audio, "flac")
-    if DirectPlayHas(normalized, "alac") then DirectPlayPushUnique(audio, "alac")
-    if DirectPlayHas(normalized, "opus") then DirectPlayPushUnique(audio, "opus")
-    if DirectPlayHas(normalized, "vorbis") then DirectPlayPushUnique(audio, "vorbis")
 
     hints.video = video
     hints.audio = audio
@@ -178,20 +169,45 @@ function DirectPlayUnknownHints(stream as dynamic) as object
     return { isDirect: url.Trim() <> "", video: [], audio: [], audioAlternatives: [] }
 end function
 
-' Common spellings and branding for Dolby Digital Plus / E-AC-3, including
-' channel-count suffixes written without a separator (DDP5.1, DD+5.1).
-function DirectPlayHasDolbyDigitalPlus(text as string) as boolean
-    explicit = DirectPlayHasAny(text, ["dd plus", "ddpplus", "dolbydigitalplus", "dolby digital plus"])
-    compactSuffix = DirectPlayHasTokenPrefix(text, "ddp") or DirectPlayHasTokenPrefix(text, "dolbydigitalplus")
-    spacedSuffix = DirectPlayHasPhrasePrefix(text, "dd plus") or DirectPlayHasPhrasePrefix(text, "dolby digital plus")
-    return explicit or compactSuffix or spacedSuffix
+function DirectPlayCodecRules() as object
+    ' Cache the immutable alias table in this component's script scope. The
+    ' StreamsLoaderTask calls DirectPlayHints many times in one worker run, and
+    ' rebuilding the rule arrays for each stream would add needless allocations.
+    if m._directPlayCodecRules = invalid
+        m._directPlayCodecRules = [
+            { family: "video", codec: "h264", exact: ["h264", "h 264", "avc", "avc1", "x264"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "video", codec: "hevc", exact: ["h265", "h 265", "hevc", "x265"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "video", codec: "av1", exact: ["av1"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "video", codec: "vp9", exact: ["vp9"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "video", codec: "mpeg4", exact: ["mpeg4", "mpeg 4", "xvid"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "eac3", exact: ["eac3", "eac 3", "e ac3", "e ac 3", "ec3", "ec 3", "dd plus", "ddpplus", "dolbydigitalplus", "dolby digital plus"], tokenPrefixes: ["ddp", "dolbydigitalplus"], phrasePrefixes: ["dd plus", "dolby digital plus"] },
+            { family: "audio", codec: "ac3", exact: ["ac3", "ac 3", "dolbydigital", "dolby digital", "dd"], tokenPrefixes: ["dd"], phrasePrefixes: [] },
+            { family: "audioAlternative", codec: "atmos", exact: ["atmos", "dolby atmos"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "truehd", exact: ["truehd", "true hd", "dolby truehd"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "aac", exact: ["aac", "he aac"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "mp3", exact: ["mp3", "mpeg audio layer 3"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "dts", exact: ["dts", "dts hd", "dts x"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "flac", exact: ["flac"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "alac", exact: ["alac"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "opus", exact: ["opus"], tokenPrefixes: [], phrasePrefixes: [] },
+            { family: "audio", codec: "vorbis", exact: ["vorbis"], tokenPrefixes: [], phrasePrefixes: [] }
+        ]
+    end if
+    return m._directPlayCodecRules
 end function
 
-' Common spellings for Dolby Digital / AC-3. The caller suppresses this alias
-' when the longer Dolby Digital Plus form was found.
-function DirectPlayHasAc3(text as string) as boolean
-    explicit = DirectPlayHasAny(text, ["ac3", "ac 3", "dolbydigital", "dolby digital", "dd"])
-    return explicit or DirectPlayHasTokenPrefix(text, "dd")
+' One rule shape handles exact aliases and the two suffix forms. Keeping the
+' data here makes new provider spellings explicit without duplicating matcher
+' logic in the parser.
+function DirectPlayRuleMatches(text as string, rule as object) as boolean
+    if DirectPlayHasAny(text, rule.exact) then return true
+    for each prefix in rule.tokenPrefixes
+        if DirectPlayHasTokenPrefix(text, prefix) then return true
+    end for
+    for each phrase in rule.phrasePrefixes
+        if DirectPlayHasPhrasePrefix(text, phrase) then return true
+    end for
+    return false
 end function
 
 ' Keep the URL path and filename-bearing query values, but discard credentials,
