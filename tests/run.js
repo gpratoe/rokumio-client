@@ -1674,6 +1674,9 @@ function checkCodecPlaybackContract() {
     if (!/profile\s*=\s*ResolveCodecProfile\s*\(/.test(taskBrs)) {
         err('StreamResolveTask.brs resolve() never builds a codec profile — the advertise list is the whole feature, and without it the URL falls back to the server defaults this work exists to improve on');
     }
+    if (!/if\s+store\.IsTorrent\(stream\)\s+then\s+profile\s*=\s*ResolveCodecProfile\(\)/.test(body(taskBrs, 'resolve'))) {
+        err('StreamResolveTask must only probe device codecs for torrent/server-transcoded streams — direct URLs bypass the server converter and should resolve without that work');
+    }
     if (!/ResolvePlayback\([^)]*\bprofile\b\s*\)/.test(taskBrs)) {
         err('StreamResolveTask.brs resolve() does not pass the profile to ResolvePlayback — the profile is built and then dropped, so the hint route is never taken');
     }
@@ -3852,6 +3855,9 @@ function checkDirectPlayContract() {
     const tile = code(read('components/StreamTile.brs'));
     const tileXml = read('components/StreamTile.xml');
     const tileContentXml = read('components/TileContent.xml');
+    const loader = code(read('components/StreamsLoaderTask.brs'));
+    const loaderXml = read('components/StreamsLoaderTask.xml');
+    const streamEnter = /function OnEnter\([^\n]*\)[\s\S]*?end function/.exec(screen);
 
     if (!/source\/util\/DirectPlay\.brs/.test(screenXml) || !/AsyncTask_Launch\(m\.top,\s*"DirectPlayCapsTask"/.test(screen)) {
         err('StreamsScreen must load the direct-play classifier and launch its device-capability snapshot off the UI thread');
@@ -3862,14 +3868,27 @@ function checkDirectPlayContract() {
     if (!/CodecProbeVideo\(di,\s*candidate,\s*false\)/.test(capsTask) || !/CodecProbeAudio\(di,\s*candidate\)/.test(capsTask)) {
         err('DirectPlayCapsTask must use the shared video/audio capability probes');
     }
-    if (!/DirectPlayClassify\(stream,\s*m\.directPlayCapabilities\)/.test(screen) || !/item\.videoCompatibilityState\s*=/.test(screen) || !/item\.audioCompatibilityState\s*=/.test(screen) || !/item\.videoCompatibilityLabel\s*=/.test(screen) || !/item\.audioCompatibilityLabel\s*=/.test(screen)) {
+    if (!/DirectPlayClassifyHints\(hint,\s*m\.directPlayCapabilities\)/.test(screen) || !/item\.videoCompatibilityState\s*=/.test(screen) || !/item\.audioCompatibilityState\s*=/.test(screen) || !/item\.videoCompatibilityLabel\s*=/.test(screen) || !/item\.audioCompatibilityLabel\s*=/.test(screen)) {
         err('StreamsScreen must attach separate video/audio compatibility states and localized labels to each stream card');
     }
     if (!/row\.CreateChild\("TileContent"\)/.test(screen) || !/<field\s+id="videoCompatibilityState"\s+type="string"/.test(tileContentXml) || !/<field\s+id="audioCompatibilityState"\s+type="string"/.test(tileContentXml) || !/<field\s+id="videoCompatibilityLabel"\s+type="string"/.test(tileContentXml) || !/<field\s+id="audioCompatibilityLabel"\s+type="string"/.test(tileContentXml)) {
         err('Stream compatibility metadata must use TileContent fields so Roku forwards it across the RowList boundary');
     }
-    if (!/url\.Trim\(\)\s*=\s*""[\s\S]*?result\.videoState\s*=\s*"server"[\s\S]*?result\.audioState\s*=\s*"server"/.test(detector) || !/behaviorHints\.filename/.test(detector) || !/DirectPlayAppend\(text,\s*stream\.url\)/.test(detector)) {
+    if (!/url\.Trim\(\)\s*=\s*""\s+then\s+return hints/.test(detector) || !/if\s+hints\.isDirect\s*<>\s*true[\s\S]*?result\.videoState\s*=\s*"server"[\s\S]*?result\.audioState\s*=\s*"server"/.test(detector) || !/behaviorHints\.filename/.test(detector) || !/DirectPlayUrlHintText\(url\)/.test(detector) || !/carriesFilename/.test(detector)) {
         err('DirectPlay must exclude server-routed streams and inspect add-on filenames plus direct URLs for codec hints');
+    }
+    if (!/source\/util\/DirectPlay\.brs/.test(loaderXml) || !/parsedHints\.Push\(DirectPlayHints\(stream\)\)/.test(loader) || !/directPlayHints:\s*parsedHints/.test(loader)) {
+        err('StreamsLoaderTask must parse each stream hint once off the UI thread and return it alongside the stream');
+    }
+    if (!/if\s+provider\.content\s*=\s*invalid[\s\S]*?provider\.content\s*=\s*content[\s\S]*?m\.streamsList\.content\s*=\s*provider\.content/.test(screen)) {
+        err('StreamsScreen must cache each provider card tree for the current visit instead of rebuilding it on every provider switch');
+    }
+    const onExit = /function OnExit\(\)[\s\S]*?end function/.exec(screen);
+    if (!onExit || !/m\.providers\s*=\s*invalid/.test(onExit[0])) {
+        err('StreamsScreen.OnExit must release per-visit stream/card caches; the player return path does not call OnExit');
+    }
+    if (!streamEnter || !/if\s+params\s*=\s*invalid[\s\S]*?RestoreFocus\(\)\s+return/.test(streamEnter[0])) {
+        err('StreamsScreen must restore its current provider on the player return path without starting a fresh stream fetch');
     }
     if (!/id="playabilityBadge"/.test(tileXml) || !/UpdatePlayabilityBadge\(\)/.test(tile) || !/videoState\s*=\s*"server"/.test(tile)) {
         err('StreamTile must show the compatibility badge for direct links and hide it for server-routed streams');

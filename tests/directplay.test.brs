@@ -6,7 +6,7 @@ sub Test_DirectPlay_HintsFromEncodedFilenameUrl()
         url: "https://cdn.example/Show.S02E04.2160p.H.265.Dolby%20Digital%20Plus.mkv?token=opaque"
     }
     hints = DirectPlayHints(stream)
-    Harness_Equal(hints.format, "mkv", "container is found in the link filename")
+    Harness_Ok(hints.isDirect, "a URL is tagged as direct during the background parse")
     Harness_Equal(hints.video.Count(), 1, "one video codec hint is found")
     Harness_Equal(hints.video[0], "hevc", "H.265 is normalized to HEVC")
     Harness_Equal(hints.audio.Count(), 1, "one audio codec hint is found")
@@ -14,6 +14,11 @@ sub Test_DirectPlay_HintsFromEncodedFilenameUrl()
 
     encodedPlus = DirectPlayHints({ url: "https://cdn.example/file?filename=Movie%20x265%20DD%2B%205.1.mkv" })
     Harness_Equal(encodedPlus.audio[0], "eac3", "percent-encoded DD+ in a link filename maps to E-AC-3")
+
+    responseName = DirectPlayHints({ url: "https://cdn.example/object?response-content-disposition=attachment%3B%20filename%3D%22Title%20x265%20DDP5.1.mkv%22&signature=x264" })
+    Harness_Equal(responseName.video.Count(), 1, "the parser reads only filename-bearing URL parameters, not signatures")
+    Harness_Equal(responseName.video[0], "hevc", "an encoded response filename supplies the video hint")
+    Harness_Equal(responseName.audio[0], "eac3", "an encoded response filename supplies the audio hint")
 end sub
 
 sub Test_DirectPlay_BrandAndShortCodecAliases()
@@ -46,34 +51,34 @@ sub Test_DirectPlay_UnknownWithoutCodecHints()
     Harness_Suite("DirectPlay leaves incomplete metadata unknown")
     caps = DirectPlayTestCapabilities("", "")
     stream = { url: "https://cdn.example/movie.mp4", title: "1080p Web-DL" }
-    result = DirectPlayClassify(stream, caps)
-    Harness_Equal(result.state, "unknown", "container and quality alone do not imply a codec")
-    result = DirectPlayClassify({ url: "https://cdn.example/movie.mp4", title: "H.264" }, caps)
-    Harness_Equal(result.state, "unknown", "missing audio metadata prevents a positive claim")
+    result = DirectPlayTestClassify(stream, caps)
+    Harness_Equal(result.videoState, "unknown", "quality alone does not imply video codec support")
+    Harness_Equal(result.audioState, "unknown", "quality alone does not imply audio codec support")
+    result = DirectPlayTestClassify({ url: "https://cdn.example/movie.mp4", title: "H.264" }, caps)
     Harness_Equal(result.videoState, "supported", "the known video codec is still reported as supported")
     Harness_Equal(result.audioState, "unknown", "missing audio metadata is reported separately")
-    result = DirectPlayClassify({ url: "https://cdn.example/movie", title: "H.264 AAC" }, caps)
+    result = DirectPlayTestClassify({ url: "https://cdn.example/movie", title: "H.264 AAC" }, caps)
     Harness_Equal(result.videoState, "supported", "an opaque container does not erase known video codec support")
     Harness_Equal(result.audioState, "supported", "an opaque container does not erase known audio codec support")
 end sub
 
 sub Test_DirectPlay_CompatibilityStates()
-    Harness_Suite("DirectPlay distinguishes likely, unsupported and unknown")
+    Harness_Suite("DirectPlay reports video/audio capability independently")
     caps = DirectPlayTestCapabilities("", "")
     stream = { url: "https://cdn.example/movie.mkv", title: "H.264 AAC" }
-    result = DirectPlayClassify(stream, caps)
-    Harness_Equal(result.state, "likely", "known container and supported video/audio codecs are likely playable")
+    result = DirectPlayTestClassify(stream, caps)
+    Harness_Equal(result.videoState, "supported", "known video codec is reported independently")
+    Harness_Equal(result.audioState, "supported", "known audio codec is reported independently")
 
     eac3Caps = DirectPlayTestCapabilities("", "eac3")
     eac3Stream = { url: "https://cdn.example/movie.mkv", title: "H.264 Dolby Digital Plus" }
-    result = DirectPlayClassify(eac3Stream, eac3Caps)
+    result = DirectPlayTestClassify(eac3Stream, eac3Caps)
     Harness_Equal(result.videoState, "supported", "an unsupported audio codec does not downgrade supported video")
     Harness_Equal(result.audioState, "unsupported", "a rejected codec is identified as an audio issue")
-    Harness_Equal(result.state, "partial", "an audio limitation is not reported as total stream incompatibility")
 
     multitrackCaps = DirectPlayTestCapabilities("", "truehd")
     multitrack = { url: "https://cdn.example/movie.mkv", title: "H.264 DDP 5.1 English TrueHD Atmos" }
-    result = DirectPlayClassify(multitrack, multitrackCaps)
+    result = DirectPlayTestClassify(multitrack, multitrackCaps)
     Harness_Equal(result.videoState, "supported", "video verdict stays independent for a multi-audio file")
     Harness_Equal(result.audioState, "partial", "supported and unsupported tracks are reported as mixed")
 
@@ -87,24 +92,29 @@ sub Test_DirectPlay_CompatibilityStates()
     Harness_Ok(audioHintsOk, "DDP and TrueHD are kept as separate audio-track hints")
 
     unavailable = { available: false, video: [], audio: [] }
-    result = DirectPlayClassify(stream, unavailable)
-    Harness_Equal(result.state, "unknown", "unavailable device probes never become a negative verdict")
+    result = DirectPlayTestClassify(stream, unavailable)
+    Harness_Equal(result.videoState, "unknown", "unavailable device probes never become a negative video verdict")
+    Harness_Equal(result.audioState, "unknown", "unavailable device probes never become a negative audio verdict")
 
     av1 = { url: "https://cdn.example/movie.mp4", title: "AV1 AAC" }
-    result = DirectPlayClassify(av1, caps)
-    Harness_Equal(result.state, "unknown", "a positive chip answer without a validated direct path stays unknown")
+    result = DirectPlayTestClassify(av1, caps)
+    Harness_Equal(result.videoState, "unknown", "a positive chip answer without a validated direct path stays unknown")
+    Harness_Equal(result.audioState, "supported", "audio capability remains independent of an uncertain video path")
 end sub
 
 sub Test_DirectPlay_TorrentsAreExcluded()
     Harness_Suite("DirectPlay does not label server-transcoded torrents")
     stream = { infoHash: "abcdef123456", title: "H.264 AAC movie.mkv" }
-    result = DirectPlayClassify(stream, DirectPlayTestCapabilities("", ""))
-    Harness_Equal(result.state, "server", "a torrent without a direct URL has no device compatibility badge")
-    Harness_Equal(result.videoState, "server", "server-routed streams are marked distinctly for the tile")
+    hints = DirectPlayHints(stream)
+    Harness_Ok(not hints.isDirect, "torrent hints stay server-routed before classification")
+    result = DirectPlayClassifyHints(hints, DirectPlayTestCapabilities("", ""))
+    Harness_Equal(result.videoState, "server", "a torrent without a direct URL has no video compatibility badge")
+    Harness_Equal(result.audioState, "server", "a torrent without a direct URL has no audio compatibility badge")
 
     direct = { url: "https://cdn.example/movie.mkv", infoHash: "abcdef123456", title: "H.264 AAC" }
-    result = DirectPlayClassify(direct, DirectPlayTestCapabilities("", ""))
-    Harness_Equal(result.state, "likely", "a direct URL keeps precedence when a stream also carries an infoHash")
+    result = DirectPlayTestClassify(direct, DirectPlayTestCapabilities("", ""))
+    Harness_Equal(result.videoState, "supported", "a direct URL keeps precedence when a stream also carries an infoHash")
+    Harness_Equal(result.audioState, "supported", "both codec checks apply to the direct URL")
 end sub
 
 function DirectPlayTestCapabilities(unsupportedVideo as string, unsupportedAudio as string) as object
@@ -117,4 +127,8 @@ function DirectPlayTestCapabilities(unsupportedVideo as string, unsupportedAudio
         audio.Push({ codec: codec, known: true, ok: codec <> unsupportedAudio })
     end for
     return { available: true, video: video, audio: audio }
+end function
+
+function DirectPlayTestClassify(stream as dynamic, capabilities as dynamic) as object
+    return DirectPlayClassifyHints(DirectPlayHints(stream), capabilities)
 end function

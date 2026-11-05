@@ -203,14 +203,14 @@
       "noStreamsForProvider": "No streams found for this provider.",
       "loadingStreams": "Loading streams…",
       "streamFallback": "Stream",
-      "videoCodecSupported": "Video: likely supported",
-      "videoCodecUnsupported": "Video: may not play",
+      "videoCodecSupported": "Video codec: supported",
+      "videoCodecUnsupported": "Video codec: may fail",
       "videoCodecPartial": "Video: mixed codec hints",
-      "videoCodecUnknown": "Video: unknown",
-      "audioCodecSupported": "Audio: likely supported",
-      "audioCodecUnsupported": "Audio: may not play",
+      "videoCodecUnknown": "Video codec: unknown",
+      "audioCodecSupported": "Audio codec: supported",
+      "audioCodecUnsupported": "Audio codec: may fail",
       "audioCodecPartial": "Audio: some tracks may fail",
-      "audioCodecUnknown": "Audio: unknown"
+      "audioCodecUnknown": "Audio codec: unknown"
     },
     "player": {
       "sourceUnavailable": "This source is poorly available or your internet connection is not fast enough.",
@@ -476,14 +476,14 @@
       "noStreamsForProvider": "No se encontraron streams para este proveedor.",
       "loadingStreams": "Cargando streams…",
       "streamFallback": "Stream",
-      "videoCodecSupported": "Vídeo: probablemente compatible",
-      "videoCodecUnsupported": "Vídeo: puede no reproducirse",
+      "videoCodecSupported": "Vídeo: códec compatible",
+      "videoCodecUnsupported": "Vídeo: códec puede fallar",
       "videoCodecPartial": "Vídeo: indicios mixtos",
-      "videoCodecUnknown": "Vídeo: desconocido",
-      "audioCodecSupported": "Audio: probablemente compatible",
-      "audioCodecUnsupported": "Audio: puede no sonar",
-      "audioCodecPartial": "Audio: algunas pistas pueden fallar",
-      "audioCodecUnknown": "Audio: desconocido"
+      "videoCodecUnknown": "Vídeo: códec desconocido",
+      "audioCodecSupported": "Audio: códec compatible",
+      "audioCodecUnsupported": "Audio: códec puede fallar",
+      "audioCodecPartial": "Audio: algunas pistas fallan",
+      "audioCodecUnknown": "Audio: códec desconocido"
     },
     "player": {
       "sourceUnavailable": "Esta fuente está poco disponible o tu conexión a internet no es lo bastante rápida.",

@@ -88,12 +88,11 @@ sub resolve()
         http = Transport()
         store = PlaybackStore(http)
         stream = m.top.stream
-        ' The device's codec answer, read HERE because roDeviceInfo is Task-only.
-        ' The store cannot ask for it: it runs in whatever component includes it
-        ' (five of them) and only this one is guaranteed a Task scope. Nothing in
-        ' this call touches the network, so a failure costs nothing — an empty
-        ' profile simply leaves the legacy URL in place.
-        profile = ResolveCodecProfile()
+        ' Device codec probing is only needed for server-transcoded torrents,
+        ' where the result configures the HLS converter. A direct URL bypasses
+        ' that converter, so probing there only delays the player handoff.
+        profile = invalid
+        if store.IsTorrent(stream) then profile = ResolveCodecProfile()
         resolved = store.ResolvePlayback(m.top.serverAddress, m.top.stream, m.top.season, m.top.episode, profile)
         ' The probe gets its own try, and this is the other half of the fix
         ' described above. It is a diagnostic: its job is to ADD what is known,

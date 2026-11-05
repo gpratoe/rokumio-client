@@ -39,9 +39,6 @@ sub init()
     m.streamsPlaceholder = m.top.FindNode("streamsPlaceholder")
     m.bg = m.top.FindNode("streamBg")
     m.scrim = m.top.FindNode("bgScrim")
-    ' The language the panel was painted in — a language change repaints it.
-    m.textsLanguage = ""
-
     t = Theme()
     m.bg.color = t.screenBg
     m.scrim.color = t.scrim
@@ -71,18 +68,12 @@ sub init()
 end sub
 
 function OnEnter(params as object) as void
-    ' The language first: the panel's chrome (the action line, the synopsis) is
-    ' words, and it survives a visit — so a language change re-applies it.
+    ' Pull the current app language for app-owned labels. Provider names and
+    ' stream descriptions remain exactly as returned by their source.
     RefreshTexts()
-    languageChanged = m.textsLanguage <> TextsLanguage()
-    if languageChanged
-        m.textsLanguage = TextsLanguage()
-        if m.params <> invalid then ApplyParamsChrome(m.params)
-    end if
     ' Re-entry after the player pops: params is invalid and the Group was given
     ' focus by the stack. The stream list must take it back.
     if params = invalid
-        if languageChanged and m.activeIndex >= 0 then RenderActiveProvider()
         RestoreFocus()
         return
     end if
@@ -194,7 +185,14 @@ sub LoadStreams(params as object)
             if addon.address <> invalid and addon.address <> ""
                 name = addon.name
                 if name = invalid or name = "" then name = addon.address
-                providers.Push({ name: name, address: addon.address, streams: [], error: "" })
+                providers.Push({
+                    name: name
+                    address: addon.address
+                    streams: []
+                    directPlayHints: []
+                    content: invalid
+                    error: ""
+                })
             end if
         end if
     end for
@@ -275,9 +273,16 @@ sub onStreamsLoaded(event as object)
     result = task.result
     provider = m.providers[index]
     if result <> invalid and result.streams <> invalid
-        for each stream in result.streams
+        hints = result.directPlayHints
+        for i = 0 to result.streams.Count() - 1
+            stream = result.streams[i]
             provider.streams.Push(stream)
+            hint = invalid
+            if hints <> invalid and i < hints.Count() then hint = hints[i]
+            if hint = invalid then hint = DirectPlayUnknownHints(stream)
+            provider.directPlayHints.Push(hint)
         end for
+        provider.content = invalid
     else if result <> invalid and result.error <> invalid and result.error <> ""
         provider.error = result.error
         if m.loadError = "" then m.loadError = result.error
@@ -487,6 +492,7 @@ sub onDirectPlayCapsLoaded(event as object)
     m.directPlayCapsTask = invalid
     AsyncTask_Reap(task, m.top, false)
     m.directPlayCapabilities = result
+    InvalidateProviderCards()
     if m.activeIndex >= 0 and m.providers <> invalid and m.activeIndex < m.providers.Count()
         if m.providers[m.activeIndex].streams.Count() > 0 then RenderActiveProvider()
     end if
@@ -533,30 +539,40 @@ sub RenderActiveProvider()
         restorePosition = [m.streamsList.rowItemFocused[0], m.streamsList.rowItemFocused[1]]
     end if
 
-    content = CreateObject("roSGNode", "ContentNode")
-    for i = 0 to m.streams.Count() - 1
-        row = content.CreateChild("ContentNode")
-        ' ContentNode drops custom fields across the RowList boundary. TileContent
-        ' declares the playability state/label so StreamTile receives its badge.
-        item = row.CreateChild("TileContent")
-        stream = m.streams[i]
-        item.title = StreamLabel(stream)
-        compatibility = DirectPlayClassify(stream, m.directPlayCapabilities)
-        item.videoCompatibilityState = compatibility.videoState
-        item.audioCompatibilityState = compatibility.audioState
-        item.videoCompatibilityLabel = CompatibilityLabel("video", compatibility.videoState)
-        item.audioCompatibilityLabel = CompatibilityLabel("audio", compatibility.audioState)
-        lines = StreamTitleLines(stream)
-        if lines.Count() > 0
-            description = ""
-            for each line in lines
-                if description <> "" then description = description + chr(10)
-                description = description + line
-            end for
-            item.description = description
-        end if
-    end for
-    m.streamsList.content = content
+    ' The content tree belongs to this provider for the current picker visit.
+    ' Switching providers reuses its TileContent nodes rather than reparsing all
+    ' metadata and rebuilding the whole list on the render thread.
+    if provider.content = invalid
+        content = CreateObject("roSGNode", "ContentNode")
+        for i = 0 to m.streams.Count() - 1
+            row = content.CreateChild("ContentNode")
+            ' ContentNode drops custom fields across the RowList boundary.
+            item = row.CreateChild("TileContent")
+            stream = m.streams[i]
+            item.title = StreamLabel(stream)
+            hint = invalid
+            if provider.directPlayHints <> invalid and i < provider.directPlayHints.Count()
+                hint = provider.directPlayHints[i]
+            end if
+            if hint = invalid then hint = DirectPlayUnknownHints(stream)
+            compatibility = DirectPlayClassifyHints(hint, m.directPlayCapabilities)
+            item.videoCompatibilityState = compatibility.videoState
+            item.audioCompatibilityState = compatibility.audioState
+            item.videoCompatibilityLabel = CompatibilityLabel("video", compatibility.videoState)
+            item.audioCompatibilityLabel = CompatibilityLabel("audio", compatibility.audioState)
+            lines = StreamTitleLines(stream)
+            if lines.Count() > 0
+                description = ""
+                for each line in lines
+                    if description <> "" then description = description + chr(10)
+                    description = description + line
+                end for
+                item.description = description
+            end if
+        end for
+        provider.content = content
+    end if
+    m.streamsList.content = provider.content
     m.streamsList.numRows = m.streams.Count()
     if not m.listFilled
         m.listFilled = true
@@ -566,6 +582,16 @@ sub RenderActiveProvider()
         if restorePosition[0] >= m.streams.Count() then restorePosition[0] = m.streams.Count() - 1
         m.streamsList.jumpToRowItem = restorePosition
     end if
+end sub
+
+' Capability and language changes invalidate this visit's rendered cards once;
+' provider switches do not. The underlying stream results and parsed hints stay
+' attached to their provider until OnExit clears the visit.
+sub InvalidateProviderCards()
+    if m.providers = invalid then return
+    for each provider in m.providers
+        provider.content = invalid
+    end for
 end sub
 
 ' The card owns the visual style; this screen supplies separate localized video
@@ -821,6 +847,18 @@ end function
 function OnExit() as void
     CancelStreamsLoad()
     CancelEpisodeLoad()
+    ' A pop leaves the picker visit. Drop stream and card caches so a later push
+    ' fetches fresh provider results. Pushing PlayerScreen does not call OnExit,
+    ' so returning from playback still reuses the active visit.
+    m.providers = invalid
+    m.providersTotal = 0
+    m.streams = []
+    m.activeIndex = -1
+    m.listFilled = false
+    m.params = invalid
+    m.status.text = ""
+    m.streamsPlaceholder.visible = false
+    EmptyStreamsList()
 end function
 
 function OnBackPressed() as boolean

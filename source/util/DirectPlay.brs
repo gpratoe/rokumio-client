@@ -2,30 +2,23 @@
 ' links. Codec names are read from the add-on's stream hints; hardware answers
 ' are supplied by DirectPlayCapsTask through the shared CodecProbe helpers.
 
-' Classify only direct URLs. A stream with no URL follows the torrent/server
-' path, including a stream with an infoHash and no URL.
-function DirectPlayClassify(stream as dynamic, capabilities as dynamic) as object
+' Classify parsed hints against one device capability snapshot. Parsing is kept
+' separate so it can run once in StreamsLoaderTask, not on every provider switch.
+function DirectPlayClassifyHints(hints as dynamic, capabilities as dynamic) as object
     result = {
-        state: "unknown"
         videoState: "unknown"
         audioState: "unknown"
-        format: ""
         video: []
         audio: []
         audioAlternatives: []
     }
-    if Type(stream) <> "roAssociativeArray" then return result
-
-    url = DirectPlayText(stream.url)
-    if url.Trim() = "" then
-        result.state = "server"
+    if Type(hints) <> "roAssociativeArray" then return result
+    if hints.isDirect <> true
         result.videoState = "server"
         result.audioState = "server"
         return result
     end if
 
-    hints = DirectPlayHints(stream)
-    result.format = hints.format
     result.video = hints.video
     result.audio = hints.audio
     result.audioAlternatives = hints.audioAlternatives
@@ -92,14 +85,6 @@ function DirectPlayClassify(stream as dynamic, capabilities as dynamic) as objec
         end if
     end for
     result.audioState = DirectPlayAggregateState(audioSupported, audioUnsupported, audioUnknown)
-
-    if result.videoState = "unsupported"
-        result.state = "unsupported"
-    else if result.audioState = "unsupported" or result.videoState = "partial" or result.audioState = "partial"
-        result.state = "partial"
-    else if result.videoState = "supported" and result.audioState = "supported" and result.format <> ""
-        result.state = "likely"
-    end if
     return result
 end function
 
@@ -117,12 +102,18 @@ function DirectPlayAggregateState(supported as integer, unsupported as integer, 
     return "unknown"
 end function
 
-' Extract codec-family hints from the fields add-ons commonly use for a file
-' name or release label. The URL is included so a filename in its path or query
-' (including percent-encoded separators) can contribute hints too.
-function DirectPlayHints(stream as object) as object
+' Extract codec-family hints from fields stream providers commonly use for a
+' filename or release label. This pure parser also runs in StreamsLoaderTask.
+function DirectPlayHints(stream as dynamic) as object
+    hints = { isDirect: false, video: [], audio: [], audioAlternatives: [] }
+    if Type(stream) <> "roAssociativeArray" then return hints
+
+    url = DirectPlayText(stream.url)
+    if url.Trim() = "" then return hints
+    hints.isDirect = true
+
     text = ""
-    text = DirectPlayAppend(text, stream.url)
+    text = DirectPlayAppend(text, DirectPlayUrlHintText(url))
     text = DirectPlayAppend(text, stream.name)
     text = DirectPlayAppend(text, stream.title)
     text = DirectPlayAppend(text, stream.description)
@@ -149,7 +140,7 @@ function DirectPlayHints(stream as object) as object
         DirectPlayPushUnique(video, "mpeg4")
     end if
 
-    hasDolbyPlus = DirectPlayHasAny(normalized, ["dd plus", "ddpplus", "dolbydigitalplus", "dolby digital plus"]) or DirectPlayHasTokenPrefix(normalized, "ddp") or DirectPlayHasPhrasePrefix(normalized, "dd plus") or DirectPlayHasTokenPrefix(normalized, "dolbydigitalplus") or DirectPlayHasPhrasePrefix(normalized, "dolby digital plus")
+    hasDolbyPlus = DirectPlayHasDolbyDigitalPlus(normalized)
     hasEac3 = DirectPlayHasAny(normalized, ["eac3", "eac 3", "e ac3", "e ac 3", "ec3", "ec 3"]) or hasDolbyPlus
     hasAtmos = DirectPlayHasAny(normalized, ["atmos", "dolby atmos"])
     hasTruehd = DirectPlayHasAny(normalized, ["truehd", "true hd", "dolby truehd"])
@@ -160,7 +151,7 @@ function DirectPlayHints(stream as object) as object
 
     ' Check the enhanced Dolby label first so "Dolby Digital Plus" is never
     ' reduced to AC-3 by its shorter "Dolby Digital" prefix.
-    hasAc3 = DirectPlayHasAny(normalized, ["ac3", "ac 3", "dolbydigital", "dolby digital", "dd"]) or DirectPlayHasTokenPrefix(normalized, "dd")
+    hasAc3 = DirectPlayHasAc3(normalized)
     if hasAc3 and not hasEac3 and not hasAtmos then DirectPlayPushUnique(audio, "ac3")
 
     if hasTruehd then DirectPlayPushUnique(audio, "truehd")
@@ -172,22 +163,60 @@ function DirectPlayHints(stream as object) as object
     if DirectPlayHas(normalized, "opus") then DirectPlayPushUnique(audio, "opus")
     if DirectPlayHas(normalized, "vorbis") then DirectPlayPushUnique(audio, "vorbis")
 
-    return {
-        format: DirectPlayFormat(normalized)
-        video: video
-        audio: audio
-        audioAlternatives: alternatives
-    }
+    hints.video = video
+    hints.audio = audio
+    hints.audioAlternatives = alternatives
+    return hints
 end function
 
-' The same broad container names PlaybackStore can pass to Roku's Video node.
-' Codec hints alone do not establish a likely result if the container is opaque.
-function DirectPlayFormat(normalized as string) as string
-    if DirectPlayHasAny(normalized, ["m3u8", "m3u"]) then return "hls"
-    if DirectPlayHas(normalized, "mpd") then return "dash"
-    if DirectPlayHas(normalized, "mkv") then return "mkv"
-    if DirectPlayHasAny(normalized, ["mp4", "m4v", "mov"]) then return "mp4"
-    return ""
+' Used only if a loader returns a stream without the matching parsed-hint slot.
+' Preserve direct-versus-server routing but avoid falling back to a costly UI
+' thread parse.
+function DirectPlayUnknownHints(stream as dynamic) as object
+    url = ""
+    if Type(stream) = "roAssociativeArray" then url = DirectPlayText(stream.url)
+    return { isDirect: url.Trim() <> "", video: [], audio: [], audioAlternatives: [] }
+end function
+
+' Common spellings and branding for Dolby Digital Plus / E-AC-3, including
+' channel-count suffixes written without a separator (DDP5.1, DD+5.1).
+function DirectPlayHasDolbyDigitalPlus(text as string) as boolean
+    explicit = DirectPlayHasAny(text, ["dd plus", "ddpplus", "dolbydigitalplus", "dolby digital plus"])
+    compactSuffix = DirectPlayHasTokenPrefix(text, "ddp") or DirectPlayHasTokenPrefix(text, "dolbydigitalplus")
+    spacedSuffix = DirectPlayHasPhrasePrefix(text, "dd plus") or DirectPlayHasPhrasePrefix(text, "dolby digital plus")
+    return explicit or compactSuffix or spacedSuffix
+end function
+
+' Common spellings for Dolby Digital / AC-3. The caller suppresses this alias
+' when the longer Dolby Digital Plus form was found.
+function DirectPlayHasAc3(text as string) as boolean
+    explicit = DirectPlayHasAny(text, ["ac3", "ac 3", "dolbydigital", "dolby digital", "dd"])
+    return explicit or DirectPlayHasTokenPrefix(text, "dd")
+end function
+
+' Keep the URL path and filename-bearing query values, but discard credentials,
+' signatures and unrelated parameters. This matters because signed links can be
+' much longer than the actual release filename.
+function DirectPlayUrlHintText(url as string) as string
+    query = ""
+    queryIndex = url.InStr("?")
+    if queryIndex >= 0
+        path = url.Left(queryIndex)
+        query = url.Mid(queryIndex + 1)
+    else
+        path = url
+    end if
+
+    text = path
+    if query = "" then return text
+    for each parameter in query.Split("&")
+        equals = parameter.InStr("=")
+        if equals < 0 then continue for
+        key = LCase(parameter.Left(equals))
+        carriesFilename = key.InStr("filename") >= 0 or key.InStr("content-disposition") >= 0 or key = "file" or key = "name"
+        if carriesFilename then text = DirectPlayAppend(text, parameter.Mid(equals + 1))
+    end for
+    return text
 end function
 
 ' Convert release-name punctuation and common encoded URL separators into
@@ -202,7 +231,7 @@ function DirectPlayNormalize(text as string) as string
             result = result + " plus "
             i = i + 3
             continue while
-        else if encoded = "%20" or encoded = "%2e" or encoded = "%2d" or encoded = "%5f" or encoded = "%2f" or encoded = "%28" or encoded = "%29"
+        else if encoded = "%20" or encoded = "%2e" or encoded = "%2d" or encoded = "%5f" or encoded = "%2f" or encoded = "%28" or encoded = "%29" or encoded = "%22" or encoded = "%3b" or encoded = "%3d" or encoded = "%5b" or encoded = "%5d"
             result = result + " "
             i = i + 3
             continue while
