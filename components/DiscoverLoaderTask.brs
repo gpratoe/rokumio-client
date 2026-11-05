@@ -6,7 +6,8 @@
 ' The screen hands over the raw genre (empty when unfiltered) rather than a
 ' pre-built extra string so this task can percent-encode it: genres come from
 ' arbitrary add-on manifests and may contain spaces or '&', which a raw query
-' segment would corrupt.
+' segment would corrupt. It also passes whether this catalog declares `skip`,
+' which lets CatalogStore infer a next page from a full standard-sized response.
 sub init()
     m.top.functionName = "discover"
 end sub
@@ -20,7 +21,7 @@ sub discover()
             parts = []
             if m.top.genre <> "" then parts.Push("genre=" + http.EncodeQueryValue(m.top.genre))
             parts.Push("skip=" + m.top.pageOffset.ToStr())
-            answer = catalog.Catalog(m.top.addonAddress, m.top.metaType, m.top.catalogId, parts.Join("&"))
+            answer = catalog.Catalog(m.top.addonAddress, m.top.metaType, m.top.catalogId, parts.Join("&"), m.top.supportsPagination)
             result.ok = answer.ok
             result.error = answer.error
             result.hasMore = answer.hasMore

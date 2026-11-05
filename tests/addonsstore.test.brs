@@ -437,7 +437,7 @@ sub Test_Addons_SupportsResource()
 end sub
 
 sub Test_Addons_CatalogCapabilities()
-    Harness_Suite("AddonsStore.CatalogCapabilities derives search/feed/genre from extras")
+    Harness_Suite("AddonsStore.CatalogCapabilities derives search/feed/pagination/genre from extras")
     addons = AddonsStore(ScriptedTransport([]), invalid)
 
     top = {
@@ -454,7 +454,12 @@ sub Test_Addons_CatalogCapabilities()
     Harness_Ok(topCaps.feed, "optional extras keep it feedable")
     Harness_Ok(topCaps.genre, "genre extra surfaces")
     Harness_Ok(not topCaps.genreRequired, "genre is optional")
+    Harness_Ok(not topCaps.pagination, "catalog without skip does not advertise pagination")
     Harness_Equal(topCaps.genreOptions.Count(), 2, "genre options carried")
+
+    paged = { type: "movie", id: "paged", extra: [{ name: "skip", isRequired: false }] }
+    pagedCaps = addons.CatalogCapabilities(paged)
+    Harness_Ok(pagedCaps.pagination, "modern skip extra enables pagination")
 
     year = {
         type: "movie"
@@ -482,7 +487,7 @@ sub Test_Addons_CatalogCapabilities()
     legacy = {
         type: "movie"
         id: "legacy"
-        extraSupported: ["search", "genre"]
+        extraSupported: ["search", "genre", "skip"]
         extraRequired: ["genre"]
         genres: ["Drama", "Horror"]
     }
@@ -492,9 +497,11 @@ sub Test_Addons_CatalogCapabilities()
     Harness_Equal(legacyCaps.genreOptions.Count(), 2, "top-level genres used as options")
     Harness_Ok(not legacyCaps.search, "required legacy genre blocks search")
     Harness_Ok(legacyCaps.feed, "legacy required genre still feedable")
+    Harness_Ok(legacyCaps.pagination, "legacy extraSupported skip enables pagination")
 
     bare = addons.CatalogCapabilities({ type: "movie", id: "bare" })
     Harness_Ok(bare.feed, "catalog with no extras is feedable")
+    Harness_Ok(not bare.pagination, "catalog with no extras has no pagination")
     Harness_Ok(not bare.search, "catalog with no extras is not searchable")
     Harness_Ok(not bare.genre, "catalog with no extras has no genre")
 

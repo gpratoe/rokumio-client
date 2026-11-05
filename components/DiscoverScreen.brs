@@ -289,6 +289,7 @@ function CatalogsForType() as object
                 sourceName: sourceName
                 rawType: descriptor.type
                 catalogId: descriptor.id
+                supportsPagination: caps.pagination
                 title: m.stores.addons.callFunc("AddonsCatalogTitle", descriptor, source.name)
                 catalog: descriptor
             })
@@ -557,6 +558,7 @@ sub FetchDiscover()
         addonAddress: m.selectedCatalog.address
         metaType: m.selectedCatalog.rawType
         catalogId: m.selectedCatalog.catalogId
+        supportsPagination: m.selectedCatalog.supportsPagination
         genre: GenreFilter()
         pageOffset: 0
     }, "discoverLoader")
@@ -576,6 +578,7 @@ sub LoadMore()
         addonAddress: m.selectedCatalog.address
         metaType: m.selectedCatalog.rawType
         catalogId: m.selectedCatalog.catalogId
+        supportsPagination: m.selectedCatalog.supportsPagination
         genre: GenreFilter()
         pageOffset: m.metas.Count()
     }, "discoverLoaderMore")

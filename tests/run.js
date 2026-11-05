@@ -4161,15 +4161,21 @@ function checkDiscoverSourcesContract() {
     if (!/m\.selectedCatalog\.address/.test(screen) || !/m\.selectedCatalog\.rawType/.test(screen)) {
         err('DiscoverScreen.brs does not fetch against the selected catalog (m.selectedCatalog.address/rawType)');
     }
+    if (!/supportsPagination:\s*caps\.pagination/.test(screen) || !/supportsPagination:\s*m\.selectedCatalog\.supportsPagination/.test(screen)) {
+        err('DiscoverScreen.brs does not carry each selected catalog\'s pagination capability through both first-page and next-page requests');
+    }
     if (!/genre:\s*GenreFilter\(\)/.test(screen)) {
         err('DiscoverScreen.brs does not pass a raw genre to DiscoverLoaderTask');
     }
 
-    if (!/<field id="genre" type="string"/.test(taskXml) || /<field id="extra"/.test(taskXml)) {
-        err('DiscoverLoaderTask.xml must expose a raw genre field and no pre-built extra field');
+    if (!/<field id="genre" type="string"/.test(taskXml) || !/<field id="supportsPagination" type="boolean"/.test(taskXml) || /<field id="extra"/.test(taskXml)) {
+        err('DiscoverLoaderTask.xml must expose a raw genre, pagination capability and no pre-built extra field');
     }
     if (!/http\.EncodeQueryValue\(m\.top\.genre\)/.test(task)) {
         err('DiscoverLoaderTask.brs must percent-encode the manifest-sourced genre before it becomes a URL segment');
+    }
+    if (!/m\.top\.supportsPagination/.test(task) || !/m\.top\.supportsPagination\)/.test(task)) {
+        err('DiscoverLoaderTask.brs does not pass pagination capability to CatalogStore');
     }
 
     if (!/for each addon in m\.top\.addons/.test(sourcesTask)) {

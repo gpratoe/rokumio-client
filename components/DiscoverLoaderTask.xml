@@ -6,6 +6,7 @@
         <field id="catalogId" type="string" value="" />
         <field id="genre" type="string" value="" />
         <field id="pageOffset" type="integer" value="0" />
+        <field id="supportsPagination" type="boolean" value="false" />
         <field id="result" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />

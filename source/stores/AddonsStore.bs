@@ -383,10 +383,11 @@ class AddonsStore
     end function
 
     ' What a catalog descriptor is allowed to be asked for, derived from its
-    ' extras. Three independent answers:
+    ' extras. Four independent answers:
     '   search — the catalog declares search AND nothing beyond search/skip is
     '            required (Stremio sends no genre during a search, so a
     '            required-genre catalog would fail every query).
+    '   pagination — the catalog declares the standard `skip` extra.
     '   feed   — the catalog can be browsed without supplying anything beyond
     '            skip/genre (genre is handled by the screen's chip). This is what
     '            keeps required-extra catalogs like cinemeta's last-videos out of
@@ -395,7 +396,7 @@ class AddonsStore
     '            (falling back to the top-level `genres` array some manifests
     '            ship) and whether a genre is required.
     function CatalogCapabilities(catalog as object) as object
-        caps = { search: false, feed: true, genre: false, genreRequired: false, genreOptions: [] }
+        caps = { search: false, feed: true, pagination: false, genre: false, genreRequired: false, genreOptions: [] }
         if catalog = invalid or Type(catalog) <> "roAssociativeArray" then
             caps.feed = false
             return caps
@@ -412,6 +413,7 @@ class AddonsStore
             name = ""
             if m.HasText(extra.name) then name = extra.name
             if name = "search" then searchDeclared = true
+            if name = "skip" then caps.pagination = true
             if name = "genre"
                 caps.genre = true
                 if extra.options <> invalid and Type(extra.options) = "roArray" then caps.genreOptions = extra.options
