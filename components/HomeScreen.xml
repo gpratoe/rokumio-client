@@ -66,6 +66,7 @@
             rowItemSpacing="[[0, 0]]"
             showRowLabel="[false]"
             drawFocusFeedback="false"
+            skipFocusAnimations="true"
             itemComponentName="RailTile"
             vertFocusAnimationStyle="floatingFocus"/>
 

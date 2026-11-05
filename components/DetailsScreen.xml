@@ -73,6 +73,7 @@
             rowItemSpacing="[[12, 0]]"
             showRowLabel="false"
             drawFocusFeedback="true"
+            skipFocusAnimations="true"
             itemComponentName="ChipTile" />
     </children>
 </component>
