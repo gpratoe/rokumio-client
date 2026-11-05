@@ -28,6 +28,8 @@ async function writeCombinedScript() {
         'tests/helpers.test.brs',
         'tests/addonjson.test.brs',
         'tests/settingsstore.test.brs',
+        'source/util/HomeCatalogs.brs',
+        'tests/homecatalogs.test.brs',
         'tests/authstore.test.brs',
         'tests/addonsstore.test.brs',
         'tests/addonsync.test.brs',
@@ -247,7 +249,7 @@ function checkScreenRuntimeHazards() {
 function checkScreenContract() {
     const fs = require('fs');
     const contract = ['SetStores', 'OnEnter', 'OnExit', 'OnBackPressed', 'BlurFocus'];
-    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen'];
+    const screens = ['HomeScreen', 'DetailsScreen', 'EpisodesScreen', 'StreamsScreen', 'PlayerScreen', 'SettingsScreen', 'HomeRowsScreen', 'AddonsScreen', 'SearchScreen', 'DiscoverScreen', 'LibraryScreen', 'AuthScreen', 'LinkStremioScreen'];
     const declaredSet = (name) => {
         const xml = fs.readFileSync(path.join(projectRoot, 'components', `${name}.xml`), 'utf8');
         return new Set([...xml.matchAll(/<function\s+name="([^"]+)"\s*\/?>/gi)].map(match => match[1]));
@@ -2719,9 +2721,9 @@ function checkHomeCatalogStalenessContract() {
         err('HomeScreen.brs has no EnsureCurrentRows() — the call sites have nothing to call, and a stale grid stays stale');
     } else {
         // Fresh must be a no-op, and the test must come BEFORE the rebuild.
-        const fresh = /if\s+m\.catalogSignature\s*=\s*CatalogSignature\(\)\s+then\s+return/.exec(ensure);
+        const fresh = /if\s+m\.catalogSignature\s*=\s*CatalogSignature\(\)\s+and\s+m\.catalogVisibilitySignature\s*=\s*HomeCatalogVisibilitySignature\(\)\s+then\s+return/.exec(ensure);
         if (!fresh) {
-            err('HomeScreen.brs EnsureCurrentRows() does not short-circuit when the add-on set is unchanged — every launch would re-walk every catalog over the network');
+            err('HomeScreen.brs EnsureCurrentRows() does not short-circuit when both the add-on set and hidden-catalog set are unchanged — every launch would re-walk every catalog over the network');
         }
         if (!/RebuildRows\(\)/.test(ensure)) {
             err('HomeScreen.brs EnsureCurrentRows() never re-derives the grid — it can detect staleness but does nothing about it');
@@ -2787,6 +2789,18 @@ function checkHomeCatalogStalenessContract() {
     const init = body(home, 'init');
     if (!init || !/m\.catalogSignature\s*=\s*""/.test(init)) {
         err('HomeScreen.brs init() does not seed m.catalogSignature — an uninitialised field reads invalid, and invalid would never equal a real signature, so the very first EnsureCurrentRows() would rebuild unconditionally');
+    }
+    if (!init || !/m\.catalogVisibilitySignature\s*=\s*""/.test(init)) {
+        err('HomeScreen.brs init() does not seed m.catalogVisibilitySignature — the Home visibility comparison would be invalid until the first catalog load');
+    }
+
+    const task = code(read('components/HomeCatalogsTask.brs'));
+    const taskXml = read('components/HomeCatalogsTask.xml');
+    const taskBody = body(task, 'load');
+    if (!/<field\s+id="hiddenCatalogs"\s+type="array"\s*\/>/.test(taskXml) || !/HomeCatalogIsHidden\(/.test(taskBody)) {
+        err('HomeCatalogsTask does not receive or apply hidden catalog identities — hidden rows would still be fetched and rendered');
+    } else if (taskBody.indexOf('HomeCatalogIsHidden(') > taskBody.indexOf('catalog.Catalog(')) {
+        err('HomeCatalogsTask checks the hidden set after fetching a catalog — disabled Home rows still cost a network request');
     }
     return ok;
 }

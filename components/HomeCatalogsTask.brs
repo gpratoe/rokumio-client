@@ -4,7 +4,8 @@
 ' notification; the Task never republishes all previous rows. That keeps
 ' cross-thread copies proportional to the catalogs fetched, while Home fills
 ' progressively. A hung add-on costs the worker thread, not a frozen channel.
-' Only plain { address, catalogs } descriptors cross in from HomeScreen.
+' Only plain add-on descriptors and the hidden-catalog selection cross in from
+' HomeScreen; no store object crosses the task boundary.
 
 sub init()
     m.top.functionName = "load"
@@ -26,18 +27,20 @@ sub load()
             end if
             if catalogs <> invalid and Type(catalogs) = "roArray"
                 for each descriptor in catalogs
-                    if CatalogBrowsable(descriptor)
-                        response = catalog.Catalog(addon.address, descriptor.type, descriptor.id)
-                        if response.ok and response.metas <> invalid and response.metas.Count() > 0
-                            row = {
-                                index: index
-                                addonAddress: addon.address
-                                title: CatalogTitle(descriptor, addon)
-                                metaType: descriptor.type
-                                metas: response.metas
-                            }
-                            index = index + 1
-                            m.top.result = { row: row, done: false }
+                    if HomeCatalogBrowsable(descriptor)
+                        if not HomeCatalogIsHidden(addon.address, descriptor.type, descriptor.id, m.top.hiddenCatalogs)
+                            response = catalog.Catalog(addon.address, descriptor.type, descriptor.id)
+                            if response.ok and response.metas <> invalid and response.metas.Count() > 0
+                                row = {
+                                    index: index
+                                    addonAddress: addon.address
+                                    title: CatalogTitle(descriptor, addon)
+                                    metaType: descriptor.type
+                                    metas: response.metas
+                                }
+                                index = index + 1
+                                m.top.result = { row: row, done: false }
+                            end if
                         end if
                     end if
                 end for
@@ -49,26 +52,6 @@ sub load()
         m.top.result = { done: true, error: e.message }
     end try
 end sub
-
-' A catalog is browsable when none of its required extras demand more than the
-' plain skip=0 browse supplies (the same rule the old synchronous Home walk
-' applied).
-function CatalogBrowsable(catalog as object) as boolean
-    if catalog = invalid then return false
-    required = catalog.extraRequired
-    if required <> invalid and Type(required) = "roArray"
-        for each name in required
-            if name <> "skip" then return false
-        end for
-    end if
-    extras = catalog.extra
-    if extras <> invalid and Type(extras) = "roArray"
-        for each extra in extras
-            if extra.isRequired = true and extra.name <> "skip" then return false
-        end for
-    end if
-    return true
-end function
 
 ' A row title that is always a non-empty string. Real-world manifests (Stremio's
 ' own Channels addon included) ship catalogs with only type/id and no name, and

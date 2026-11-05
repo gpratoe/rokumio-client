@@ -160,3 +160,32 @@ sub Test_Settings_AudioTransmuxIsItsOwnSetting()
     Harness_Equal(reopened.GetAudioTransmux(), true, "persisted across a reopen")
     Harness_Equal(reopened.GetAudioPassthrough(), false, "and the passthrough is still off")
 end sub
+
+sub Test_Settings_HomeCatalogVisibilityPersists()
+    Harness_Suite("SettingsStore hides Home catalogs by stable identity")
+    registry = MockRegistry()
+    settings = SettingsStore(registry)
+    address = "https://catalog.example/addon?token=a|b"
+
+    Harness_Ok(settings.IsHomeCatalogVisible(address, "movie", "top"), "catalogs are visible by default")
+    Harness_Ok(settings.SetHomeCatalogVisible(address, "movie", "top", false), "catalog can be hidden")
+    Harness_Ok(not settings.IsHomeCatalogVisible(address, "movie", "top"), "hidden state applies to the exact catalog")
+    Harness_Ok(settings.IsHomeCatalogVisible(address, "series", "top"), "the other content type stays visible")
+    Harness_Ok(settings.IsHomeCatalogVisible("https://catalog.example/addon", "movie", "top"), "similar addresses do not collide")
+
+    reopened = SettingsStore(registry)
+    Harness_Ok(not reopened.IsHomeCatalogVisible(address, "movie", "top"), "hidden state survives reopening")
+    Harness_Equal(reopened.GetHiddenHomeCatalogs().Count(), 1, "one exclusion is persisted")
+
+    Harness_Ok(reopened.SetHomeCatalogVisible(address, "movie", "top", true), "catalog can be shown again")
+    Harness_Ok(SettingsStore(registry).IsHomeCatalogVisible(address, "movie", "top"), "showing it removes the exclusion")
+end sub
+
+sub Test_Settings_HomeCatalogVisibilityRejectsInvalidIdentity()
+    Harness_Suite("SettingsStore rejects incomplete Home catalog identities")
+    settings = SettingsStore(invalid)
+    Harness_Ok(not settings.SetHomeCatalogVisible("", "movie", "top", false), "missing add-on address is rejected")
+    Harness_Ok(not settings.SetHomeCatalogVisible("https://catalog.example", "", "top", false), "missing type is rejected")
+    Harness_Ok(not settings.SetHomeCatalogVisible("https://catalog.example", "movie", "", false), "missing catalog id is rejected")
+    Harness_Equal(settings.GetHiddenHomeCatalogs().Count(), 0, "invalid identities do not alter state")
+end sub

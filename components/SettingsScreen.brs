@@ -121,6 +121,7 @@ sub init()
     m.netDiagTask = invalid
     m.showDeviceCap = false
     m.deviceCapTask = invalid
+    m.restoreStateOnReturn = false
 end sub
 
 function OnEnter(params as object) as void
@@ -144,21 +145,15 @@ function OnEnter(params as object) as void
     m.serverCacheSizeState = ""
     m.pendingCacheSize = invalid
     m.pendingWriteType = ""
-    ' A visit starts from nothing remembered. The screen's fields outlive
-    ' OnEnter — the stack pops the screen but does not destroy it — so what
-    ' the last visit left behind is still here: the section it was on and the
-    ' row the cursor was on.
-    '
-    ' The row is what the side panel describes, and the panel is painted from
-    ' this screen's COPY of the list's focus. The copy survived the visit
-    ' while the list was rebuilt from scratch and put its cursor back on the
-    ' first row, so the panel went on describing the row the user left on —
-    ' a row the cursor was not on — and corrected itself only when the cursor
-    ' moved. Starting each visit with the first section and no row makes the
-    ' entry the same as a first entry, where the panel follows the list's own
-    ' focus.
-    m.activeSection = 0
-    m.focusedRow = -1
+    ' Fresh visits start at General. Returning from the Home Rows picker keeps
+    ' the section and focused row that opened it, so Back lands in the same place.
+    restoreState = false
+    if params = invalid then restoreState = m.restoreStateOnReturn
+    m.restoreStateOnReturn = false
+    if not restoreState
+        m.activeSection = 0
+        m.focusedRow = -1
+    end if
     ' The sections are rebuilt on entry rather than kept: the set of rows
     ' changes under the screen — the diagnostics appear, the account row
     ' changes what it does — and a section built when the screen was opened
@@ -248,6 +243,7 @@ end sub
 function SectionDefinitions() as object
     sections = []
     sections.Push({ id: "general", rows: ["account", "language"] })
+    sections.Push({ id: "home", rows: ["homeRows"] })
     server = ["server", "audioPassthrough", "audioTransmux", "torrentProfile", "cacheSize", "testServer"]
     ' The two diagnostic rows are appended last and only once the gesture has
     ' revealed them, so they stay out of the way of the rows people use.
@@ -263,6 +259,7 @@ end function
 ' while the rows beside it already speak the new one.
 function SectionLabel(id as string) as string
     if id = "general" then return Lang("settings", "sectionGeneral")
+    if id = "home" then return Lang("settings", "sectionHome")
     if id = "server" then return Lang("settings", "sectionServer")
     return id
 end function
@@ -276,6 +273,8 @@ function RowLabel(action as string) as string
         return Lang("settings", "rowLogin")
     else if action = "language" then
         return Lang("settings", "rowLanguage")
+    else if action = "homeRows" then
+        return Lang("settings", "rowHomeRows")
     else if action = "server" then
         return Lang("settings", "rowServer")
     else if action = "audioPassthrough" then
@@ -310,6 +309,8 @@ function RowValue(action as string) as string
         return ""
     else if action = "language" then
         return LanguageValue()
+    else if action = "homeRows" then
+        return Lang("settings", "valueHomeRows")
     else if action = "server" then
         return ServerValue()
     else if action = "audioPassthrough" then
@@ -580,6 +581,8 @@ function PanelBody(action as string) as string
         return Lang("settings", "panelServer")
     else if action = "language" then
         return Lang("settings", "panelLanguage")
+    else if action = "homeRows" then
+        return Lang("settings", "panelHomeRows")
     else if action = "testServer" then
         return Lang("settings", "panelTestServer")
     else if action = "account" then
@@ -940,6 +943,8 @@ sub onRowSelected()
     action = m.rows[index]
     if action = "account"
         if SignedIn() then SignOut() else SignIn()
+    else if action = "homeRows"
+        OpenHomeRows()
     else if action = "server"
         EditServer()
     else if action = "language"
@@ -984,6 +989,13 @@ end sub
 
 sub SignOut()
     m.top.pushRequest = { action: "logout" }
+end sub
+
+' The catalog picker is a separate screen because its rows are dynamic and can
+' be numerous; Settings remains a concise list of setting categories.
+sub OpenHomeRows()
+    m.restoreStateOnReturn = true
+    m.top.pushRequest = { screen: "homeRowsScreen", params: {} }
 end sub
 
 ' Open the streaming server editor. Empty input clears the address (clearing is

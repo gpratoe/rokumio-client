@@ -56,6 +56,7 @@ sub init()
     ' them through its own channel too.
     m.settingsScreen = m.top.FindNode("settingsScreen")
     m.settingsScreen.ObserveField("pushRequest", "onSettingsAction")
+    m.homeRowsScreen = m.top.FindNode("homeRowsScreen")
     m.addonsScreen = m.top.FindNode("addonsScreen")
     ' Install/remove rep from the add-on manager: MainScene owns the account
     ' mirror and the collection pump, so the screen's two channels land here.
@@ -154,6 +155,7 @@ sub init()
     m.episodesScreen.callFunc("SetStores", m.storeHost, m.top)
     m.streamsScreen.callFunc("SetStores", m.storeHost, m.top)
     m.settingsScreen.callFunc("SetStores", m.storeHost, m.top)
+    m.homeRowsScreen.callFunc("SetStores", m.storeHost, m.top)
     m.addonsScreen.callFunc("SetStores", m.storeHost, m.top)
     m.searchScreen.callFunc("SetStores", m.storeHost, m.top)
     m.discoverScreen.callFunc("SetStores", m.storeHost, m.top)
@@ -229,7 +231,12 @@ end sub
 ' thin orchestrator.
 sub onSettingsAction()
     request = m.settingsScreen.pushRequest
-    if request = invalid or request.action = invalid then return
+    if request = invalid then return
+    if request.screen <> invalid
+        m.stack.push(request.screen, request.params)
+        return
+    end if
+    if request.action = invalid then return
     if request.action = "login"
         m.loginFromSettings = true
         StartLinkCodeFlow()
