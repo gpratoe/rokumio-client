@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="HomeRowsScreen" extends="Screen">
+    <interface>
+        <function name="OnEnter" />
+        <function name="OnExit" />
+        <function name="OnBackPressed" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/HomeRowsScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/HomeCatalogs.brs" />
+
+    <children>
+        <Rectangle id="homeRowsBg" width="1920" height="1080" color="0x0" />
+
+        <Label
+            id="homeRowsTitle"
+            translation="[80, 48]"
+            width="1760"
+            height="70"
+            font="font:LargeBoldSystemFont" />
+        <Label
+            id="homeRowsSub"
+            translation="[80, 126]"
+            width="1760"
+            height="40"
+            font="font:SmallSystemFont" />
+
+        <ChevronList
+            id="homeRowsList"
+            translation="[80, 240]"
+            numRows="6"
+            itemWidth="1000"
+            rowHeight="100" />
+
+        <Group id="homeRowsPanel" translation="[1140, 240]">
+            <Rectangle id="homeRowsPlate" width="700" height="690" />
+            <Label
+                id="homeRowsPanelTitle"
+                translation="[40, 30]"
+                width="620"
+                height="60"
+                horizAlign="center"
+                font="font:MediumBoldSystemFont" />
+            <Label
+                id="homeRowsPanelBody"
+                translation="[50, 120]"
+                width="600"
+                height="500"
+                horizAlign="center"
+                vertAlign="top"
+                wrap="true"
+                font="font:SmallSystemFont" />
+        </Group>
+
+        <Label
+            id="homeRowsStatus"
+            translation="[80, 970]"
+            width="1760"
+            height="40"
+            font="font:SmallSystemFont" />
+    </children>
+</component>

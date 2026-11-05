@@ -387,6 +387,16 @@ function SettingsGetLanguage() as string
     return m.stores.settings.GetLanguage()
 end function
 
+' settings.GetHiddenHomeCatalogs
+function SettingsGetHiddenHomeCatalogs() as object
+    return m.stores.settings.GetHiddenHomeCatalogs()
+end function
+
+' settings.IsHomeCatalogVisible
+function SettingsIsHomeCatalogVisible(addonAddress as string, metaType as string, catalogId as string) as boolean
+    return m.stores.settings.IsHomeCatalogVisible(addonAddress, metaType, catalogId)
+end function
+
 ' settings.GetServerAddress
 function SettingsGetServerAddress() as string
     return m.stores.settings.GetServerAddress()
@@ -410,6 +420,11 @@ end function
 ' settings.SetLanguage
 function SettingsSetLanguage(value as string) as boolean
     return m.stores.settings.SetLanguage(value)
+end function
+
+' settings.SetHomeCatalogVisible
+function SettingsSetHomeCatalogVisible(addonAddress as string, metaType as string, catalogId as string, visible as boolean) as boolean
+    return m.stores.settings.SetHomeCatalogVisible(addonAddress, metaType, catalogId, visible)
 end function
 
 ' settings.SetServerAddress

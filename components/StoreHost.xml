@@ -67,11 +67,14 @@
         <function name="SettingsClearServerAddress" />
         <function name="SettingsGetAudioPassthrough" />
         <function name="SettingsGetAudioTransmux" />
+        <function name="SettingsGetHiddenHomeCatalogs" />
         <function name="SettingsGetLanguage" />
         <function name="SettingsGetServerAddress" />
+        <function name="SettingsIsHomeCatalogVisible" />
         <function name="SettingsSaveFailed" />
         <function name="SettingsSetAudioPassthrough" />
         <function name="SettingsSetAudioTransmux" />
+        <function name="SettingsSetHomeCatalogVisible" />
         <function name="SettingsSetLanguage" />
         <function name="SettingsSetServerAddress" />
         <function name="SwitchSession" />

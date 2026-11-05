@@ -8,7 +8,7 @@
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <field id="pushRequest" type="assocarray" />
+        <field id="pushRequest" type="assocarray" alwaysNotify="true" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/SettingsScreen.brs" />

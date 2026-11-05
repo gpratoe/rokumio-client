@@ -248,6 +248,7 @@ end sub
 function SectionDefinitions() as object
     sections = []
     sections.Push({ id: "general", rows: ["account", "language"] })
+    sections.Push({ id: "home", rows: ["homeRows"] })
     server = ["server", "audioPassthrough", "audioTransmux", "torrentProfile", "cacheSize", "testServer"]
     ' The two diagnostic rows are appended last and only once the gesture has
     ' revealed them, so they stay out of the way of the rows people use.
@@ -263,6 +264,7 @@ end function
 ' while the rows beside it already speak the new one.
 function SectionLabel(id as string) as string
     if id = "general" then return Lang("settings", "sectionGeneral")
+    if id = "home" then return Lang("settings", "sectionHome")
     if id = "server" then return Lang("settings", "sectionServer")
     return id
 end function
@@ -276,6 +278,8 @@ function RowLabel(action as string) as string
         return Lang("settings", "rowLogin")
     else if action = "language" then
         return Lang("settings", "rowLanguage")
+    else if action = "homeRows" then
+        return Lang("settings", "rowHomeRows")
     else if action = "server" then
         return Lang("settings", "rowServer")
     else if action = "audioPassthrough" then
@@ -310,6 +314,8 @@ function RowValue(action as string) as string
         return ""
     else if action = "language" then
         return LanguageValue()
+    else if action = "homeRows" then
+        return Lang("settings", "valueHomeRows")
     else if action = "server" then
         return ServerValue()
     else if action = "audioPassthrough" then
@@ -580,6 +586,8 @@ function PanelBody(action as string) as string
         return Lang("settings", "panelServer")
     else if action = "language" then
         return Lang("settings", "panelLanguage")
+    else if action = "homeRows" then
+        return Lang("settings", "panelHomeRows")
     else if action = "testServer" then
         return Lang("settings", "panelTestServer")
     else if action = "account" then
@@ -940,6 +948,8 @@ sub onRowSelected()
     action = m.rows[index]
     if action = "account"
         if SignedIn() then SignOut() else SignIn()
+    else if action = "homeRows"
+        OpenHomeRows()
     else if action = "server"
         EditServer()
     else if action = "language"
@@ -984,6 +994,12 @@ end sub
 
 sub SignOut()
     m.top.pushRequest = { action: "logout" }
+end sub
+
+' The catalog picker is a separate screen because its rows are dynamic and can
+' be numerous; Settings remains a concise list of setting categories.
+sub OpenHomeRows()
+    m.top.pushRequest = { screen: "homeRowsScreen", params: {} }
 end sub
 
 ' Open the streaming server editor. Empty input clears the address (clearing is

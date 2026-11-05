@@ -26,6 +26,7 @@ class SettingsStore
     language as string
     audioPassthrough as boolean
     audioTransmux as boolean
+    hiddenHomeCatalogs as object
     saveRefused as boolean
 
     sub new(registry = invalid as dynamic)
@@ -34,6 +35,7 @@ class SettingsStore
         m.language = "en"
         m.audioPassthrough = false
         m.audioTransmux = false
+        m.hiddenHomeCatalogs = []
         m.saveRefused = false
         m.Load()
     end sub
@@ -119,6 +121,48 @@ class SettingsStore
         return m.audioTransmux
     end function
 
+    ' A catalog is shown on Home unless its stable add-on/type/catalog tuple is
+    ' explicitly hidden. Keeping only exclusions means catalogs from newly
+    ' installed add-ons retain the existing Home behavior and appear by default.
+    function GetHiddenHomeCatalogs() as object
+        return m.hiddenHomeCatalogs
+    end function
+
+    function IsHomeCatalogVisible(addonAddress as string, metaType as string, catalogId as string) as boolean
+        return m.HiddenHomeCatalogIndex(addonAddress, metaType, catalogId) < 0
+    end function
+
+    ' Persist a visibility change immediately. The identity is a tuple rather
+    ' than a joined string so add-on URLs or catalog ids containing separators
+    ' cannot collide with another catalog.
+    function SetHomeCatalogVisible(addonAddress as string, metaType as string, catalogId as string, visible as boolean) as boolean
+        if addonAddress = "" or metaType = "" or catalogId = "" then return false
+
+        index = m.HiddenHomeCatalogIndex(addonAddress, metaType, catalogId)
+        if visible
+            if index >= 0 then m.hiddenHomeCatalogs.Delete(index)
+        else if index < 0
+            m.hiddenHomeCatalogs.Push({
+                addonAddress: addonAddress
+                metaType: metaType
+                catalogId: catalogId
+            })
+        end if
+
+        m.Save()
+        return true
+    end function
+
+    function HiddenHomeCatalogIndex(addonAddress as string, metaType as string, catalogId as string) as integer
+        for i = 0 to m.hiddenHomeCatalogs.Count() - 1
+            hiddenCatalog = m.hiddenHomeCatalogs[i]
+            if hiddenCatalog <> invalid and Type(hiddenCatalog) = "roAssociativeArray"
+                if hiddenCatalog.addonAddress = addonAddress and hiddenCatalog.metaType = metaType and hiddenCatalog.catalogId = catalogId then return i
+            end if
+        end for
+        return -1
+    end function
+
     function SetAudioTransmux(value as boolean) as boolean
         m.audioTransmux = value
         m.Save()
@@ -152,6 +196,7 @@ class SettingsStore
         if not m.registry.Write("language", m.language) then ok = false
         if not m.registry.Write("audioPassthrough", m.AudioPassthroughText()) then ok = false
         if not m.registry.Write("audioTransmux", m.AudioTransmuxText()) then ok = false
+        if not m.registry.Write("hiddenHomeCatalogs", FormatJson(m.hiddenHomeCatalogs)) then ok = false
         m.registry.Flush()
         m.saveRefused = not ok
         return ok
@@ -175,5 +220,30 @@ class SettingsStore
         ' a value from a future version) leaves the default in place.
         if m.registry.Read("audioPassthrough") = "true" then m.audioPassthrough = true
         if m.registry.Read("audioTransmux") = "true" then m.audioTransmux = true
+
+        rawHomeCatalogs = m.registry.Read("hiddenHomeCatalogs")
+        if rawHomeCatalogs <> ""
+            parsedHomeCatalogs = invalid
+            try
+                parsedHomeCatalogs = ParseJson(rawHomeCatalogs)
+            catch e
+                parsedHomeCatalogs = invalid
+            end try
+            if parsedHomeCatalogs <> invalid and Type(parsedHomeCatalogs) = "roArray"
+                for each hiddenCatalog in parsedHomeCatalogs
+                    if hiddenCatalog = invalid or Type(hiddenCatalog) <> "roAssociativeArray" then continue for
+                    if GetInterface(hiddenCatalog.addonAddress, "ifString") = invalid or hiddenCatalog.addonAddress = "" then continue for
+                    if GetInterface(hiddenCatalog.metaType, "ifString") = invalid or hiddenCatalog.metaType = "" then continue for
+                    if GetInterface(hiddenCatalog.catalogId, "ifString") = invalid or hiddenCatalog.catalogId = "" then continue for
+                    if m.HiddenHomeCatalogIndex(hiddenCatalog.addonAddress, hiddenCatalog.metaType, hiddenCatalog.catalogId) < 0
+                        m.hiddenHomeCatalogs.Push({
+                            addonAddress: hiddenCatalog.addonAddress
+                            metaType: hiddenCatalog.metaType
+                            catalogId: hiddenCatalog.catalogId
+                        })
+                    end if
+                end for
+            end if
+        end if
     end sub
 end class

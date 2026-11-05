@@ -39,6 +39,16 @@
             height="40"
             text="Move between rows, OK for details, Back to exit, * Focus nav-rail and back"
             font="font:SmallSystemFont" />
+        <Label
+            id="homeEmpty"
+            translation="[200, 360]"
+            width="1500"
+            height="90"
+            horizAlign="center"
+            vertAlign="center"
+            wrap="true"
+            visible="false"
+            font="font:MediumSystemFont" />
 
         <!-- Left rail: the vertical icon menu (Search, Discover, Library,
              Add-ons, Settings, Support). A one-column RowList of RailTiles; OK

@@ -80,6 +80,7 @@
             <EpisodesScreen id="episodesScreen" visible="false" />
             <StreamsScreen id="streamsScreen" visible="false" />
             <SettingsScreen id="settingsScreen" visible="false" />
+            <HomeRowsScreen id="homeRowsScreen" visible="false" />
             <AddonsScreen id="addonsScreen" visible="false" />
             <SearchScreen id="searchScreen" visible="false" />
             <DiscoverScreen id="discoverScreen" visible="false" />

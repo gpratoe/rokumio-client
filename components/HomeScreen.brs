@@ -7,7 +7,7 @@
 ' poster publishes one pushRequest; the Scene does the stack work.
 '
 ' Rows are served by the addon stores: a HomeCatalogsTask walks the add-ons off
-' the UI thread, fetching every advertisable catalog, and republishes the row
+' the UI thread, fetching every enabled browsable catalog, and republishes the row
 ' set after each completion so the grid fills in one row at a time instead of
 ' blocking startup on the whole catalog set. On top sits a Continue Watching row
 ' built from the (local) LibraryStore whenever the user has entries — guests
@@ -28,11 +28,13 @@ sub init()
     m.rail = m.top.FindNode("rail")
     m.rail.ObserveField("rowItemSelected", "onRailItemSelected")
     m.homeSub = m.top.FindNode("homeSub")
+    m.homeEmpty = m.top.FindNode("homeEmpty")
     m.homeHint = ""
 
     t = Theme()
     m.top.FindNode("homeTitle").color = t.accent
     m.homeSub.color = t.textSecondary
+    m.homeEmpty.color = t.textSecondary
     m.top.FindNode("railBg").color = t.railTint
     m.catalog.rowLabelOffset = [0,10]
     m.catalog.focusBitmapBlendColor = t.accentFocus
@@ -46,14 +48,16 @@ sub init()
     m.gridLanguage = ""
     m.cwSignature = ""
     m.catalogSignature = ""
+    m.catalogVisibilitySignature = ""
     m.railBuilt = false
 end sub
 
 ' Kick off the catalog walk. The walking happens off the UI thread in a
 ' HomeCatalogsTask (a hung add-on then costs the worker, not startup); it
 ' republishes the row set after every completed catalog, and onCatalogState
-' slots each new row into the grid immediately. Only the plain addon descriptors
-' cross the thread boundary. A no-op once started or finished.
+' slots each new row into the grid immediately. Only plain add-on descriptors
+' and hidden catalog identities cross the thread boundary. A no-op once started
+' or finished.
 '
 ' The walk records which add-on set it derived from (see CatalogSignature), which
 ' is the only way anything downstream can later tell that Home's rows have been
@@ -65,6 +69,7 @@ sub StartCatalogLoad()
     if m.catalogRowsBuilt or m.catalogTask <> invalid then return
     if m.stores = invalid then
         m.catalogRowsBuilt = true
+        UpdateHomeEmptyState()
         return
     end if
     addons = []
@@ -72,11 +77,18 @@ sub StartCatalogLoad()
         addons.Push({ address: addon.address, catalogs: addon.catalogs, name: addon.name })
     end for
     m.catalogSignature = CatalogSignature()
+    hiddenCatalogs = m.stores.settings.callFunc("SettingsGetHiddenHomeCatalogs")
+    if hiddenCatalogs = invalid then hiddenCatalogs = []
+    m.catalogVisibilitySignature = FormatJson(hiddenCatalogs)
     if addons.Count() = 0 then
         m.catalogRowsBuilt = true
+        UpdateHomeEmptyState()
         return
     end if
-    task = AsyncTask_Launch(m.top, "HomeCatalogsTask", "onCatalogState", { addons: addons }, invalid)
+    task = AsyncTask_Launch(m.top, "HomeCatalogsTask", "onCatalogState", {
+        addons: addons
+        hiddenCatalogs: hiddenCatalogs
+    }, invalid)
     m.catalogTask = task
 end sub
 
@@ -116,9 +128,19 @@ end function
 ' installed) and a walk that latched on an empty registry.
 sub EnsureCurrentRows()
     if m.stores = invalid then return
-    if m.catalogSignature = CatalogSignature() then return
+    if m.catalogSignature = CatalogSignature() and m.catalogVisibilitySignature = HomeCatalogVisibilitySignature() then return
     RebuildRows()
 end sub
+
+' The hidden-catalog set that Home was built against. The settings store keeps
+' entries in a deterministic array order for the life of the session, so its
+' JSON representation is a cheap change signature without a network request.
+function HomeCatalogVisibilitySignature() as string
+    if m.stores = invalid then return ""
+    hiddenCatalogs = m.stores.settings.callFunc("SettingsGetHiddenHomeCatalogs")
+    if hiddenCatalogs = invalid then hiddenCatalogs = []
+    return FormatJson(hiddenCatalogs)
+end function
 
 ' Each result carries one completed row ({ row, done: false }) or the final
 ' completion marker. The task assigns each row a stable index, so the slot is
@@ -157,6 +179,7 @@ sub ApplyCatalogRow(row as object)
     end if
     m.catalogRows.Push(descriptor)
     m.gridRows.Push(descriptor)
+    UpdateHomeEmptyState()
     m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
     ResyncRowLabels()
@@ -187,6 +210,7 @@ sub FinishCatalogLoad()
         m.catalogTask = invalid
         AsyncTask_Reap(task, m.top, false)
     end if
+    UpdateHomeEmptyState()
 end sub
 
 ' Assemble the visible grid: Continue Watching (when the local library has
@@ -211,6 +235,15 @@ sub BuildRows()
     m.catalog.content = content
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
+    UpdateHomeEmptyState()
+end sub
+
+' If Continue Watching and every catalog row are absent, explain where catalog
+' rows come from and how to enable them instead of leaving an unexplained blank.
+sub UpdateHomeEmptyState()
+    if m.homeEmpty = invalid then return
+    m.homeEmpty.text = Lang("home", "emptyCatalogRows")
+    m.homeEmpty.visible = m.catalogRowsBuilt and m.gridRows.Count() = 0
 end sub
 
 ' Rebuild the grid from the current add-on set — called by the Scene after a
@@ -489,6 +522,7 @@ function OnEnter(params as object) as void
     ' as well means leaving for another screen and coming back repairs a stale
     ' grid, instead of the staleness being permanent until a relaunch.
     EnsureCurrentRows()
+    UpdateHomeEmptyState()
     ' The place the cursor goes is the place it was left: the grid for a trip
     ' into the tiles, the rail — at the icon the user left it on — for a trip
     ' opened from the rail. BlurFocus records which had it.
