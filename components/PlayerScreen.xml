@@ -41,7 +41,7 @@
             enableTrickPlay="true" />
         <Label
             id="playerStatus"
-            translation="[40, 760]"
+            translation="[40, 812]"
             width="1840"
             height="44"
             font="font:MediumSystemFont"
