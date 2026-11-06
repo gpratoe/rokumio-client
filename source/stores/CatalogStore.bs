@@ -47,6 +47,8 @@ class CatalogStore
         result.manifest = {
             id: json.id
             name: json.name
+            description: json.description
+            logo: json.logo
             version: json.version
             types: json.types
             idPrefixes: json.idPrefixes

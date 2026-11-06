@@ -122,6 +122,24 @@ sub Test_Addons_Install()
     Harness_Equal(addons.GetAll().Count(), 3, "built-ins plus the new one")
 end sub
 
+sub Test_Addons_InstallKeepsDisplayMetadata()
+    Harness_Suite("AddonsStore.Install retains the manifest's tile metadata")
+    manifestUrl = "https://addon.example.com/manifest.json"
+    manifest = ManifestFixture("com.example.addon", "Example")
+    manifest.description = "Everything the tile needs."
+    manifest.logo = "https://addon.example.com/icon.png"
+    script = [
+        { method: "GET", url: manifestUrl, ok: true, status: 200, json: manifest, error: "" }
+    ]
+    addons = AddonsStore(ScriptedTransport(script), invalid)
+
+    Harness_Ok(addons.Install(manifestUrl).ok, "install ok")
+    record = addons.Get("com.example.addon")
+    Harness_Equal(record.description, "Everything the tile needs.", "description stored")
+    Harness_Equal(record.logo, "https://addon.example.com/icon.png", "logo stored")
+    Harness_Equal(record.metadataFetched, true, "a fetched manifest is authoritative, even without a logo")
+end sub
+
 sub Test_Addons_InstallOnEmptyRegistry()
     Harness_Suite("AddonsStore.Install adds to an empty first-run registry")
     manifestUrl = "https://addon.example.com/manifest.json"
@@ -305,6 +323,29 @@ sub Test_Addons_PersistsViaRegistry()
     reopened = AddonsStore(ScriptedTransport([]), registry)
     Harness_Ok(reopened.Get("com.example.addon") <> invalid, "installed add-on reloaded")
     Harness_Equal(reopened.Get("com.example.addon").address, "https://addon.example.com", "address reloaded")
+end sub
+
+sub Test_Addons_UpdateDisplayMetadataPersists()
+    Harness_Suite("AddonsStore.UpdateDisplayMetadata caches refreshed tile metadata")
+    registry = MockRegistry()
+    addons = AddonsStore(ScriptedTransport([]), registry)
+    addons.Register(RecordFixture("com.example.legacy", "Legacy"))
+    Harness_Equal(addons.Get("com.example.legacy").metadataFetched, invalid, "a legacy record has no refresh marker yet")
+
+    address = "https://com.example.legacy.example.com"
+    Harness_Ok(addons.UpdateDisplayMetadata("com.example.legacy", address, "Added later.", "https://addon.example.com/icon.png", "2.0.0"), "refresh cached")
+    record = addons.Get("com.example.legacy")
+    Harness_Equal(record.description, "Added later.", "description filled in")
+    Harness_Equal(record.logo, "https://addon.example.com/icon.png", "logo filled in")
+    Harness_Equal(record.version, "2.0.0", "version filled in")
+    Harness_Equal(record.metadataFetched, true, "the refresh marker stops a second fetch")
+
+    reopened = AddonsStore(ScriptedTransport([]), registry)
+    Harness_Equal(reopened.Get("com.example.legacy").description, "Added later.", "description survived reload")
+    Harness_Equal(reopened.Get("com.example.legacy").logo, "https://addon.example.com/icon.png", "logo survived reload")
+    Harness_Equal(reopened.Get("com.example.legacy").version, "2.0.0", "version survived reload")
+    Harness_Ok(not addons.UpdateDisplayMetadata("com.example.missing", address, "x", "y", "z"), "unknown add-on refused")
+    Harness_Ok(not addons.UpdateDisplayMetadata("com.example.legacy", "https://mirror.example.com", "x", "y", "z"), "a same-id mirror's manifest cannot overwrite the record")
 end sub
 
 sub Test_Addons_RegisterAdoptsRecord()

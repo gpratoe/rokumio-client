@@ -1,7 +1,7 @@
-' PrefRow — wide focusable row for the Settings and Add-ons lists. Same field
-' plumbing as every tile: RowList feeds the ContentNode through itemContent and
-' drives focus through itemHasFocus / rowHasFocus. The left/bold title and the
-' right/muted value come from itemContent.title / itemContent.description.
+' PrefRow — wide focusable row for the Settings list. Same field plumbing as
+' every tile: RowList feeds the ContentNode through itemContent and drives focus
+' through itemHasFocus / rowHasFocus. The left/bold title and the right/muted
+' value come from itemContent.title / itemContent.description.
 '
 ' The content node's OWN fields are watched too, because a screen that changes
 ' a setting writes the new value into the row's node rather than rebuilding

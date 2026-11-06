@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="PrefRow" extends="Group">
-    <!-- Wide focusable row used by the Settings and Add-ons lists. RowList
-         drives it through the same read-only interface fields as every tile
-         (itemContent / itemHasFocus / rowHasFocus). The row reads
-         itemContent.title (left, bold) and itemContent.description (right,
-         muted). -->
+    <!-- Wide focusable row used by the Settings list. RowList drives it through
+         the same read-only interface fields as every tile (itemContent /
+         itemHasFocus / rowHasFocus). The row reads itemContent.title (left,
+         bold) and itemContent.description (right, muted). -->
     <interface>
         <field id="itemContent" type="node" />
         <field id="itemHasFocus" type="boolean" />
