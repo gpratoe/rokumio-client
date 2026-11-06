@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="AddonTileContent" extends="ContentNode">
+    <interface>
+        <field id="addonLogo" type="string" value="" />
+        <field id="addonVersion" type="string" value="" />
+        <field id="addonScope" type="string" value="" />
+        <field id="actionKey" type="string" value="" />
+        <field id="actionLabel" type="string" value="" />
+    </interface>
+</component>

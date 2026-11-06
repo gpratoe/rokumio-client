@@ -520,6 +520,8 @@ class AddonsStore
         record = {
             id: json.id
             name: json.name
+            description: json.description
+            logo: json.logo
             version: json.version
             types: json.types
             idPrefixes: m.DeclaredList(json.idPrefixes)
@@ -527,6 +529,7 @@ class AddonsStore
             resources: m.NormalizeResources(json.resources)
             address: base
             builtin: false
+            metadataFetched: true
         }
         ' The boundary pass, on the RECORD rather than the raw manifest, and after
         ' the shaping helpers. That order is their contract: what a record keeps is
@@ -569,6 +572,24 @@ class AddonsStore
         ' a plain append reproduces it. A local install lands at the end, and a
         ' re-install after a removal does too.
         if not m.InOrder(record.id) then m.order.Push(record.id)
+        m.Save()
+        return true
+    end function
+
+    ' Cache display metadata fetched off-thread for an older stored record. The
+    ' metadataFetched marker distinguishes "the manifest has no logo" from
+    ' "this record predates metadata storage" and prevents repeated refreshes.
+    ' The address is checked too: a built-in seed and a same-id mirror share an
+    ' id, so id alone would stamp one add-on's manifest onto the other.
+    function UpdateDisplayMetadata(id as string, address as string, description as dynamic, logo as dynamic, version as dynamic) as boolean
+        if not m.HasKey(m.installed, id) then return false
+        record = m.installed[id]
+        if not m.HasText(address) then return false
+        if not m.HasText(record.address) or record.address <> address then return false
+        if m.HasText(description) then record.description = description
+        if m.HasText(logo) then record.logo = logo
+        if m.HasText(version) then record.version = version
+        record.metadataFetched = true
         m.Save()
         return true
     end function
@@ -628,6 +649,8 @@ class AddonsStore
         record = {
             id: manifest.id
             name: manifest.name
+            description: manifest.description
+            logo: manifest.logo
             version: manifest.version
             types: manifest.types
             idPrefixes: m.DeclaredList(manifest.idPrefixes)
@@ -635,6 +658,9 @@ class AddonsStore
             resources: m.NormalizeResources(manifest.resources)
             address: base
             builtin: false
+            ' The descriptor may carry the display metadata already. When it
+            ' does not, AddonsScreen refreshes it on entry and persists it.
+            metadataFetched: (m.HasText(manifest.description) or m.HasText(manifest.logo))
         }
         ' The boundary pass for a manifest the account sync handed over — same
         ' record-not-payload order and the same reason as Install above.

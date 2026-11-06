@@ -1,12 +1,21 @@
 ' AddonsScreen — installed add-on manager.
 '
-' One column of PrefRows: an "Add add-on" row on top (installs by fetching a
-' manifest URL through a system KeyboardDialog), then one row per add-on from
-' AddonsStore.GetAll(). Removing any add-on — including a shipped built-in —
-' requires a confirmation dialog; the builtin flag is passed to
-' AddonsStore.Uninstall so a same-id mirror and its shipped seed are told
-' apart. The list is rebuilt after every install/remove so it always reflects
-' the store.
+' One AddonTile per add-on: logo, name, dimmed version, the add-on's scope and
+' its description. The action on the right is part of the row model, not the
+' markup, so the same tile can become a search result later (Uninstall here,
+' Install there). The "Add add-on" entry uses the same tile and installs by
+' fetching a manifest URL through a system KeyboardDialog.
+'
+' Removing any add-on — including a shipped built-in — requires a confirmation
+' dialog; the builtin flag is passed to AddonsStore.Uninstall so a same-id
+' mirror and its shipped seed are told apart. The list is rebuilt after every
+' install/remove so it always reflects the store.
+'
+' Display metadata (description and logo) is retained by AddonsStore. Records
+' stored before that existed are refreshed off the render thread by
+' AddonMetadataTask while their tiles show a placeholder; successful results
+' are persisted back through the store. Built-ins are virtual, so their fetched
+' metadata lives in this screen's session cache.
 '
 ' The manifest fetch happens on AddonsInstallTask (off the render thread — the
 ' request can park up to the 15s default timeout). The task validates against a
@@ -43,6 +52,10 @@ sub init()
     m.list.ObserveField("rowItemSelected", "onRowSelected")
 
     m.rows = []
+    m.rowNodes = []
+    m.metadataCache = {}
+    m.metadataTask = invalid
+    m.metadataFailures = 0
     m.installTask = invalid
 end sub
 
@@ -64,13 +77,16 @@ function OnEnter(params as object) as void
     m.companionCaption.text = Lang("addons", "companionCaption")
     m.setupHint.text = Lang("addons", "setupHint")
     CancelInstall()
-    BuildRows()
+    CancelMetadata()
     m.status.text = ""
+    BuildRows()
     m.list.callFunc("SetListFocus")
+    StartMetadataRefresh()
 end function
 
 function OnExit() as void
     CancelInstall()
+    CancelMetadata()
 end function
 
 function OnBackPressed() as boolean
@@ -80,38 +96,68 @@ end function
 sub BlurFocus()
 end sub
 
-' Rebuild the list: the add row first, then every installed add-on.
+' Rebuild the list: the add row first, then every installed add-on. Focus is
+' restored to the row the user was on because installing, removing or adopting
+' a result is not a reason to throw the cursor back to the top.
 sub BuildRows()
+    focusRow = 0
+    if m.list.rowItemFocused <> invalid and m.list.rowItemFocused.Count() > 0 then focusRow = m.list.rowItemFocused[0]
+
     m.rows = []
     m.rows.Push({
-        action: "add"
+        actionKey: "add"
+        id: ""
+        name: ""
         title: Lang("addons", "addRow")
-        value: Lang("addons", "addRowValue")
+        description: Lang("addons", "addRowValue")
+        logo: "pkg:/images/puzzle.png"
+        version: ""
+        scope: ""
+        actionLabel: Lang("addons", "addAction")
+        address: ""
+        builtin: false
+        metadataPending: false
     })
     if m.stores <> invalid
         for each addon in m.stores.addons.callFunc("AddonsGetAll")
-            ' Add-on records come from manifests an add-on supplied, so the
-            ' address is coerced rather than trusted to be a string.
-            value = StringOf(addon.address)
-            if addon.builtin = true then value = Lang("addons", "builtinPrefix") + value
-            m.rows.Push({
-                action: "addon"
-                id: addon.id
-                name: addon.name
-                builtin: addon.builtin
-                title: addon.name
-                value: value
-            })
+            ' Add-on records come from manifests an add-on supplied, so every
+            ' displayed value is coerced rather than trusted to be a string.
+            row = {
+                actionKey: "uninstall"
+                id: StringOf(addon.id)
+                name: StringOf(addon.name)
+                title: StringOf(addon.name)
+                description: StringOf(addon.description)
+                logo: StringOf(addon.logo)
+                version: StringOf(addon.version)
+                scope: AddonScopeLabel(addon.types)
+                actionLabel: Lang("addons", "uninstallAction")
+                address: StringOf(addon.address)
+                builtin: (addon.builtin = true)
+                metadataPending: MetadataNeeded(addon)
+            }
+            ApplyCachedMetadata(row)
+            if row.metadataPending and row.description = ""
+                row.description = Lang("addons", "loadingMetadata")
+            end if
+            if row.description = "" then row.description = Lang("addons", "noDescription")
+            if row.logo = "" then row.logo = "pkg:/images/puzzle.png"
+            m.rows.Push(row)
         end for
     end if
 
     content = CreateObject("roSGNode", "ContentNode")
+    m.rowNodes = []
     for each row in m.rows
         entry = content.CreateChild("ContentNode")
-        item = entry.CreateChild("ContentNode")
-        item.title = row.title
-        item.description = row.value
+        item = entry.CreateChild("AddonTileContent")
+        PaintRowNode(item, row)
+        m.rowNodes.Push(item)
     end for
+
+    if focusRow >= m.rows.Count() then focusRow = m.rows.Count() - 1
+    if focusRow < 0 then focusRow = 0
+    m.list.focusRow = focusRow
     m.list.content = content
 
     installed = m.rows.Count() - 1
@@ -121,18 +167,205 @@ sub BuildRows()
     m.sub.text = Fill(Lang("addons", "subtitle"), { count: quantity })
 end sub
 
+' Copy one row model into its AddonTileContent node. The tile watches those
+' fields, so a metadata result repaints a row without rebuilding the list.
+sub PaintRowNode(item as object, row as object)
+    item.title = row.title
+    item.description = row.description
+    item.addonLogo = row.logo
+    item.addonVersion = row.version
+    item.addonScope = row.scope
+    item.actionKey = row.actionKey
+    item.actionLabel = row.actionLabel
+end sub
+
 sub onRowSelected()
     data = m.list.rowItemSelected
     if data = invalid or data.Count() < 2 then return
     index = data[0]
     if index < 0 or index >= m.rows.Count() then return
     row = m.rows[index]
-    if row.action = "add"
+    ' The action is data, not the row's identity: a future add-on search can
+    ' hand the same tile an "install" action without touching the screen.
+    if row.actionKey = "add"
         ShowAddDialog()
-    else
+    else if row.actionKey = "uninstall"
         ShowRemoveConfirm(row)
     end if
 end sub
+
+' --- metadata refresh ------------------------------------------------------
+
+' A logo that is an SVG cannot be rendered by Roku's Poster, so it needs an
+' off-thread PNG candidate resolution even when its other metadata is cached.
+function LogoNeedsResolution(logo as dynamic) as boolean
+    url = StringOf(logo).Trim()
+    if url = "" then return false
+    path = url
+    queryStart = url.InStr("?")
+    if queryStart > 0 then path = url.Left(queryStart - 1)
+    if path.Len() < 4 then return false
+    return LCase(path.Right(4)) = ".svg"
+end function
+
+' True when this row has no display metadata yet. A cached success is final for
+' this screen session; an unreachable manifest is retried on the next entry.
+function MetadataNeeded(addon as object) as boolean
+    address = StringOf(addon.address)
+    if address = "" then return false
+    if m.metadataCache[address] <> invalid then return false
+    if addon.metadataFetched <> true then return true
+    return LogoNeedsResolution(addon.logo)
+end function
+
+sub ApplyCachedMetadata(row as object)
+    cached = m.metadataCache[row.address]
+    if cached = invalid then return
+    row.metadataPending = false
+    if cached.ok <> true then return
+    description = StringOf(cached.description)
+    if description <> "" then row.description = description
+    logo = StringOf(cached.logo)
+    if logo <> "" then row.logo = logo
+    version = StringOf(cached.version)
+    if version <> "" then row.version = version
+end sub
+
+sub StartMetadataRefresh()
+    if m.stores = invalid then return
+    pending = []
+    seen = {}
+    for each row in m.rows
+        if row.metadataPending <> true then continue for
+        address = StringOf(row.address)
+        if address = "" or seen[address] = true then continue for
+        seen[address] = true
+        pending.Push({ id: row.id, address: address })
+    end for
+    if pending.Count() = 0 then return
+
+    m.metadataFailures = 0
+    m.metadataTask = AsyncTask_Launch(m.top, "AddonMetadataTask", "onMetadataResult", { addons: pending }, "addonsMetadata")
+end sub
+
+sub onMetadataResult()
+    if m.metadataTask = invalid then return
+    task = m.metadataTask
+    result = task.result
+    if result = invalid then return
+
+    if result.done = true
+        m.metadataTask = invalid
+        AsyncTask_Reap(task, m.top, false)
+        if StringOf(result.error) <> "" then m.metadataFailures = m.metadataFailures + 1
+        FinishMetadataRefresh()
+        return
+    end if
+
+    address = StringOf(result.address)
+    if address = "" then return
+    if result.ok = true
+        description = StringOf(result.description)
+        logo = StringOf(result.logo)
+        version = StringOf(result.version)
+        m.metadataCache[address] = { ok: true, description: description, logo: logo, version: version }
+        if m.stores <> invalid
+            m.stores.addons.callFunc("AddonsUpdateDisplayMetadata", StringOf(result.id), address, description, logo, version)
+        end if
+        ApplyMetadataToRows(address)
+    else
+        m.metadataFailures = m.metadataFailures + 1
+        MarkMetadataFailed(address)
+    end if
+end sub
+
+sub ApplyMetadataToRows(address as string)
+    cached = m.metadataCache[address]
+    for i = 0 to m.rows.Count() - 1
+        row = m.rows[i]
+        if row.address <> address then continue for
+        row.metadataPending = false
+        if cached <> invalid
+            description = StringOf(cached.description)
+            if description <> "" then row.description = description
+            logo = StringOf(cached.logo)
+            if logo <> "" then row.logo = logo
+            version = StringOf(cached.version)
+            if version <> "" then row.version = version
+        end if
+        if row.description = "" then row.description = Lang("addons", "noDescription")
+        if row.logo = "" then row.logo = "pkg:/images/puzzle.png"
+        PaintRowNode(m.rowNodes[i], row)
+    end for
+end sub
+
+sub MarkMetadataFailed(address as string)
+    for i = 0 to m.rows.Count() - 1
+        row = m.rows[i]
+        if row.address <> address then continue for
+        row.metadataPending = false
+        if row.description = "" or row.description = Lang("addons", "loadingMetadata")
+            row.description = Lang("addons", "noDescription")
+        end if
+        if row.logo = "" then row.logo = "pkg:/images/puzzle.png"
+        PaintRowNode(m.rowNodes[i], row)
+    end for
+end sub
+
+' The worker has ended. Any row still pending lost its result (or the task was
+' cancelled); leave it on the no-description fallback rather than a spinner-like
+' "loading" line that will never change. A failed optional refresh is reported
+' only when it did not land on top of an install/remove status.
+sub FinishMetadataRefresh()
+    for i = 0 to m.rows.Count() - 1
+        row = m.rows[i]
+        if row.metadataPending <> true then continue for
+        row.metadataPending = false
+        if row.description = "" or row.description = Lang("addons", "loadingMetadata")
+            row.description = Lang("addons", "noDescription")
+        end if
+        PaintRowNode(m.rowNodes[i], row)
+    end for
+    if m.metadataFailures > 0 and m.status.text = ""
+        m.status.text = Lang("addons", "metadataUnavailable")
+    end if
+end sub
+
+sub CancelMetadata()
+    if m.metadataTask <> invalid
+        task = m.metadataTask
+        m.metadataTask = invalid
+        AsyncTask_Reap(task, m.top, true)
+    end if
+end sub
+
+' A manifest may declare any type name; the known ones use the app's own
+' vocabulary and anything else is title-cased as the manifest wrote it.
+function AddonScopeLabel(types as dynamic) as string
+    if types = invalid or Type(types) <> "roArray" then return Lang("addons", "scopeOther")
+    labels = []
+    seen = {}
+    for each declared in types
+        value = LCase(StringOf(declared).Trim())
+        if value = "" then continue for
+        label = AddonTypeLabel(value)
+        if seen[label] = true then continue for
+        seen[label] = true
+        labels.Push(label)
+    end for
+    if labels.Count() = 0 then return Lang("addons", "scopeOther")
+    return labels.Join(" · ")
+end function
+
+function AddonTypeLabel(metaType as string) as string
+    if metaType = "movie" then return Lang("common", "movies")
+    if metaType = "series" then return Lang("common", "series")
+    if metaType = "channel" or metaType = "tv" then return Lang("common", "channels")
+    if metaType = "other" then return Lang("addons", "scopeOther")
+    return UCase(metaType.Left(1)) + metaType.Mid(1)
+end function
+
+' --- install / remove ------------------------------------------------------
 
 ' Install flow: a KeyboardDialog whose OK kicks AddonsInstallTask.
 sub ShowAddDialog()

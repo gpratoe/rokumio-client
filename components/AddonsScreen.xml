@@ -2,9 +2,9 @@
 <component name="AddonsScreen" extends="Screen">
     <!-- Installed add-on manager. An "Add add-on" row installs by fetching a
          manifest URL (system KeyboardDialog), and every installed add-on below
-         it can be removed through a confirmation dialog unless it is a
-         protected built-in. The list is rebuilt from AddonsStore on every entry
-         and after each install/remove. -->
+         it can be removed through a confirmation dialog (shipped built-ins too).
+         The list is rebuilt from AddonsStore on every entry and after each
+         install/remove; every row is an AddonTile. -->
     <interface>
         <function name="OnEnter" />
         <function name="OnExit" />
@@ -48,9 +48,10 @@
         <ChevronList
             id="addonsList"
             translation="[80, 240]"
-            numRows="5"
+            numRows="4"
             itemWidth="1000"
-            rowHeight="110" />
+            rowHeight="160"
+            rowComponent="AddonTile" />
 
        <Group id="companionPanel" translation="[1140, 140]">
             <Rectangle id="companionPlate" width="700" height="720" />

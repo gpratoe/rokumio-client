@@ -741,7 +741,8 @@ function checkTileContract() {
     const fs = require('fs');
     const tiles = [
         { name: 'PosterTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] },
-        { name: 'EpisodeTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] }
+        { name: 'EpisodeTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] },
+        { name: 'AddonTile', fields: ['itemContent', 'itemHasFocus', 'rowHasFocus'] }
     ];
     let ok = true;
     for (const tile of tiles) {

@@ -24,6 +24,7 @@
         <function name="AddonsSupportsResource" />
         <function name="AddonsSyncAccountCollection" />
         <function name="AddonsUninstall" />
+        <function name="AddonsUpdateDisplayMetadata" />
         <function name="AuthGetAuthKey" />
         <function name="AuthGetSession" />
         <function name="AuthGetUser" />

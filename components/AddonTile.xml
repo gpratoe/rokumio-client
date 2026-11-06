@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="AddonTile" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" />
+        <field id="itemHasFocus" type="boolean" />
+        <field id="rowHasFocus" type="boolean" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/AddonTile.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+
+    <children>
+        <Rectangle id="tileFace" width="992" height="152" translation="[4, 4]" />
+        <Poster
+            id="addonLogo"
+            translation="[20, 36]"
+            width="80"
+            height="80"
+            loadWidth="80"
+            loadHeight="80"
+            loadDisplayMode="scaleToFit"
+            failedBitmapUri="pkg:/images/puzzle.png" />
+        <LayoutGroup
+            id="nameVersionRow"
+            translation="[118, 30]"
+            layoutDirection="horiz"
+            itemSpacings="[12]"
+            vertAlignment="center">
+            <Label
+                id="addonName"
+                height="36"
+                font="font:MediumBoldSystemFont" />
+            <Label
+                id="addonVersion"
+                height="30"
+                font="font:SmallSystemFont" />
+        </LayoutGroup>
+        <Label
+            id="addonScope"
+            translation="[118, 68]"
+            width="630"
+            height="28"
+            font="font:SmallBoldSystemFont" />
+        <Label
+            id="addonDescription"
+            translation="[118, 102]"
+            width="630"
+            height="56"
+            wrap="true"
+            maxLines="2"
+            font="font:SmallSystemFont" />
+        <Label
+            id="addonAction"
+            translation="[768, 66]"
+            width="200"
+            height="52"
+            horizAlign="center"
+            vertAlign="center"
+            font="font:MediumBoldSystemFont" />
+    </children>
+</component>

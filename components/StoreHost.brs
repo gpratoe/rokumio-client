@@ -143,6 +143,11 @@ function AddonsUninstall(id as string, builtin = false as boolean) as boolean
     return m.stores.addons.Uninstall(id, builtin)
 end function
 
+' addons.UpdateDisplayMetadata
+function AddonsUpdateDisplayMetadata(id as string, address as string, description as dynamic, logo as dynamic, version as dynamic) as boolean
+    return m.stores.addons.UpdateDisplayMetadata(id, address, description, logo, version)
+end function
+
 ' addons.SyncAccountCollection — adopt the successful pull's verbatim entries.
 function AddonsSyncAccountCollection(accountAddons as object) as void
     m.stores.addons.SyncAccountCollection(accountAddons)
