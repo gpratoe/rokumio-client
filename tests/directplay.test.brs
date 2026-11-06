@@ -19,6 +19,28 @@ sub Test_DirectPlay_HintsFromEncodedFilenameUrl()
     Harness_Equal(responseName.video.Count(), 1, "the parser reads only filename-bearing URL parameters, not signatures")
     Harness_Equal(responseName.video[0], "hevc", "an encoded response filename supplies the video hint")
     Harness_Equal(responseName.audio[0], "eac3", "an encoded response filename supplies the audio hint")
+
+    aacLayoutStream = {
+        url: "https://node1.lat-add.com/media/movie/video.mkv?sig=opaque"
+        behaviorHints: {
+            filename: "Teenage.Sex.and.Death.at.Camp.Miasma.2026.1080p.MUBI.WEB-DL.AAC2.0.H.264.CAST.mkv"
+        }
+    }
+    aacLayout = DirectPlayHints(aacLayoutStream)
+    Harness_Equal(aacLayout.audio.Count(), 1, "AAC with an attached 2.0 layout still produces one audio hint")
+    Harness_Equal(aacLayout.audio[0], "aac", "AAC2.0 maps to AAC")
+    classified = DirectPlayTestClassify(aacLayoutStream, DirectPlayTestCapabilities("", ""))
+    Harness_Equal(classified.audioState, "supported", "the recognized AAC hint reaches the device capability check")
+
+    aacLookalike = DirectPlayHints({ url: "https://cdn.example/movie.mkv", title: "AACPlus" })
+    Harness_Equal(aacLookalike.audio.Count(), 0, "alphabetic AAC lookalikes do not become codec hints")
+
+    truehdLayout = DirectPlayHints({
+        url: "https://cdn.example/movie.mkv"
+        behaviorHints: { filename: "Movie.2026.1080p.WEB-DL.TrueHD7.1.mkv" }
+    })
+    Harness_Equal(truehdLayout.audio.Count(), 1, "TrueHD with an attached channel layout still produces one audio hint")
+    Harness_Equal(truehdLayout.audio[0], "truehd", "TrueHD7.1 maps to TrueHD")
 end sub
 
 sub Test_DirectPlay_BrandAndShortCodecAliases()
