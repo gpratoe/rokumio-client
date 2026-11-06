@@ -11,6 +11,10 @@ sub init()
     m.description = m.top.FindNode("addonDescription")
     m.action = m.top.FindNode("addonAction")
 
+    t = Theme()
+    m.name.color = t.textPrimary
+    m.version.color = t.textSecondary
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onFocusChanged")
     m.top.ObserveField("rowHasFocus", "onFocusChanged")
@@ -34,11 +38,12 @@ sub ApplyContent()
     content = m.top.itemContent
     if content = invalid then return
     m.name.text = content.title
-    m.description.text = content.description
     m.version.text = content.addonVersion
+    m.description.text = content.description
     m.scope.text = content.addonScope
     m.action.text = content.actionLabel
     m.logo.uri = RokuLogoUri(content.addonLogo)
+
     UpdateLook()
 end sub
 

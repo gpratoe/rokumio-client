@@ -21,27 +21,30 @@
             loadHeight="80"
             loadDisplayMode="scaleToFit"
             failedBitmapUri="pkg:/images/puzzle.png" />
-        <Label
-            id="addonName"
-            translation="[118, 16]"
-            width="440"
-            height="36"
-            font="font:MediumBoldSystemFont" />
-        <Label
-            id="addonVersion"
-            translation="[570, 20]"
-            width="190"
-            height="30"
-            font="font:SmallSystemFont" />
+        <LayoutGroup
+            id="nameVersionRow"
+            translation="[118, 30]"
+            layoutDirection="horiz"
+            itemSpacings="[12]"
+            vertAlignment="center">
+            <Label
+                id="addonName"
+                height="36"
+                font="font:MediumBoldSystemFont" />
+            <Label
+                id="addonVersion"
+                height="30"
+                font="font:SmallSystemFont" />
+        </LayoutGroup>
         <Label
             id="addonScope"
-            translation="[118, 54]"
+            translation="[118, 68]"
             width="630"
             height="28"
             font="font:SmallBoldSystemFont" />
         <Label
             id="addonDescription"
-            translation="[118, 84]"
+            translation="[118, 102]"
             width="630"
             height="56"
             wrap="true"
@@ -49,7 +52,7 @@
             font="font:SmallSystemFont" />
         <Label
             id="addonAction"
-            translation="[768, 48]"
+            translation="[768, 66]"
             width="200"
             height="52"
             horizAlign="center"
