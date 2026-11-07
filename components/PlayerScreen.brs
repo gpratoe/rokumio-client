@@ -1082,9 +1082,6 @@ end sub
 ' The platform's buffering feedback is NOT one widget — it is three internal
 ' nodes, and the app-owned logo reveal is meant to be the only one on screen:
 '
-'   - a BusySpinner (the center spinning wheel). It is NOT a documented field of
-'     the Video node; it is an internal child node. It can only be reached by
-'     walking the node's children, and there is no getter like trickPlayBar.
 '   - retrievingBar (documented READ_WRITE field, an internal ProgressBar): the
 '     bottom bar shown while the stream first loads.
 '   - bufferingBar (documented READ_WRITE field, an internal ProgressBar): the
@@ -1161,38 +1158,6 @@ sub HideNativeBufferingUi()
         print "[video] retrievingBar not hideable on this OS: " ; e.message
     end try
 
-    ' The wheel is not a field of the Video node — unlike trickPlayBar there is no
-    ' getter for it — so it can only be reached by walking the node's children and
-    ' matching on subtype. Only documented interfaces are used for that
-    ' (ifSGNodeChildren getChildCount/getChild, ifSGNodeDict subtype), which is
-    ' what makes this safe where a made-up method name was not.
-    HideBusySpinners(m.video, 0)
-end sub
-
-' Depth-first walk for BusySpinner descendants, hiding each one found. Depth
-' capped because this walks a system-owned subtree and a cycle would otherwise
-' spin the render thread forever. Every step is optional: a node type this OS does
-' not have simply matches nothing, and that costs the hide, not the play.
-sub HideBusySpinners(node as object, depth as integer)
-    if node = invalid or depth > 8 then return
-    count = 0
-    try
-        count = node.GetChildCount()
-    catch e
-        return
-    end try
-    for i = 0 to count - 1
-        child = node.GetChild(i)
-        if child <> invalid
-            try
-                if child.subtype() = "BusySpinner" then child.visible = false
-            catch e
-                ' A node in a system-owned subtree that will not take `visible`
-                ' costs the hide, not the play.
-            end try
-            HideBusySpinners(child, depth + 1)
-        end if
-    end for
 end sub
 
 ' The Video node is declared in XML so Roku owns its native UI lifecycle. The

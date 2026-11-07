@@ -18,7 +18,7 @@ sub init()
     m.qrPoster = m.top.FindNode("pairQr")
     m.qrFallback = m.top.FindNode("pairQrFallback")
     m.column = m.top.FindNode("pairColumn")
-    m.spinner = m.top.FindNode("pairSpinner")
+
     m.step1Label = m.top.FindNode("pairStep1Line")
     m.timerLabel = m.top.FindNode("pairTimer")
     m.statusLabel = m.top.FindNode("pairStatus")
@@ -123,7 +123,6 @@ end sub
 ' Back to the "fetching the QR" pose: spinner up, column down, countdown armed.
 sub ResetUI()
     m.refreshing = false
-    m.spinner.visible = true
     m.column.visible = false
     m.qrPoster.uri = ""
     ' onQrLoadStatus hides the poster when an image fails. ResetUI has to put it
@@ -203,7 +202,6 @@ end sub
 ' settled task result) may race; the first one wins.
 sub Reveal()
     if m.column.visible then return
-    m.spinner.visible = false
     m.column.visible = true
 end sub
 

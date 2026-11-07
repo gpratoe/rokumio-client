@@ -22,7 +22,7 @@ sub init()
     m.poster = m.top.FindNode("poster")
     m.tileBg = m.top.FindNode("tileBg")
     m.titleText = m.top.FindNode("titleText")
-    m.loadSpinner = m.top.FindNode("loadSpinner")
+
     m.progressTrack = m.top.FindNode("progressTrack")
     m.progressFill = m.top.FindNode("progressFill")
     m.watchedBadge = m.top.FindNode("watchedBadge")
@@ -104,10 +104,8 @@ sub ApplyTileSize()
 
     if w = 270 and h = 405
         m.titleText.translation = [18, 8]
-        m.loadSpinner.translation = [113, 163]
     else
         m.titleText.translation = [12, 8]
-        m.loadSpinner.translation = [(w - 44) / 2, (h - 44) / 2]
     end if
 
     if m.top.itemContent <> invalid then UpdateOverlays()
@@ -137,8 +135,6 @@ sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     loading = m.top.itemContent.loadState = "loading"
     if loading
-        m.loadSpinner.visible = true
-        m.loadSpinner.control = "start"
         m.poster.uri = ""
         m.titleText.text = m.top.itemContent.title
         ShowArtless()
@@ -146,13 +142,6 @@ sub onItemContentChanged()
         UpdateLook()
         return
     end if
-
-    ' Only Search sets loadState, and it defaults off here — every other screen
-    ' that reuses PosterTile is unaffected. A recycled tile must not carry a
-    ' spinning-but-hidden spinner into its next cell, so always stop it when not
-    ' loading.
-    m.loadSpinner.control = "stop"
-    m.loadSpinner.visible = false
 
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""

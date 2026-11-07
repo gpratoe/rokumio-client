@@ -5477,11 +5477,6 @@ function checkNativeBufferingSuppressionContract() {
         err('PlayerScreen.brs SuppressNativeBufferingUi() no longer opts out of the auto retrieving bar — the initial load bar returns');
     }
 
-    const walk = body('HideBusySpinners');
-    if (!walk || !/(GetChild\s*\(|GetChildCount\s*\()/.test(walk) || !/subtype\s*\(/.test(walk)) {
-        err('PlayerScreen.brs HideBusySpinners() no longer walks node children by subtype — the center wheel has no field/getter, so that walk is the only documented way to reach it');
-    }
-
     const custom = body('CustomizeVideoNode');
     if (!custom || !/SuppressNativeBufferingUi\s*\(/.test(custom)) {
         err('PlayerScreen.brs CustomizeVideoNode() no longer arms the native buffering suppression at play start — the initial retrieving bar appears before the observer can hide it');

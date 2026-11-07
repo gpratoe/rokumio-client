@@ -21,12 +21,6 @@
     <children>
         <Rectangle id="pairBg" width="1920" height="1080" color="0x0" />
 
-        <BusySpinner
-            id="pairSpinner"
-            translation="[832, 400]"
-            visible="true"
-            control="RUN" />
-
         <!-- The full-width vertical group centers every child by its own
              measured size, so wider translations stay centered with no manual
              math. Starts hidden; ShowLink flips it on as soon as the scan URL
