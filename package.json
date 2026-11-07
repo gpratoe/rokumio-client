@@ -1,6 +1,6 @@
 {
     "name": "rokumio-client",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "private": true,
     "description": "Native Roku client for Stremio addons and debrid streams",
     "scripts": {
