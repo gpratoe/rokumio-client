@@ -26,6 +26,7 @@ class SettingsStore
     language as string
     audioPassthrough as boolean
     audioTransmux as boolean
+    directPlayMode as string
     hiddenHomeCatalogs as object
     saveRefused as boolean
 
@@ -35,6 +36,7 @@ class SettingsStore
         m.language = "en"
         m.audioPassthrough = false
         m.audioTransmux = false
+        m.directPlayMode = "off"
         m.hiddenHomeCatalogs = []
         m.saveRefused = false
         m.Load()
@@ -169,6 +171,23 @@ class SettingsStore
         return true
     end function
 
+    ' How torrents are played, in three states:
+    '   "on"   — always play the original file straight from the server
+    '   "ask"  — offer the choice before every torrent play
+    '   "off"  — always remux through the server's converter (the default)
+    ' Anything else stored is read as the default: an unknown value must not
+    ' silently turn an experimental feature fully on.
+    function GetDirectPlayMode() as string
+        return m.directPlayMode
+    end function
+
+    function SetDirectPlayMode(value as string) as boolean
+        if value <> "on" and value <> "ask" and value <> "off" then return false
+        m.directPlayMode = value
+        m.Save()
+        return true
+    end function
+
     ' The registry keeps strings, so the flags go out as text. The in-memory
     ' values are booleans; this is only the wire.
     function AudioPassthroughText() as string
@@ -179,6 +198,10 @@ class SettingsStore
     function AudioTransmuxText() as string
         if m.audioTransmux then return "true"
         return "false"
+    end function
+
+    function DirectPlayModeText() as string
+        return m.directPlayMode
     end function
 
     ' Writes every field through the registry and flushes. roRegistrySection.Write
@@ -196,6 +219,7 @@ class SettingsStore
         if not m.registry.Write("language", m.language) then ok = false
         if not m.registry.Write("audioPassthrough", m.AudioPassthroughText()) then ok = false
         if not m.registry.Write("audioTransmux", m.AudioTransmuxText()) then ok = false
+        if not m.registry.Write("directPlay", m.DirectPlayModeText()) then ok = false
         if not m.registry.Write("hiddenHomeCatalogs", FormatJson(m.hiddenHomeCatalogs)) then ok = false
         m.registry.Flush()
         m.saveRefused = not ok
@@ -220,6 +244,16 @@ class SettingsStore
         ' a value from a future version) leaves the default in place.
         if m.registry.Read("audioPassthrough") = "true" then m.audioPassthrough = true
         if m.registry.Read("audioTransmux") = "true" then m.audioTransmux = true
+        ' The boolean this replaced wrote "true"/"false": migrate those, keep
+        ' the mode strings, and let anything else fall to the default.
+        storedMode = m.registry.Read("directPlay")
+        if storedMode = "false"
+            m.directPlayMode = "off"
+        else if storedMode = "true"
+            m.directPlayMode = "on"
+        else if storedMode = "on" or storedMode = "ask" or storedMode = "off"
+            m.directPlayMode = storedMode
+        end if
 
         rawHomeCatalogs = m.registry.Read("hiddenHomeCatalogs")
         if rawHomeCatalogs <> ""

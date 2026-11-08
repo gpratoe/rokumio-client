@@ -45,6 +45,7 @@
 ' spent on one attempt that can succeed instead of two that cannot.
 const PROBE_TIMEOUT_MS = 8000
 
+
 ' The warm-up's two timeouts, split because the two requests it makes are not
 ' remotely alike and one shared number was letting the wrong one fail.
 '
@@ -975,6 +976,7 @@ class PlaybackStore
         end if
         return result
     end function
+
 
     ' One plain GET of the playlist URL, with the body left as text.
     '

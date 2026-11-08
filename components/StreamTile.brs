@@ -24,6 +24,7 @@ sub init()
     m.scrollTimer = m.top.FindNode("scrollTimer")
 
     m.title = m.top.FindNode("tileTitle")
+    m.remuxLabel = m.top.FindNode("remuxLabel")
     m.playabilityBadge = m.top.FindNode("playabilityBadge")
     m.videoCompatibilityIcon = m.top.FindNode("videoCompatibilityIcon")
     m.audioCompatibilityIcon = m.top.FindNode("audioCompatibilityIcon")
@@ -129,6 +130,7 @@ end sub
 sub onItemContentChanged()
     if m.top.itemContent = invalid
         if m.playabilityBadge <> invalid then m.playabilityBadge.visible = false
+        if m.remuxLabel <> invalid then m.remuxLabel.visible = false
         SetCardTitleLayout(false)
         return
     end if
@@ -148,6 +150,19 @@ sub onItemContentChanged()
 end sub
 
 sub UpdatePlayabilityBadge()
+    ' A torrent that will be remuxed says so plainly instead of the glyphs:
+    ' a direct-play verdict there would read as a warning about a play that
+    ' is never going to be attempted.
+    remux = m.top.itemContent.remuxLabel
+    if remux <> invalid and remux <> ""
+        m.playabilityBadge.visible = false
+        m.remuxLabel.text = remux
+        m.remuxLabel.color = Theme().textSecondary
+        m.remuxLabel.visible = true
+        SetCardTitleLayout(true)
+        return
+    end if
+    if m.remuxLabel <> invalid then m.remuxLabel.visible = false
     videoState = m.top.itemContent.videoCompatibilityState
     audioState = m.top.itemContent.audioCompatibilityState
     if videoState = invalid or audioState = invalid or videoState = "server"

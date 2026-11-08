@@ -26,6 +26,10 @@
              a Task cannot reach the store itself. -->
         <field id="audioPassthrough" type="boolean" value="false" />
         <field id="audioTransmux" type="boolean" value="false" />
+        <!-- How torrents are played: "on" always serves the original file
+             with no remux, "ask" prepares both routes and lets the player
+             ask, "off" always remuxes through the HLS converter. -->
+        <field id="directPlayMode" type="string" value="off" />
         <field id="result" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />

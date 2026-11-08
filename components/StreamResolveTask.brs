@@ -153,24 +153,37 @@ sub resolve()
                 resolved.warmup = { ok: false, status: 0, error: e.message }
             end try
 
-            try
-                resolved.probe = WaitForPlaylist(store, resolved.url, resolved.fallbackUrl)
-                ' The probe can move off the direct HLS2 route, so the URL handed
-                ' to the Video node has to be the one the probe settled on — see
-                ' WaitForPlaylist. Guarded on the field's type rather than assumed,
-                ' because the fallback probe object built below carries no url.
-                if resolved.probe.url <> invalid then resolved.url = resolved.probe.url
-            catch e
-                resolved.probe = {
-                    ok: false
-                    status: 0
-                    attempts: 0
-                    firstError: e.message
-                    body: ""
-                    gaveUp: true
-                    url: resolved.url
-                }
-            end try
+            resolved.direct = false
+            if m.top.directPlayMode = "on"
+                if m.top.state = "stop" then return
+                directUrl = store.EngineUrl(m.top.serverAddress, m.top.stream, m.top.season, m.top.episode)
+                if directUrl <> ""
+                    resolved.url = directUrl
+                    resolved.streamFormat = store.StreamFormat(m.top.stream, directUrl)
+                    resolved.direct = true
+                end if
+            end if
+
+            if not resolved.direct then
+                try
+                    resolved.probe = WaitForPlaylist(store, resolved.url, resolved.fallbackUrl)
+                    ' The probe can move off the direct HLS2 route, so the URL handed
+                    ' to the Video node has to be the one the probe settled on — see
+                    ' WaitForPlaylist. Guarded on the field's type rather than assumed,
+                    ' because the fallback probe object built below carries no url.
+                    if resolved.probe.url <> invalid then resolved.url = resolved.probe.url
+                catch e
+                    resolved.probe = {
+                        ok: false
+                        status: 0
+                        attempts: 0
+                        firstError: e.message
+                        body: ""
+                        gaveUp: true
+                        url: resolved.url
+                    }
+                end try
+            end if
         end if
         ' A stop that landed inside the probe loop leaves a probe object built
         ' from fewer than four attempts. Publishing it is pointless at best — its

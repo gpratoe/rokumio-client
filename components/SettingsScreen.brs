@@ -244,7 +244,7 @@ function SectionDefinitions() as object
     sections = []
     sections.Push({ id: "general", rows: ["account", "language"] })
     sections.Push({ id: "home", rows: ["homeRows"] })
-    server = ["server", "audioPassthrough", "audioTransmux", "torrentProfile", "cacheSize", "testServer"]
+    server = ["server", "audioPassthrough", "audioTransmux", "directPlay", "torrentProfile", "cacheSize", "testServer"]
     ' The two diagnostic rows are appended last and only once the gesture has
     ' revealed them, so they stay out of the way of the rows people use.
     if m.showNetDiag then server.Push("netdiag")
@@ -281,6 +281,8 @@ function RowLabel(action as string) as string
         return Lang("settings", "rowAudioPassthrough")
     else if action = "audioTransmux" then
         return Lang("settings", "rowAudioTransmux")
+    else if action = "directPlay" then
+        return Lang("settings", "rowDirectPlay")
     else if action = "torrentProfile" then
         return Lang("settings", "rowTorrentProfile")
     else if action = "cacheSize" then
@@ -317,6 +319,8 @@ function RowValue(action as string) as string
         return AudioPassthroughValue()
     else if action = "audioTransmux" then
         return AudioTransmuxValue()
+    else if action = "directPlay" then
+        return DirectPlayValue()
     else if action = "torrentProfile" then
         return TorrentProfileValue()
     else if action = "cacheSize" then
@@ -497,6 +501,14 @@ function AudioTransmuxValue() as string
     return AudioCodecsValue(m.transmuxCodecs)
 end function
 
+function DirectPlayValue() as string
+    if m.stores = invalid then return Lang("common", "off")
+    mode = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
+    if mode = "on" then return Lang("common", "on")
+    if mode = "ask" then return Lang("settings", "valueDirectAsk")
+    return Lang("common", "off")
+end function
+
 ' The codecs an option would offer, or the state of the probe that answers it.
 function AudioCodecsValue(codecs as object) as string
     if codecs = invalid then return Lang("common", "on")
@@ -571,6 +583,8 @@ function PanelBody(action as string) as string
         body = Lang("settings", "panelTransmux")
         body = body + " " + AudioEligibility("eligibilitySubjectTransmux", m.transmuxCodecs)
         return body
+    else if action = "directPlay" then
+        return Lang("settings", "panelDirectPlay")
     else if action = "torrentProfile" then
         body = Lang("settings", "panelTorrentProfile")
         body = body + " " + TorrentProfileLimitsText()
@@ -668,6 +682,27 @@ sub ToggleAudioTransmux()
     if m.stores = invalid then return
     current = m.stores.settings.callFunc("SettingsGetAudioTransmux")
     if m.stores.settings.callFunc("SettingsSetAudioTransmux", not current)
+        ReportSaveFault()
+        RefreshValues()
+        UpdatePanel()
+    end if
+end sub
+
+' Cycle the three direct-play states forward: On -> Ask first -> Off. The
+' cycle order puts Ask first in the middle, so one extra press from On
+' lands on the safe choice rather than on always-remux.
+sub ToggleDirectPlay()
+    if m.stores = invalid then return
+    current = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
+    nextMode = "ask"
+    if current = "on"
+        nextMode = "ask"
+    else if current = "ask"
+        nextMode = "off"
+    else if current = "off"
+        nextMode = "on"
+    end if
+    if m.stores.settings.callFunc("SettingsSetDirectPlayMode", nextMode)
         ReportSaveFault()
         RefreshValues()
         UpdatePanel()
@@ -953,6 +988,8 @@ sub onRowSelected()
         ToggleAudioPassthrough()
     else if action = "audioTransmux"
         ToggleAudioTransmux()
+    else if action = "directPlay"
+        ToggleDirectPlay()
     else if action = "torrentProfile"
         CycleTorrentProfile()
     else if action = "cacheSize"

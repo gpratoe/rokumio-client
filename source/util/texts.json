@@ -56,6 +56,8 @@
       "rowServer": "Streaming server",
       "rowAudioPassthrough": "Audio passthrough",
       "rowAudioTransmux": "Audio transmux (experimental)",
+      "rowDirectPlay": "Direct play",
+      "valueDirectAsk": "Ask first",
       "rowTorrentProfile": "Torrent profile",
       "rowCacheSize": "Cache size",
       "rowTestServer": "Test server",
@@ -69,6 +71,7 @@
       "panelPassthrough": "The server copies the audio instead of re-encoding it, and your sound system decodes it over HDMI. Nothing is re-encoded: the server does less work and the quality is the original.",
       "panelPassthroughNote": "If your sound system reports a codec, the Roku hands the audio stream over to it.",
       "panelTransmux": "Experimental. The server copies the audio instead of re-encoding it, and this Roku decodes it. The server does less work and the quality is the original, but a Roku's own Dolby decoder inside a fragmented MP4 has not been tested on this kind of device, so the picture may come with no sound.",
+      "panelDirectPlay": "Direct play serves the torrent's original file straight from the server, with no remux or re-encode: the server does almost no work and the quality is the original. Ask first shows a choice before every torrent play; Off always remuxes through the server instead.",
       "panelTorrentProfile": "Stremio's torrent profile defines how hard the server works to fetch a torrent: how many peers it may connect to, how fast it may download, and how many peers it wants before it calls a torrent stable. <bold>Soft</bold> keeps it gentle, <bold>Fast</bold> and <bold>Ultra fast</bold> take it to the limit.",
       "profileLimits": "Now: <bold>{connections}</bold> connections, <bold>{peers}</bold> peers wanted, <bold>{soft}</bold> soft, <bold>{hard}</bold> hard.",
       "panelCacheSize": "The size of the streaming server's download cache, chosen from the sizes the server itself offers.",
@@ -228,7 +231,8 @@
       "noStreamsForTitle": "No streams found for this title.",
       "noStreamsForProvider": "No streams found for this provider.",
       "loadingStreams": "Loading streams…",
-      "streamFallback": "Stream"
+      "streamFallback": "Stream",
+      "remuxLabel": "Remux"
     },
     "player": {
       "sourceUnavailable": "This source is poorly available or your internet connection is not fast enough.",
@@ -243,7 +247,10 @@
       "captionsFallback": "Captions",
       "notPlayable": "This video is not playable on this device.",
       "playbackFailed": "Playback failed: check the stream and server.",
-      "playbackFailedCode": "{message}  (code {code})"
+      "playbackFailedCode": "{message}  (code {code})",
+      "directDialogTitle": "Play this video directly?",
+      "directDialogDirect": "Play direct (original file)",
+      "directDialogRemux": "Remux (converted on the server)"
     },
     "discover": {
       "title": "Discover",
@@ -347,6 +354,8 @@
       "rowServer": "Servidor de streaming",
       "rowAudioPassthrough": "Passthrough de audio",
       "rowAudioTransmux": "Remux de audio (experimental)",
+      "rowDirectPlay": "Reproducción directa",
+      "valueDirectAsk": "Preguntar primero",
       "rowTorrentProfile": "Perfil de torrents",
       "rowCacheSize": "Tamaño de caché",
       "rowTestServer": "Probar servidor",
@@ -360,6 +369,7 @@
       "panelPassthrough": "El servidor copia el audio en vez de recodificarlo, y tu equipo de sonido lo decodifica por HDMI. No se recodifica nada: el servidor trabaja menos y la calidad es la original.",
       "panelPassthroughNote": "Si tu equipo de sonido reporta un códec, el Roku le entrega el flujo de audio.",
       "panelTransmux": "Experimental. El servidor copia el audio en vez de recodificarlo, y este Roku lo decodifica. El servidor trabaja menos y la calidad es la original, pero el decodificador Dolby propio del Roku dentro de un MP4 fragmentado no se ha probado en este tipo de dispositivo, así que la imagen puede llegar sin sonido.",
+      "panelDirectPlay": "La reproducción directa sirve el archivo original del torrent directamente desde el servidor, sin remux ni recodificación: el servidor casi no trabaja y la calidad es la original. Preguntar primero muestra una elección antes de cada reproducción de torrent; Desactivado remuxea siempre a través del servidor.",
       "panelTorrentProfile": "El perfil de torrents de Stremio define con cuánta fuerza el servidor descarga un torrent: con cuántos peers puede conectar, a qué velocidad puede bajar y cuántos peers quiere para dar un torrent por estable. <bold>Soft</bold> lo mantiene suave, <bold>Fast</bold> y <bold>Ultra fast</bold> lo llevan al límite.",
       "profileLimits": "Ahora: <bold>{connections}</bold> conexiones, <bold>{peers}</bold> peers deseados, <bold>{soft}</bold> suave, <bold>{hard}</bold> duro.",
       "panelCacheSize": "El tamaño de la caché de descarga del servidor de streaming, elegido entre los tamaños que el propio servidor ofrece.",
@@ -519,7 +529,8 @@
       "noStreamsForTitle": "No se encontraron streams para este título.",
       "noStreamsForProvider": "No se encontraron streams para este proveedor.",
       "loadingStreams": "Cargando streams…",
-      "streamFallback": "Stream"
+      "streamFallback": "Stream",
+      "remuxLabel": "Remux"
     },
     "player": {
       "sourceUnavailable": "Esta fuente está poco disponible o tu conexión a internet no es lo bastante rápida.",
@@ -534,7 +545,10 @@
       "captionsFallback": "Subtítulos",
       "notPlayable": "Este video no se puede reproducir en este dispositivo.",
       "playbackFailed": "Falló la reproducción: revisa el stream y el servidor.",
-      "playbackFailedCode": "{message}  (código {code})"
+      "playbackFailedCode": "{message}  (código {code})",
+      "directDialogTitle": "¿Reproducir este video directamente?",
+      "directDialogDirect": "Directo (archivo original)",
+      "directDialogRemux": "Remux (convertido en el servidor)"
     },
     "discover": {
       "title": "Descubrir",

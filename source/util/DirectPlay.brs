@@ -1,6 +1,7 @@
-' DirectPlay — conservative, metadata-only compatibility estimates for direct
-' links. Codec names are read from the add-on's stream hints; hardware answers
-' are supplied by DirectPlayCapsTask through the shared CodecProbe helpers.
+' DirectPlay — conservative, metadata-only compatibility estimates for
+' direct links and torrents. Codec names are read from the add-on's stream
+' hints; hardware answers are supplied by DirectPlayCapsTask through the
+' shared CodecProbe helpers.
 
 ' Classify parsed hints against one device capability snapshot. Parsing is kept
 ' separate so it can run once in StreamsLoaderTask, not on every provider switch.
@@ -13,7 +14,7 @@ function DirectPlayClassifyHints(hints as dynamic, capabilities as dynamic) as o
         audioAlternatives: []
     }
     if Type(hints) <> "roAssociativeArray" then return result
-    if hints.isDirect <> true
+    if hints.isDirect <> true and hints.isTorrent <> true
         result.videoState = "server"
         result.audioState = "server"
         return result
@@ -105,12 +106,19 @@ end function
 ' Extract codec-family hints from fields stream providers commonly use for a
 ' filename or release label. This pure parser also runs in StreamsLoaderTask.
 function DirectPlayHints(stream as dynamic) as object
-    hints = { isDirect: false, video: [], audio: [], audioAlternatives: [] }
+    hints = { isDirect: false, isTorrent: false, video: [], audio: [], audioAlternatives: [] }
     if Type(stream) <> "roAssociativeArray" then return hints
 
     url = DirectPlayText(stream.url)
-    if url.Trim() = "" then return hints
-    hints.isDirect = true
+    if url.Trim() = ""
+        ' A torrent carries no URL, only an infoHash — but its release
+        ' metadata names the same codecs a direct link's filename would, so
+        ' it gets the same hints. A stream with neither is not a candidate.
+        if DirectPlayText(stream.infoHash).Trim() = "" then return hints
+        hints.isTorrent = true
+    else
+        hints.isDirect = true
+    end if
 
     text = ""
     text = DirectPlayAppend(text, DirectPlayUrlHintText(url))
@@ -165,8 +173,12 @@ end function
 ' thread parse.
 function DirectPlayUnknownHints(stream as dynamic) as object
     url = ""
-    if Type(stream) = "roAssociativeArray" then url = DirectPlayText(stream.url)
-    return { isDirect: url.Trim() <> "", video: [], audio: [], audioAlternatives: [] }
+    infoHash = ""
+    if Type(stream) = "roAssociativeArray"
+        url = DirectPlayText(stream.url)
+        infoHash = DirectPlayText(stream.infoHash)
+    end if
+    return { isDirect: url.Trim() <> "", isTorrent: url.Trim() = "" and infoHash.Trim() <> "", video: [], audio: [], audioAlternatives: [] }
 end function
 
 function DirectPlayCodecRules() as object

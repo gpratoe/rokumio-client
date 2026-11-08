@@ -29,6 +29,17 @@
                 height="40"
                 translation="[18, 32]"
                 vertAlign="center" />
+            <!-- The remux label, shown instead of the compatibility glyphs
+                 when a torrent will be remuxed by the server. -->
+            <Label
+                id="remuxLabel"
+                translation="[880, 32]"
+                width="180"
+                height="40"
+                font="font:MediumSystemFont"
+                horizAlign="center"
+                vertAlign="center"
+                visible="false" />
             <!-- Compact top-right pairs: media type icon, then state marker. -->
             <Group id="playabilityBadge" translation="[870, 18]" visible="false">
                 <Poster

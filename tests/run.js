@@ -1910,6 +1910,46 @@ function checkCodecPlaybackContract() {
         err('SettingsScreen.brs does not say the transmux option is experimental — it is untested on this kind of device, and the panel is the only place that can say so');
     }
 
+    // 12. Direct play: three states, no server probe. "on" serves the bare
+    //     file route, "ask" prepares both routes and the player asks, "off"
+    //     is the plain HLS route. Evidence for the choice comes from the
+    //     stream's own metadata (the direct-link hints, now including
+    //     torrents), never from an ffprobe round trip.
+    if (!/<field\s+id="directPlayMode"\s+type="string"/.test(taskXml)) {
+        err('StreamResolveTask.xml does not declare the directPlayMode field — the setting would never reach the resolve');
+    }
+    if (/ProbeServerMedia|DirectTorrentVerdict/.test(taskBrs) || /ProbeServerMedia/.test(store)) {
+        err('The smart media probe is back — direct play is now metadata-based, and a probe that fails takes a playable stream down with it');
+    }
+    if (!/directPlayMode\s*:/.test(playerBrs) || !/SettingsGetDirectPlayMode/.test(playerBrs)) {
+        err('PlayerScreen.brs does not pass the direct-play mode to StreamResolveTask — the task would always get the default');
+    }
+    const resolveBody = body(taskBrs, 'resolve');
+    if (resolveBody) {
+        if (!/m\.top\.directPlayMode\s*=\s*"on"/.test(resolveBody) || !/EngineUrl\(/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() does not build the bare file route in on mode — direct play would never happen');
+        }
+        if (!/directPlayMode\s*=\s*"on"/.test(resolveBody) || !/resolved\.url\s*=\s*directUrl/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() does not hand the bare file route to the player in on mode');
+        }
+        if (!/if\s+not\s+resolved\.direct\s+then[\s\S]*?WaitForPlaylist\(store,\s*resolved\.url,\s*resolved\.fallbackUrl\)/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() does not wait for the HLS playlist when remuxing — a cold converter would stall the play');
+        }
+    }
+    // The ask happens in the picker, before anything resolves: the dialog's
+    // choice travels as a per-play on/off mode, so the resolver and the
+    // player never see "ask".
+    const streamsScreen = code(read('components/StreamsScreen.brs'));
+    if (!/StandardMessageDialog/.test(streamsScreen) || !/PushPlayer\(m\.pendingPlayIndex,\s*"on"\)/.test(streamsScreen) || !/PushPlayer\(m\.pendingPlayIndex,\s*"off"\)/.test(streamsScreen)) {
+        err('StreamsScreen.brs does not ask direct-vs-remux before pushing the player — ask mode would never ask');
+    }
+    if (!/directPlayMode:\s*playMode/.test(streamsScreen) || !/params\.directPlayMode/.test(playerBrs)) {
+        err('The per-play direct mode does not travel from the picker through the player to the resolve task');
+    }
+    if (!/"directPlay"/.test(read('components/SettingsScreen.brs'))) {
+        err('SettingsScreen.brs has no directPlay row — the user has no way to change the mode');
+    }
+
     return ok;
 }
 
@@ -3925,8 +3965,8 @@ function checkDirectPlayContract() {
     if (!/row\.CreateChild\("TileContent"\)/.test(screen) || !/<field\s+id="videoCompatibilityState"\s+type="string"/.test(tileContentXml) || !/<field\s+id="audioCompatibilityState"\s+type="string"/.test(tileContentXml)) {
         err('Stream compatibility metadata must use TileContent fields so Roku forwards it across the RowList boundary');
     }
-    if (!/url\.Trim\(\)\s*=\s*""\s+then\s+return hints/.test(detector) || !/if\s+hints\.isDirect\s*<>\s*true[\s\S]*?result\.videoState\s*=\s*"server"[\s\S]*?result\.audioState\s*=\s*"server"/.test(detector) || !/behaviorHints\.filename/.test(detector) || !/DirectPlayUrlHintText\(url\)/.test(detector) || !/carriesFilename/.test(detector)) {
-        err('DirectPlay must exclude server-routed streams and inspect add-on filenames plus direct URLs for codec hints');
+    if (!/DirectPlayText\(stream\.infoHash\)/.test(detector) || !/if\s+hints\.isDirect\s*<>\s*true\s+and\s+hints\.isTorrent\s*<>\s*true[\s\S]*?result\.videoState\s*=\s*"server"[\s\S]*?result\.audioState\s*=\s*"server"/.test(detector) || !/behaviorHints\.filename/.test(detector) || !/DirectPlayUrlHintText\(url\)/.test(detector) || !/carriesFilename/.test(detector)) {
+        err('DirectPlay must classify direct links and torrents from add-on filenames, and only leave streams with neither a URL nor an infoHash as server-routed');
     }
     if (!/source\/util\/DirectPlay\.brs/.test(loaderXml) || !/parsedHints\.Push\(DirectPlayHints\(stream\)\)/.test(loader) || !/directPlayHints:\s*parsedHints/.test(loader)) {
         err('StreamsLoaderTask must parse each stream hint once off the UI thread and return it alongside the stream');
@@ -4494,7 +4534,13 @@ const ENGLISH_BY_DECISION = [
     'On',
     'Off',
     'no playable tracks',
-    'not supported'
+    'not supported',
+    // The DirectPlay verdict state codes. Compared, never displayed: the
+    // words on screen are the directState* entries of the table.
+    'supported',
+    'partial',
+    'unsupported',
+    'unknown'
 ];
 
 // The files whose user-visible words come from the table. Each wave adds its

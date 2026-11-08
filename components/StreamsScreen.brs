@@ -65,6 +65,7 @@ sub init()
     m.epMetaTask = invalid
     m.directPlayCapsTask = invalid
     m.directPlayCapabilities = invalid
+    m.pendingPlayIndex = -1
 end sub
 
 function OnEnter(params as object) as void
@@ -474,6 +475,16 @@ sub CancelEpisodeLoad()
     end if
 end sub
 
+' The direct-play mode ("on"/"ask"/"off") from the settings store. Read
+' per render, not cached: the only way to change it is leaving this screen
+' for Settings, which rebuilds the visit (and the cards) on the way back.
+function DirectPlayMode() as string
+    if m.stores = invalid then return "off"
+    mode = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
+    if mode = "on" or mode = "ask" or mode = "off" then return mode
+    return "off"
+end function
+
 ' Probe once for this long-lived picker. The device calls are local and
 ' read-only; the resulting capability snapshot is reused across provider and
 ' episode changes, then applied when either the snapshot or streams arrive.
@@ -558,6 +569,12 @@ sub RenderActiveProvider()
             compatibility = DirectPlayClassifyHints(hint, m.directPlayCapabilities)
             item.videoCompatibilityState = compatibility.videoState
             item.audioCompatibilityState = compatibility.audioState
+            ' In always-remux mode a torrent card says how it WILL play
+            ' instead of how it could: direct-play glyphs there would read
+            ' as a warning about a play nobody is going to attempt.
+            if hint.isTorrent = true and DirectPlayMode() = "off"
+                item.remuxLabel = Lang("streams", "remuxLabel")
+            end if
             lines = StreamTitleLines(stream)
             if lines.Count() > 0
                 description = ""
@@ -724,18 +741,53 @@ sub onStreamSelected()
     index = data[0]
     if m.streams = invalid or index < 0 or index >= m.streams.Count() then return
 
+    ' Ask-first mode asks before anything resolves: the choice travels as a
+    ' per-play mode, and the player never sees "ask".
+    if DirectPlayMode() = "ask" and IsTorrentHint(index)
+        m.pendingPlayIndex = index
+        ShowDirectChoice()
+        return
+    end if
+    PushPlayer(index, DirectPlayMode())
+end sub
+
+function IsTorrentHint(index as integer) as boolean
+    if m.providers = invalid or m.activeIndex < 0 or m.activeIndex >= m.providers.Count() then return false
+    provider = m.providers[m.activeIndex]
+    if provider.directPlayHints = invalid or index >= provider.directPlayHints.Count() then return false
+    return provider.directPlayHints[index].isTorrent = true
+end function
+
+sub ShowDirectChoice()
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = Lang("player", "directDialogTitle")
+    dialog.buttons = [Lang("player", "directDialogDirect"), Lang("player", "directDialogRemux"), Lang("common", "cancel")]
+    dialog.observeField("buttonSelected", "onDirectChoice")
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onDirectChoice()
+    dialog = m.top.getScene().dialog
+    if dialog = invalid then return
+    index = dialog.buttonSelected
+    m.top.getScene().dialog = invalid
+    if index = 0
+        PushPlayer(m.pendingPlayIndex, "on")
+    else if index = 1
+        PushPlayer(m.pendingPlayIndex, "off")
+    end if
+end sub
+
+sub PushPlayer(index as integer, playMode as string)
+    if m.streams = invalid or index < 0 or index >= m.streams.Count() then return
+
     serverAddress = ""
     if m.stores <> invalid then serverAddress = m.stores.settings.callFunc("SettingsGetServerAddress")
 
-    ' m.params.position is the resume point from when this list was opened. If
-    ' the viewer played a stream, it froze, and they came back to pick another
-    ' one, the player has saved a newer point since: use it, whichever stream
-    ' wrote it, so every source picks up where the last one stopped.
     position = m.params.position
     if m.stores <> invalid and m.params.metaId <> invalid and m.params.videoId <> invalid
         saved = m.stores.library.callFunc("LibraryResumeFor", m.params.metaId)
         if saved <> invalid and saved.videoId = m.params.videoId and saved.position <> invalid and saved.position > 0
-            print "[resume] stream pick: list opened at pos=" ; position ; ", library has pos=" ; saved.position ; " for " ; m.params.videoId ; " — using library"
             position = saved.position
         end if
     end if
@@ -744,6 +796,7 @@ sub onStreamSelected()
         screen: "playerScreen"
         params: {
             stream: m.streams[index]
+            directPlayMode: playMode
             serverAddress: serverAddress
             metaType: m.params.metaType
             metaId: m.params.metaId

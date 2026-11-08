@@ -124,18 +124,25 @@ sub Test_DirectPlay_CompatibilityStates()
     Harness_Equal(result.audioState, "supported", "audio capability remains independent of an uncertain video path")
 end sub
 
-sub Test_DirectPlay_TorrentsAreExcluded()
-    Harness_Suite("DirectPlay does not label server-transcoded torrents")
+sub Test_DirectPlay_TorrentsAreIncluded()
+    Harness_Suite("DirectPlay labels torrents from their release metadata")
     stream = { infoHash: "abcdef123456", title: "H.264 AAC movie.mkv" }
     hints = DirectPlayHints(stream)
-    Harness_Ok(not hints.isDirect, "torrent hints stay server-routed before classification")
+    Harness_Ok(hints.isTorrent, "a torrent is tagged as a direct candidate during the background parse")
+    Harness_Ok(not hints.isDirect, "but it is not a direct URL")
     result = DirectPlayClassifyHints(hints, DirectPlayTestCapabilities("", ""))
-    Harness_Equal(result.videoState, "server", "a torrent without a direct URL has no video compatibility badge")
-    Harness_Equal(result.audioState, "server", "a torrent without a direct URL has no audio compatibility badge")
+    Harness_Equal(result.videoState, "supported", "a torrent's release name supplies its video verdict")
+    Harness_Equal(result.audioState, "supported", "and its audio verdict")
+
+    result = DirectPlayTestClassify({ infoHash: "abcdef123456", title: "movie" }, DirectPlayTestCapabilities("", ""))
+    Harness_Equal(result.videoState, "unknown", "a torrent whose metadata names no codec stays unknown, not server")
+    Harness_Equal(result.audioState, "unknown", "ditto for audio")
 
     direct = { url: "https://cdn.example/movie.mkv", infoHash: "abcdef123456", title: "H.264 AAC" }
+    hints = DirectPlayHints(direct)
+    Harness_Ok(hints.isDirect and not hints.isTorrent, "a direct URL keeps precedence when a stream also carries an infoHash")
     result = DirectPlayTestClassify(direct, DirectPlayTestCapabilities("", ""))
-    Harness_Equal(result.videoState, "supported", "a direct URL keeps precedence when a stream also carries an infoHash")
+    Harness_Equal(result.videoState, "supported", "both codec checks apply to the direct URL")
     Harness_Equal(result.audioState, "supported", "both codec checks apply to the direct URL")
 end sub
 

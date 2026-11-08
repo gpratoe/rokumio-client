@@ -161,6 +161,39 @@ sub Test_Settings_AudioTransmuxIsItsOwnSetting()
     Harness_Equal(reopened.GetAudioPassthrough(), false, "and the passthrough is still off")
 end sub
 
+' Direct play is a three-state mode, deactivated by default: nothing about
+' torrent playback changes until the user opts in. An unknown stored value
+' must never turn an experimental feature on.
+sub Test_Settings_DirectPlay()
+    Harness_Suite("SettingsStore direct play mode")
+    registry = MockRegistry()
+    settings = SettingsStore(registry)
+
+    Harness_Equal(settings.GetDirectPlayMode(), "off", "deactivated by default")
+
+    Harness_Ok(settings.SetDirectPlayMode("on"), "on is accepted")
+    Harness_Equal(settings.GetDirectPlayMode(), "on", "turned on")
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "on", "persisted across a reopen")
+
+    Harness_Ok(settings.SetDirectPlayMode("off"), "off is accepted")
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "off", "off persists too")
+    Harness_Ok(not settings.SetDirectPlayMode("always"), "an unknown mode is rejected")
+    Harness_Equal(settings.GetDirectPlayMode(), "off", "and leaves the stored mode alone")
+end sub
+
+sub Test_Settings_DirectPlayMigratesOldBoolean()
+    Harness_Suite("SettingsStore direct play migrates the old boolean")
+    registry = MockRegistry()
+    registry.values["directPlay"] = "false"
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "off", "the old false reads as off")
+
+    registry.values["directPlay"] = "true"
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "on", "the old true reads as on")
+
+    registry.values["directPlay"] = "yes"
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "off", "anything else falls to the default")
+end sub
+
 sub Test_Settings_HomeCatalogVisibilityPersists()
     Harness_Suite("SettingsStore hides Home catalogs by stable identity")
     registry = MockRegistry()

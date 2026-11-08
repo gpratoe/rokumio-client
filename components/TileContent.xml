@@ -24,5 +24,8 @@
         <!-- StreamTile: separate direct-play codec verdicts per media type. -->
         <field id="videoCompatibilityState" type="string" />
         <field id="audioCompatibilityState" type="string" />
+        <!-- StreamTile: when set, a torrent card shows this label instead of
+             the compatibility glyphs (the always-remux mode). -->
+        <field id="remuxLabel" type="string" />
     </interface>
 </component>
