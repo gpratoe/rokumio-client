@@ -644,11 +644,27 @@ sub onDiscoverLoaded()
         m.status.text = ""
         LandingChipsFocus()
     else
-        for each meta in result.metas
-            m.metas.Push(meta)
+        ' Append only metas not already shown. Cinemeta's skip=49 page
+        ' repeats the last item of the 49-item first page, and an add-on
+        ' that ignores skip returns the same page forever — a page that
+        ' adds no new ids ends pagination instead of paging infinitely.
+        seen = {}
+        for each existing in m.metas
+            if existing.id <> invalid then seen[existing.id] = true
         end for
-        m.allLoaded = not result.hasMore or result.metas.Count() = 0
-        UpdateGrid(AppendRestorePosition())
+        added = 0
+        for each meta in result.metas
+            if meta.id <> invalid and seen.DoesExist(meta.id) then continue for
+            if meta.id <> invalid then seen[meta.id] = true
+            m.metas.Push(meta)
+            added = added + 1
+        end for
+        if added = 0
+            m.allLoaded = true
+        else
+            m.allLoaded = not result.hasMore
+            UpdateGrid(AppendRestorePosition())
+        end if
     end if
 end sub
 
