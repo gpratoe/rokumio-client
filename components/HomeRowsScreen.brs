@@ -241,7 +241,8 @@ sub onRowSelected()
     visible = IsCatalogVisible(row)
     accepted = m.stores.settings.callFunc("SettingsSetHomeCatalogVisible", row.addonAddress, row.metaType, row.catalogId, not visible)
     if not accepted
-        m.status.text = Lang("homeRows", "toggleFailed")
+        scene = m.top.getScene()
+        if scene <> invalid then scene.callFunc("Notify", Lang("homeRows", "toggleFailed"), "error")
         return
     end if
 
@@ -256,18 +257,13 @@ sub onRowSelected()
     UpdatePanel()
 end sub
 
-' Mirror a refused registry write into both the local status line and the
-' Scene-owned fault strip; the setting remains active for this session.
+' A refused registry write lands as a Scene toast; the setting remains
+' active for this session.
 sub ReportSettingsSaveFault()
     if m.stores = invalid then return
     failed = m.stores.settings.callFunc("SettingsSaveFailed")
     scene = m.top.getScene()
     if scene <> invalid and failed then scene.callFunc("Notify", "settings could not be saved", "error")
-    if failed
-        m.status.text = Lang("homeRows", "notSaved")
-    else
-        m.status.text = ""
-    end if
 end sub
 
 sub CancelSources()
