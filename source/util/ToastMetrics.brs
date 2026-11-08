@@ -8,14 +8,14 @@ function ToastDuration(kind as string) as float
 end function
 
 function ToastPlateWidth(text as string) as integer
-    width = 96 + text.Len() * 19
+    width = 72 + text.Len() * 19
     if width > 1400 then return 1400
-    if width < 300 then return 300
+    if width < 280 then return 280
     return width
 end function
 
 function ToastPlateHeight(text as string, width as integer) as integer
-    charsPerLine = Int((width - 64) / 19)
+    charsPerLine = Int((width - 40) / 19)
     if charsPerLine < 1 then charsPerLine = 1
     lines = Int((text.Len() + charsPerLine - 1) / charsPerLine)
     if lines < 1 then lines = 1

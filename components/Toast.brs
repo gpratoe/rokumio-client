@@ -86,9 +86,9 @@ sub Paint()
     m.plate.height = height
     m.plate.translation = [x, y]
     m.label.text = m.shownText
-    m.label.width = width - 64
+    m.label.width = width - 40
     m.label.height = height - 28
-    m.label.translation = [x + 32, y + 14]
+    m.label.translation = [x + 20, y + 14]
 end sub
 
 sub onDismissTimerFire()
