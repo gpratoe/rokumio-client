@@ -45,6 +45,12 @@
 ' spent on one attempt that can succeed instead of two that cannot.
 const PROBE_TIMEOUT_MS = 8000
 
+' How many times the media probe is asked before its failure is final. Only
+' timeouts (status 0) are retried — an HTTP answer is an answer — so the
+' worst case is this many request timeouts, the same count-bounded shape as
+' the playlist probe behind it.
+const MEDIA_PROBE_ATTEMPTS = 3
+
 ' The warm-up's two timeouts, split because the two requests it makes are not
 ' remotely alike and one shared number was letting the wrong one fail.
 '
@@ -986,33 +992,47 @@ class PlaybackStore
     ' loopback, exactly as CodecPlaybackUrl does: the server probes the file
     ' from itself, never over the LAN.
     '
-    ' Best effort, like the warm-up: { ok, status, format, streams, error }.
-    ' A failure, a server predating /hlsv2/probe, or an unparseable body all
-    ' answer ok=false and the caller keeps the HLS route — the probe must
-    ' never be the reason a playable stream does not play.
+    ' Best effort, like the warm-up: { ok, status, format, streams, error,
+    ' attempts }. A failure, a server predating /hlsv2/probe, or an
+    ' unparseable body all answer ok=false and the caller keeps the HLS
+    ' route — the probe must never be the reason a playable stream does not
+    ' play.
+    '
+    ' Timeouts (status 0) are retried, up to MEDIA_PROBE_ATTEMPTS: ffprobe
+    ' reads the file through the torrent engine, and a slow first read is
+    ' the one failure a second ask can fix. An HTTP answer is final — a 404
+    ' means no such route and retrying it would only wait — and transport
+    ' failures never reach here, because Transport already retries those.
+    ' No sleep between attempts: the request's own timeout is the wait, and
+    ' a Wait() here would abort the test interpreter (see StreamResolveTask
+    ' for why loops that sleep live in the task, not the store).
     function ProbeServerMedia(serverAddress as string, infoHash as string, fileIdx as integer) as object
-        result = { ok: false, status: 0, format: "", streams: [], error: "" }
+        result = { ok: false, status: 0, format: "", streams: [], error: "", attempts: 0 }
         if serverAddress = "" or infoHash = "" then
             result.error = "no server or infoHash"
             return result
         end if
         mediaURL = m.LoopbackMediaBase(serverAddress) + "/" + infoHash + "/" + fileIdx.ToStr()
         url = serverAddress + "/hlsv2/probe?mediaURL=" + m.transport.EncodeQueryValue(mediaURL)
-        response = m.transport.Get(url)
-        if response = invalid
-            result.error = "no transport"
-            return result
-        end if
-        result.status = response.status
-        if response.error <> invalid then result.error = response.error
-        if not response.ok or response.json = invalid
+        while result.attempts < MEDIA_PROBE_ATTEMPTS
+            result.attempts = result.attempts + 1
+            response = m.transport.Get(url)
+            if response = invalid
+                result.error = "no transport"
+                return result
+            end if
+            result.status = response.status
+            if response.error <> invalid then result.error = response.error
+            if response.ok and response.json <> invalid
+                result.format = response.json.format
+                if Type(response.json.streams) = "roArray" then result.streams = response.json.streams
+                result.ok = true
+                result.error = ""
+                return result
+            end if
             if result.error = "" then result.error = "media probe failed"
-            return result
-        end if
-        result.format = response.json.format
-        if Type(response.json.streams) = "roArray" then result.streams = response.json.streams
-        result.ok = true
-        result.error = ""
+            if response.status <> 0 then return result
+        end while
         return result
     end function
 

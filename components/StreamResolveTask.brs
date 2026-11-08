@@ -167,7 +167,7 @@ sub resolve()
                 try
                     media = store.ProbeServerMedia(m.top.serverAddress, store.StreamInfoHash(m.top.stream), store.DirectFileIdx(m.top.stream))
                     resolved.mediaProbe = media
-                    print "[resolve] media probe -> ok=" ; media.ok ; " status=" ; media.status ; " error=[" ; media.error ; "]"
+                    print "[resolve] media probe -> ok=" ; media.ok ; " status=" ; media.status ; " attempts=" ; media.attempts ; " error=[" ; media.error ; "]"
                     if media.ok and profile <> invalid
                         ' The raw report and the device answers, printed because
                         ' "reason=video" alone cannot say whether the server

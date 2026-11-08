@@ -939,6 +939,26 @@ sub Test_Playback_ProbeServerMediaFailureIsNotFatal()
     Harness_Ok(not noHash.ok, "no infoHash is not probed")
 end sub
 
+' A timeout (status 0) is the one failure worth asking again: ffprobe reads
+' through the torrent engine, and a slow first read can succeed on a second
+' ask. An HTTP answer is final and must not be retried.
+sub Test_Playback_ProbeServerMediaRetriesTimeoutsOnly()
+    Harness_Suite("PlaybackStore media probe retries timeouts")
+    server = "http://127.0.0.1:11470"
+    probeUrl = server + "/hlsv2/probe?mediaURL=http%3A%2F%2F127.0.0.1%3A11470%2Fabc123%2F0"
+
+    timedOut = PlaybackStore(ScriptedTransport([])).ProbeServerMedia(server, "abc123", 0)
+    Harness_Ok(not timedOut.ok, "a probe that keeps timing out still answers not ok")
+    Harness_Equal(timedOut.attempts, 3, "and was asked three times")
+    Harness_Equal(timedOut.status, 0, "the last timeout is the status")
+
+    refused = PlaybackStore(ScriptedTransport([
+        { method: "GET", url: probeUrl, ok: false, status: 404, json: invalid, error: "HTTP 404" }
+    ])).ProbeServerMedia(server, "abc123", 0)
+    Harness_Ok(not refused.ok, "a 404 answers not ok")
+    Harness_Equal(refused.attempts, 1, "and was asked only once — a refusal is not a timeout")
+end sub
+
 ' Counts the occurrences of a literal key in a string. Local so the assertions
 ' above do not have to know where in the URL a key sits.
 function Hints_Count(text as string, key as string) as integer

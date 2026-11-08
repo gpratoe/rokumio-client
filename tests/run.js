@@ -1927,6 +1927,9 @@ function checkCodecPlaybackContract() {
     } else if (!/"\/hlsv2\/probe\?mediaURL="/.test(mediaProbe)) {
         err('PlaybackStore.bs ProbeServerMedia does not ask GET /hlsv2/probe?mediaURL= — the v1 /probe parses ffmpeg stderr and is not the converter\'s own view');
     }
+    if (mediaProbe && !/MEDIA_PROBE_ATTEMPTS/.test(store) || mediaProbe && !/response\.status\s*<>\s*0/.test(mediaProbe)) {
+        err('PlaybackStore.bs ProbeServerMedia does not retry timeouts — a slow first ffprobe read through the torrent engine is the one probe failure a second ask can fix');
+    }
     const resolveBody = body(taskBrs, 'resolve');
     if (resolveBody) {
         if (!/if\s+m\.top\.directPlay\s+then/.test(resolveBody) || !/ProbeServerMedia\(/.test(resolveBody)) {
