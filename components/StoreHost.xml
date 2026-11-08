@@ -68,7 +68,7 @@
         <function name="SettingsClearServerAddress" />
         <function name="SettingsGetAudioPassthrough" />
         <function name="SettingsGetAudioTransmux" />
-        <function name="SettingsGetDirectPlay" />
+        <function name="SettingsGetDirectPlayMode" />
         <function name="SettingsGetHiddenHomeCatalogs" />
         <function name="SettingsGetLanguage" />
         <function name="SettingsGetServerAddress" />
@@ -76,7 +76,7 @@
         <function name="SettingsSaveFailed" />
         <function name="SettingsSetAudioPassthrough" />
         <function name="SettingsSetAudioTransmux" />
-        <function name="SettingsSetDirectPlay" />
+        <function name="SettingsSetDirectPlayMode" />
         <function name="SettingsSetHomeCatalogVisible" />
         <function name="SettingsSetLanguage" />
         <function name="SettingsSetServerAddress" />

@@ -387,9 +387,9 @@ function SettingsGetAudioTransmux() as boolean
     return m.stores.settings.GetAudioTransmux()
 end function
 
-' settings.GetDirectPlay
-function SettingsGetDirectPlay() as boolean
-    return m.stores.settings.GetDirectPlay()
+' settings.GetDirectPlayMode
+function SettingsGetDirectPlayMode() as string
+    return m.stores.settings.GetDirectPlayMode()
 end function
 
 ' settings.GetLanguage
@@ -427,9 +427,9 @@ function SettingsSetAudioTransmux(value as boolean) as boolean
     return m.stores.settings.SetAudioTransmux(value)
 end function
 
-' settings.SetDirectPlay
-function SettingsSetDirectPlay(value as boolean) as boolean
-    return m.stores.settings.SetDirectPlay(value)
+' settings.SetDirectPlayMode
+function SettingsSetDirectPlayMode(value as string) as boolean
+    return m.stores.settings.SetDirectPlayMode(value)
 end function
 
 ' settings.SetLanguage

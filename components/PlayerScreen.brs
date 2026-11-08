@@ -167,6 +167,11 @@ function OnEnter(params as object) as void
         m.bufferingGroup.visible = false
     end if
 
+    ' The picker's per-play mode wins; the setting is only the fallback for
+    ' entries that did not choose (ask mode is resolved in the picker).
+    playMode = DirectPlayModeSetting()
+    if params.directPlayMode = "on" or params.directPlayMode = "off" then playMode = params.directPlayMode
+    m.playMode = playMode
     StartResolve(params.stream, params.serverAddress, ResolveOrdinal(params.season), ResolveOrdinal(params.episode))
     StartSubtitles(params)
 end function
@@ -201,7 +206,7 @@ sub StartResolve(stream as object, serverAddress as dynamic, season = 0 as integ
         episode: episode
         audioPassthrough: AudioPassthroughEnabled()
         audioTransmux: AudioTransmuxEnabled()
-        directPlay: DirectPlayEnabled()
+        directPlayMode: m.playMode
     }, "playerResolve")
     m.resolveTask = task
 end sub
@@ -221,9 +226,11 @@ function AudioTransmuxEnabled() as boolean
     return m.stores.settings.callFunc("SettingsGetAudioTransmux")
 end function
 
-function DirectPlayEnabled() as boolean
-    if m.stores = invalid then return false
-    return m.stores.settings.callFunc("SettingsGetDirectPlay")
+function DirectPlayModeSetting() as string
+    if m.stores = invalid then return "ask"
+    mode = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
+    if mode = "on" or mode = "ask" or mode = "off" then return mode
+    return "ask"
 end function
 
 ' Season and episode as whole numbers, 0 when the play has neither. Coerced
@@ -396,6 +403,7 @@ sub CancelResolve()
     end if
     StopPreVideoPulse()
 end sub
+
 
 ' Kick the caption fetch off the render thread.
 '

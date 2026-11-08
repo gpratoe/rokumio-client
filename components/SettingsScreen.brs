@@ -503,7 +503,9 @@ end function
 
 function DirectPlayValue() as string
     if m.stores = invalid then return Lang("common", "off")
-    if m.stores.settings.callFunc("SettingsGetDirectPlay") then return Lang("common", "on")
+    mode = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
+    if mode = "on" then return Lang("common", "on")
+    if mode = "ask" then return Lang("settings", "valueDirectAsk")
     return Lang("common", "off")
 end function
 
@@ -686,10 +688,21 @@ sub ToggleAudioTransmux()
     end if
 end sub
 
+' Cycle the three direct-play states forward: On -> Ask first -> Off. The
+' cycle order puts Ask first in the middle, so one extra press from On
+' lands on the safe choice rather than on always-remux.
 sub ToggleDirectPlay()
     if m.stores = invalid then return
-    current = m.stores.settings.callFunc("SettingsGetDirectPlay")
-    if m.stores.settings.callFunc("SettingsSetDirectPlay", not current)
+    current = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
+    nextMode = "ask"
+    if current = "on"
+        nextMode = "ask"
+    else if current = "ask"
+        nextMode = "off"
+    else if current = "off"
+        nextMode = "on"
+    end if
+    if m.stores.settings.callFunc("SettingsSetDirectPlayMode", nextMode)
         ReportSaveFault()
         RefreshValues()
         UpdatePanel()

@@ -26,7 +26,7 @@ class SettingsStore
     language as string
     audioPassthrough as boolean
     audioTransmux as boolean
-    directPlay as boolean
+    directPlayMode as string
     hiddenHomeCatalogs as object
     saveRefused as boolean
 
@@ -36,7 +36,7 @@ class SettingsStore
         m.language = "en"
         m.audioPassthrough = false
         m.audioTransmux = false
-        m.directPlay = true
+        m.directPlayMode = "ask"
         m.hiddenHomeCatalogs = []
         m.saveRefused = false
         m.Load()
@@ -171,17 +171,19 @@ class SettingsStore
         return true
     end function
 
-    ' Whether a torrent whose codecs this device accepts may be played from
-    ' the server as the original file, with no remux at all. On by default:
-    ' the verdict is conservative (see DirectTorrentVerdict), and turning it
-    ' off is the user's escape hatch back to always-remux. Only an explicit
-    ' "false" turns it off — a missing key means the default.
-    function GetDirectPlay() as boolean
-        return m.directPlay
+    ' How torrents are played, in three states:
+    '   "on"   — always play the original file straight from the server
+    '   "ask"  — offer the choice before every torrent play (the default)
+    '   "off"  — always remux through the server's converter
+    ' Anything else stored is read as the default: an unknown value must not
+    ' silently turn an experimental feature fully on.
+    function GetDirectPlayMode() as string
+        return m.directPlayMode
     end function
 
-    function SetDirectPlay(value as boolean) as boolean
-        m.directPlay = value
+    function SetDirectPlayMode(value as string) as boolean
+        if value <> "on" and value <> "ask" and value <> "off" then return false
+        m.directPlayMode = value
         m.Save()
         return true
     end function
@@ -198,9 +200,8 @@ class SettingsStore
         return "false"
     end function
 
-    function DirectPlayText() as string
-        if m.directPlay then return "true"
-        return "false"
+    function DirectPlayModeText() as string
+        return m.directPlayMode
     end function
 
     ' Writes every field through the registry and flushes. roRegistrySection.Write
@@ -218,7 +219,7 @@ class SettingsStore
         if not m.registry.Write("language", m.language) then ok = false
         if not m.registry.Write("audioPassthrough", m.AudioPassthroughText()) then ok = false
         if not m.registry.Write("audioTransmux", m.AudioTransmuxText()) then ok = false
-        if not m.registry.Write("directPlay", m.DirectPlayText()) then ok = false
+        if not m.registry.Write("directPlay", m.DirectPlayModeText()) then ok = false
         if not m.registry.Write("hiddenHomeCatalogs", FormatJson(m.hiddenHomeCatalogs)) then ok = false
         m.registry.Flush()
         m.saveRefused = not ok
@@ -243,7 +244,16 @@ class SettingsStore
         ' a value from a future version) leaves the default in place.
         if m.registry.Read("audioPassthrough") = "true" then m.audioPassthrough = true
         if m.registry.Read("audioTransmux") = "true" then m.audioTransmux = true
-        if m.registry.Read("directPlay") = "false" then m.directPlay = false
+        ' The boolean this replaced wrote "true"/"false": migrate those, keep
+        ' the mode strings, and let anything else fall to the default.
+        storedMode = m.registry.Read("directPlay")
+        if storedMode = "false"
+            m.directPlayMode = "off"
+        else if storedMode = "true"
+            m.directPlayMode = "on"
+        else if storedMode = "on" or storedMode = "ask" or storedMode = "off"
+            m.directPlayMode = storedMode
+        end if
 
         rawHomeCatalogs = m.registry.Read("hiddenHomeCatalogs")
         if rawHomeCatalogs <> ""

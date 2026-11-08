@@ -153,51 +153,18 @@ sub resolve()
                 resolved.warmup = { ok: false, status: 0, error: e.message }
             end try
 
-            ' Direct play: ask the server what the file actually holds (its own
-            ' ffprobe, same facts the converter would use), and if this device
-            ' can decode it as-is, hand the Video node the original file
-            ' instead of the converter's playlist. The engine is warm by now,
-            ' so the probe answers from metadata instead of waiting for it.
-            ' Its own try, like the warm-up's: a failed probe is a lost
-            ' optimisation, and it must fall back to the HLS route — never
-            ' take a playable stream down with it.
             resolved.direct = false
-            if m.top.directPlay then
+            if m.top.directPlayMode = "on"
                 if m.top.state = "stop" then return
-                try
-                    media = store.ProbeServerMedia(m.top.serverAddress, store.StreamInfoHash(m.top.stream), store.DirectFileIdx(m.top.stream))
-                    resolved.mediaProbe = media
-                    print "[resolve] media probe -> ok=" ; media.ok ; " status=" ; media.status ; " attempts=" ; media.attempts ; " error=[" ; media.error ; "]"
-                    if media.ok and profile <> invalid
-                        ' The raw report and the device answers, printed because
-                        ' "reason=video" alone cannot say whether the server
-                        ' named a codec the device rejected or a field the
-                        ' classifier did not read. FormatJson of a probe is
-                        ' small; a playlist body would not be.
-                        print "[resolve] media streams -> " ; FormatJson(media.streams)
-                        print "[resolve] device video probes -> " ; FormatJson(profile.videoProbes)
-                        print "[resolve] device audio probes -> " ; FormatJson(profile.audioProbes)
-                        verdict = DirectTorrentVerdict(media, profile.videoProbes, profile.audioProbes)
-                        resolved.directVerdict = verdict
-                        print "[resolve] direct verdict -> direct=" ; verdict.direct ; " reason=" ; verdict.reason ; " format=" ; verdict.format ; " video=" ; verdict.videoState ; " audio=" ; verdict.audioState ; " tracks -> " ; FormatJson(verdict.tracks)
-                        if verdict.direct
-                            directUrl = store.EngineUrl(m.top.serverAddress, m.top.stream, m.top.season, m.top.episode)
-                            if directUrl <> ""
-                                resolved.url = directUrl
-                                resolved.streamFormat = verdict.format
-                                resolved.direct = true
-                            end if
-                        end if
-                    end if
-                catch e
-                    resolved.mediaProbe = { ok: false, status: 0, error: e.message }
-                end try
+                directUrl = store.EngineUrl(m.top.serverAddress, m.top.stream, m.top.season, m.top.episode)
+                if directUrl <> ""
+                    resolved.url = directUrl
+                    resolved.streamFormat = store.StreamFormat(m.top.stream, directUrl)
+                    resolved.direct = true
+                    print "[resolve] direct play -> original file"
+                end if
             end if
 
-            ' A direct file needs no playlist wait: the warm-up's ranged read
-            ' already proved the engine can serve bytes, and there is no
-            ' converter playlist to become ready. The probe runs only when
-            ' the HLS route is the one being handed over.
             if not resolved.direct then
                 try
                     resolved.probe = WaitForPlaylist(store, resolved.url, resolved.fallbackUrl)
@@ -351,8 +318,6 @@ function ResolveCodecProfile() as object
         audioCodecs: audioCodecs
         maxAudioChannels: channels
         fingerprint: CodecFingerprint(CodecVideoFloor(), audioCodecs, channels)
-        videoProbes: []
-        audioProbes: []
     }
     di = ResolveDeviceInfo()
     if di = invalid then return profile
@@ -360,15 +325,6 @@ function ResolveCodecProfile() as object
     videoProbes = []
     for each candidate in CodecVideoCandidates()
         videoProbes.Push(ResolveProbeVideo(di, candidate))
-    end for
-
-    ' The raw per-codec answers, kept alongside the hint lists: the direct
-    ' verdict is decided per codec the server reports, not per hint, so it
-    ' needs the probes themselves. Audio is asked plain (no passthru filter)
-    ' for every candidate, the same question DirectPlayCapsTask asks.
-    audioProbes = []
-    for each candidate in CodecAudioCandidates()
-        audioProbes.Push(CodecProbeAudio(di, candidate))
     end for
 
     ' Two options, two different questions, and both answers are the
@@ -404,8 +360,6 @@ function ResolveCodecProfile() as object
     profile.audioCodecs = audioCodecs
     profile.maxAudioChannels = channels
     profile.fingerprint = CodecFingerprint(videoCodecs, audioCodecs, channels)
-    profile.videoProbes = videoProbes
-    profile.audioProbes = audioProbes
     return profile
 end function
 

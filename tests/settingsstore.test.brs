@@ -161,37 +161,36 @@ sub Test_Settings_AudioTransmuxIsItsOwnSetting()
     Harness_Equal(reopened.GetAudioPassthrough(), false, "and the passthrough is still off")
 end sub
 
-' Direct play is on by default: the verdict behind it is conservative, and
-' off is the escape hatch back to always-remux. Only an explicit "false"
-' turns it off.
+' Direct play is a three-state mode, asking first by default. An unknown
+' stored value must never turn an experimental feature fully on.
 sub Test_Settings_DirectPlay()
-    Harness_Suite("SettingsStore direct play")
+    Harness_Suite("SettingsStore direct play mode")
     registry = MockRegistry()
     settings = SettingsStore(registry)
 
-    Harness_Equal(settings.GetDirectPlay(), true, "on by default")
+    Harness_Equal(settings.GetDirectPlayMode(), "ask", "asks first by default")
 
-    settings.SetDirectPlay(false)
-    Harness_Equal(settings.GetDirectPlay(), false, "turned off")
+    Harness_Ok(settings.SetDirectPlayMode("on"), "on is accepted")
+    Harness_Equal(settings.GetDirectPlayMode(), "on", "turned on")
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "on", "persisted across a reopen")
 
-    reopened = SettingsStore(registry)
-    Harness_Equal(reopened.GetDirectPlay(), false, "persisted across a reopen")
-
-    settings.SetDirectPlay(true)
-    Harness_Equal(SettingsStore(registry).GetDirectPlay(), true, "and on again persists too")
+    Harness_Ok(settings.SetDirectPlayMode("off"), "off is accepted")
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "off", "off persists too")
+    Harness_Ok(not settings.SetDirectPlayMode("always"), "an unknown mode is rejected")
+    Harness_Equal(settings.GetDirectPlayMode(), "off", "and leaves the stored mode alone")
 end sub
 
-sub Test_Settings_DirectPlayReadsOnlyFalse()
-    Harness_Suite("SettingsStore direct play only turns off for false")
+sub Test_Settings_DirectPlayMigratesOldBoolean()
+    Harness_Suite("SettingsStore direct play migrates the old boolean")
     registry = MockRegistry()
-    registry.values["directPlay"] = "true"
-    Harness_Equal(SettingsStore(registry).GetDirectPlay(), true, "true leaves it on")
-
     registry.values["directPlay"] = "false"
-    Harness_Equal(SettingsStore(registry).GetDirectPlay(), false, "false turns it off")
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "off", "the old false reads as off")
+
+    registry.values["directPlay"] = "true"
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "on", "the old true reads as on")
 
     registry.values["directPlay"] = "yes"
-    Harness_Equal(SettingsStore(registry).GetDirectPlay(), true, "anything else leaves the default on")
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "ask", "anything else falls to the default")
 end sub
 
 sub Test_Settings_HomeCatalogVisibilityPersists()
