@@ -7,7 +7,7 @@
 ' pre-built extra string so this task can percent-encode it: genres come from
 ' arbitrary add-on manifests and may contain spaces or '&', which a raw query
 ' segment would corrupt. It also passes whether this catalog declares `skip`,
-' which lets CatalogStore infer a next page from a full standard-sized response.
+' which is what lets CatalogStore offer another page after any non-empty page.
 sub init()
     m.top.functionName = "discover"
 end sub

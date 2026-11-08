@@ -75,9 +75,12 @@ class CatalogStore
     end function
 
     ' Fetch one catalog row: GET {address}/catalog/{type}/{catalogId}/{extra}.json
-    ' with the extra segment defaulting to "skip=0". Some servers provide a
-    ' hasMore hint; standard Stremio pagination instead declares `skip` in the
-    ' manifest and signals another page by returning all 100 metas.
+    ' with the extra segment defaulting to "skip=0". Pagination follows what
+    ' stremio-core releases: a catalog that declares `skip` offers a next page
+    ' after any non-empty response, and the client stops on an empty page. The
+    ' server's non-standard `hasMore` hint is ignored — Cinemeta returns it as
+    ' false on its own 49-item first page even though more items exist, which
+    ' broke Discover pagination there.
     function Catalog(addonAddress as string, metaType as string, catalogId as string, extra = "skip=0" as string, supportsPagination = false as boolean) as object
         result = { ok: false, metas: invalid, hasMore: false, error: "" }
         if addonAddress = ""
@@ -129,13 +132,12 @@ class CatalogStore
         NormalizeAddonJson(metas)
 
         result.metas = metas
-        ' Keep the explicit server hint for existing Cinemeta behavior, and use
-        ' the protocol's full-page signal for catalogs that declare `skip`.
-        ' A response over the cap is terminal: these add-ons ignored paging, so
-        ' asking for skip=N would repeat the same oversized dump.
-        hasMore = (response.json.hasMore = true)
-        if supportsPagination and metas.Count() = CATALOG_MAX_METAS then hasMore = true
-        result.hasMore = hasMore and not capped
+        ' Released stremio-core: a `skip`-capable catalog has another page
+        ' after any non-empty page; an empty page ends it. The over-cap case
+        ' above is the exception — those add-ons ignored paging, so asking
+        ' for skip=N would repeat the same oversized dump. Infinite paging
+        ' is guarded in DiscoverScreen (a page that adds no new ids stops).
+        result.hasMore = supportsPagination and metas.Count() > 0 and not capped
         result.ok = true
         return result
     end function

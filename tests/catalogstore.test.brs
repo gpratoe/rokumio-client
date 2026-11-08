@@ -187,21 +187,21 @@ sub Test_Catalog_DiscoverNextPage()
                     { id: "tt0000005", type: "movie", name: "Five" }
                     { id: "tt0000006", type: "movie", name: "Six" }
                 ]
-                hasMore: true
+                hasMore: false
             }
             error: ""
         }
     ]
     store = CatalogStore(ScriptedTransport(script))
-    result = store.Catalog(address, "movie", "top", "genre=Sci-Fi&skip=50")
+    result = store.Catalog(address, "movie", "top", "genre=Sci-Fi&skip=50", true)
 
     Harness_Ok(result.ok, "next page ok")
     Harness_Equal(store.transport.log[0].url, address + "/catalog/movie/top/genre=Sci-Fi&skip=50.json", "skip advances past the metas already shown")
-    Harness_Ok(result.hasMore, "hasMore rides along when the server says so")
+    Harness_Ok(result.hasMore, "a non-empty page from a skip catalog offers another page even when the server hint is false")
 end sub
 
 sub Test_Catalog_HasMoreFlag()
-    Harness_Suite("CatalogStore reports hasMore=false when the server omits it")
+    Harness_Suite("CatalogStore ignores the server hasMore hint without skip support")
     address = "https://v3-cinemeta.strem.io"
     script = [
         {
@@ -209,54 +209,66 @@ sub Test_Catalog_HasMoreFlag()
             url: address + "/catalog/movie/top/skip=100.json"
             ok: true
             status: 200
-            json: { metas: [ { id: "tt0000007", type: "movie", name: "Seven" } ] }
+            json: { metas: [ { id: "tt0000007", type: "movie", name: "Seven" } ], hasMore: true }
             error: ""
         }
     ]
     store = CatalogStore(ScriptedTransport(script))
     result = store.Catalog(address, "movie", "top", "skip=100")
 
-    Harness_Ok(result.ok, "final page ok")
-    Harness_Equal(result.hasMore, false, "a response without hasMore stops pagination")
+    Harness_Ok(result.ok, "page ok")
+    Harness_Equal(result.hasMore, false, "the server hasMore hint alone does not paginate without skip support")
 end sub
 
-sub Test_Catalog_SkipPaginationUsesPageLength()
-    Harness_Suite("CatalogStore paginates skip-enabled catalogs by the standard 100-meta page")
-    address = "https://custom-catalog.example"
-    fullMetas = []
-    for i = 1 to 100
-        fullMetas.Push({ id: "full" + i.ToStr(), type: "movie", name: "Movie " + i.ToStr() })
+sub Test_Catalog_SkipPaginationUsesNonEmptyPage()
+    Harness_Suite("CatalogStore paginates skip-enabled catalogs on any non-empty page")
+    address = "https://v3-cinemeta.strem.io"
+    ' Cinemeta's Popular first page shape: 49 items with hasMore=false even
+    ' though skip=50/100 return fresh items. Released stremio-core paginates
+    ' it because the page is non-empty, not because of any page size.
+    cinemetaMetas = []
+    for i = 1 to 49
+        cinemetaMetas.Push({ id: "cm" + i.ToStr(), type: "movie", name: "Movie " + i.ToStr() })
     end for
-    fullScript = [
+    cinemetaScript = [
         {
             method: "GET"
             url: address + "/catalog/movie/top/skip=0.json"
             ok: true
             status: 200
-            json: { metas: fullMetas }
+            json: { metas: cinemetaMetas, hasMore: false }
             error: ""
         }
     ]
-    fullResult = CatalogStore(ScriptedTransport(fullScript)).Catalog(address, "movie", "top", "skip=0", true)
-    Harness_Ok(fullResult.ok, "full custom page loads without a hasMore field")
-    Harness_Equal(fullResult.hasMore, true, "100 metas signal another page when skip is declared")
+    cinemetaResult = CatalogStore(ScriptedTransport(cinemetaScript)).Catalog(address, "movie", "top", "skip=0", true)
+    Harness_Ok(cinemetaResult.ok, "cinemeta-shaped page loads")
+    Harness_Equal(cinemetaResult.hasMore, true, "a 49-item page from a skip catalog still offers another page")
 
-    shortMetas = []
-    for i = 1 to 99
-        shortMetas.Push({ id: "short" + i.ToStr(), type: "movie", name: "Movie " + i.ToStr() })
-    end for
     shortScript = [
+        {
+            method: "GET"
+            url: address + "/catalog/movie/top/skip=49.json"
+            ok: true
+            status: 200
+            json: { metas: [ { id: "tt0000008", type: "movie", name: "Eight" } ] }
+            error: ""
+        }
+    ]
+    shortResult = CatalogStore(ScriptedTransport(shortScript)).Catalog(address, "movie", "top", "skip=49", true)
+    Harness_Equal(shortResult.hasMore, true, "a short non-empty page from a skip catalog still offers another page")
+
+    emptyScript = [
         {
             method: "GET"
             url: address + "/catalog/movie/top/skip=100.json"
             ok: true
             status: 200
-            json: { metas: shortMetas }
+            json: { metas: [] }
             error: ""
         }
     ]
-    shortResult = CatalogStore(ScriptedTransport(shortScript)).Catalog(address, "movie", "top", "skip=100", true)
-    Harness_Equal(shortResult.hasMore, false, "fewer than 100 metas end a skip-enabled catalog")
+    emptyResult = CatalogStore(ScriptedTransport(emptyScript)).Catalog(address, "movie", "top", "skip=100", true)
+    Harness_Equal(emptyResult.hasMore, false, "an empty page ends a skip-enabled catalog")
 end sub
 
 sub Test_Catalog_FullPageWithoutSkipDoesNotInferPagination()
@@ -467,7 +479,7 @@ sub Test_Catalog_CapsOversizedPage()
     Harness_Equal(result.metas.Count(), 100, "page trimmed to CATALOG_MAX_METAS")
     Harness_Equal(result.metas[0].id, "tt1", "trim keeps the add-on's own order")
     Harness_Equal(result.metas[99].id, "tt100", "trim keeps the first page")
-    Harness_Equal(result.hasMore, false, "a capped page stops pagination even if the server says hasMore")
+    Harness_Equal(result.hasMore, false, "a capped page stops pagination even when the page is non-empty")
 end sub
 
 sub Test_Catalog_KeepsPageAtCap()
@@ -483,13 +495,13 @@ sub Test_Catalog_KeepsPageAtCap()
             url: address + "/catalog/movie/top/skip=0.json"
             ok: true
             status: 200
-            json: { metas: metas, hasMore: true }
+            json: { metas: metas }
             error: ""
         }
     ]
     store = CatalogStore(ScriptedTransport(script))
-    result = store.Catalog(address, "movie", "top")
+    result = store.Catalog(address, "movie", "top", "skip=0", true)
 
     Harness_Equal(result.metas.Count(), 100, "full page kept")
-    Harness_Equal(result.hasMore, true, "a well-behaved page keeps pagination")
+    Harness_Equal(result.hasMore, true, "a non-empty skip-capable page keeps pagination")
 end sub
