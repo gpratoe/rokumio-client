@@ -1910,6 +1910,45 @@ function checkCodecPlaybackContract() {
         err('SettingsScreen.brs does not say the transmux option is experimental — it is untested on this kind of device, and the panel is the only place that can say so');
     }
 
+    // 12. Direct play: the server's own codec report decides, per play, whether
+    //     the original file can go straight to the player. The probe runs only
+    //     after the engine is warm, only when the setting allows it, and its
+    //     failure falls back to the HLS route — a probe that took a playable
+    //     stream down with it would be worse than no probe.
+    if (!/<field\s+id="directPlay"\s+type="boolean"/.test(taskXml)) {
+        err('StreamResolveTask.xml does not declare the directPlay field — the setting would never reach the resolve and direct play would silently never happen');
+    }
+    if (!/directPlay\s*:/.test(playerBrs) || !/SettingsGetDirectPlay/.test(playerBrs)) {
+        err('PlayerScreen.brs does not pass the direct-play setting to StreamResolveTask — the task would always get the default');
+    }
+    const mediaProbe = body(store, 'ProbeServerMedia');
+    if (!mediaProbe) {
+        err('PlaybackStore.bs has no ProbeServerMedia() — the direct verdict has no server report to be decided from');
+    } else if (!/"\/hlsv2\/probe\?mediaURL="/.test(mediaProbe)) {
+        err('PlaybackStore.bs ProbeServerMedia does not ask GET /hlsv2/probe?mediaURL= — the v1 /probe parses ffmpeg stderr and is not the converter\'s own view');
+    }
+    const resolveBody = body(taskBrs, 'resolve');
+    if (resolveBody) {
+        if (!/if\s+m\.top\.directPlay\s+then/.test(resolveBody) || !/ProbeServerMedia\(/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() does not gate the media probe on the directPlay setting — turning the feature off must skip the probe, not just ignore its answer');
+        }
+        if (!/DirectTorrentVerdict\(media,\s*profile\.videoProbes,\s*profile\.audioProbes\)/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() does not classify the media probe against the device probes — the verdict would never be reached');
+        }
+        if (!/if\s+not\s+resolved\.direct\s+then[\s\S]*?WaitForPlaylist\(store,\s*resolved\.url,\s*resolved\.fallbackUrl\)/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() still waits for the HLS playlist after choosing direct play — a direct file has no playlist to wait for and the wait would stall the play');
+        }
+        if (!/resolved\.url\s*=\s*directUrl/.test(resolveBody) || !/resolved\.streamFormat\s*=\s*verdict\.format/.test(resolveBody)) {
+            err('StreamResolveTask.brs resolve() does not hand the bare file route and the probed container to the player on a direct verdict — the player would still be told to play the converter playlist');
+        }
+    }
+    if (profiler && (!/profile\.videoProbes\s*=\s*videoProbes/.test(profiler) || !/profile\.audioProbes\s*=\s*audioProbes/.test(profiler))) {
+        err('StreamResolveTask.brs ResolveCodecProfile does not carry the raw device probes on the profile — the direct verdict would have hints to classify against, not the device\'s per-codec answers');
+    }
+    if (!/"directPlay"/.test(read('components/SettingsScreen.brs'))) {
+        err('SettingsScreen.brs has no directPlay row — the user has no way to turn the feature off and always remux');
+    }
+
     return ok;
 }
 
@@ -4974,7 +5013,8 @@ const ADDON_PAYLOAD_ROOTS = [
 const ADDON_TEXT_READ_EXCEPTIONS = {
     address: 'our own record field — the transport base derived from a URL the app validated, never an add-on manifest value',
     metaId: 'our own library/progress record field (Stremio API + our own writes), not an add-on meta field',
-    addonName: 'our own key on the catalog descriptor the app builds; the value is addon.name, which IS in the table'
+    addonName: 'our own key on the catalog descriptor the app builds; the value is addon.name, which IS in the table',
+    codecType: 'our own key on the per-track verdict records DirectTrackVerdicts builds from the server probe; never an add-on field'
 };
 
 function checkAddonJsonContract() {

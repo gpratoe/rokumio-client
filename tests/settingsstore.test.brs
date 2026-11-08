@@ -161,6 +161,39 @@ sub Test_Settings_AudioTransmuxIsItsOwnSetting()
     Harness_Equal(reopened.GetAudioPassthrough(), false, "and the passthrough is still off")
 end sub
 
+' Direct play is on by default: the verdict behind it is conservative, and
+' off is the escape hatch back to always-remux. Only an explicit "false"
+' turns it off.
+sub Test_Settings_DirectPlay()
+    Harness_Suite("SettingsStore direct play")
+    registry = MockRegistry()
+    settings = SettingsStore(registry)
+
+    Harness_Equal(settings.GetDirectPlay(), true, "on by default")
+
+    settings.SetDirectPlay(false)
+    Harness_Equal(settings.GetDirectPlay(), false, "turned off")
+
+    reopened = SettingsStore(registry)
+    Harness_Equal(reopened.GetDirectPlay(), false, "persisted across a reopen")
+
+    settings.SetDirectPlay(true)
+    Harness_Equal(SettingsStore(registry).GetDirectPlay(), true, "and on again persists too")
+end sub
+
+sub Test_Settings_DirectPlayReadsOnlyFalse()
+    Harness_Suite("SettingsStore direct play only turns off for false")
+    registry = MockRegistry()
+    registry.values["directPlay"] = "true"
+    Harness_Equal(SettingsStore(registry).GetDirectPlay(), true, "true leaves it on")
+
+    registry.values["directPlay"] = "false"
+    Harness_Equal(SettingsStore(registry).GetDirectPlay(), false, "false turns it off")
+
+    registry.values["directPlay"] = "yes"
+    Harness_Equal(SettingsStore(registry).GetDirectPlay(), true, "anything else leaves the default on")
+end sub
+
 sub Test_Settings_HomeCatalogVisibilityPersists()
     Harness_Suite("SettingsStore hides Home catalogs by stable identity")
     registry = MockRegistry()

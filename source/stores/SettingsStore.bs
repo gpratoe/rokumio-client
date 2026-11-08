@@ -26,6 +26,7 @@ class SettingsStore
     language as string
     audioPassthrough as boolean
     audioTransmux as boolean
+    directPlay as boolean
     hiddenHomeCatalogs as object
     saveRefused as boolean
 
@@ -35,6 +36,7 @@ class SettingsStore
         m.language = "en"
         m.audioPassthrough = false
         m.audioTransmux = false
+        m.directPlay = true
         m.hiddenHomeCatalogs = []
         m.saveRefused = false
         m.Load()
@@ -169,6 +171,21 @@ class SettingsStore
         return true
     end function
 
+    ' Whether a torrent whose codecs this device accepts may be played from
+    ' the server as the original file, with no remux at all. On by default:
+    ' the verdict is conservative (see DirectTorrentVerdict), and turning it
+    ' off is the user's escape hatch back to always-remux. Only an explicit
+    ' "false" turns it off — a missing key means the default.
+    function GetDirectPlay() as boolean
+        return m.directPlay
+    end function
+
+    function SetDirectPlay(value as boolean) as boolean
+        m.directPlay = value
+        m.Save()
+        return true
+    end function
+
     ' The registry keeps strings, so the flags go out as text. The in-memory
     ' values are booleans; this is only the wire.
     function AudioPassthroughText() as string
@@ -178,6 +195,11 @@ class SettingsStore
 
     function AudioTransmuxText() as string
         if m.audioTransmux then return "true"
+        return "false"
+    end function
+
+    function DirectPlayText() as string
+        if m.directPlay then return "true"
         return "false"
     end function
 
@@ -196,6 +218,7 @@ class SettingsStore
         if not m.registry.Write("language", m.language) then ok = false
         if not m.registry.Write("audioPassthrough", m.AudioPassthroughText()) then ok = false
         if not m.registry.Write("audioTransmux", m.AudioTransmuxText()) then ok = false
+        if not m.registry.Write("directPlay", m.DirectPlayText()) then ok = false
         if not m.registry.Write("hiddenHomeCatalogs", FormatJson(m.hiddenHomeCatalogs)) then ok = false
         m.registry.Flush()
         m.saveRefused = not ok
@@ -220,6 +243,7 @@ class SettingsStore
         ' a value from a future version) leaves the default in place.
         if m.registry.Read("audioPassthrough") = "true" then m.audioPassthrough = true
         if m.registry.Read("audioTransmux") = "true" then m.audioTransmux = true
+        if m.registry.Read("directPlay") = "false" then m.directPlay = false
 
         rawHomeCatalogs = m.registry.Read("hiddenHomeCatalogs")
         if rawHomeCatalogs <> ""

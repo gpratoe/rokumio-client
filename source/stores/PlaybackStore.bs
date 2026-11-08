@@ -976,6 +976,46 @@ class PlaybackStore
         return result
     end function
 
+    ' Ask the streaming server what the torrent file actually holds: its ffprobe
+    ' report ({ format, streams }) for {infoHash}/{fileIdx}.
+    '
+    ' The endpoint is the HLS2 router's own probe — GET /hlsv2/probe?mediaURL=…
+    ' — because it runs the same ffprobe the converter uses to decide whether
+    ' to remux or re-encode, so the direct-vs-remux decision is made against
+    ' the same facts the server will act on. mediaURL points at the server's
+    ' loopback, exactly as CodecPlaybackUrl does: the server probes the file
+    ' from itself, never over the LAN.
+    '
+    ' Best effort, like the warm-up: { ok, status, format, streams, error }.
+    ' A failure, a server predating /hlsv2/probe, or an unparseable body all
+    ' answer ok=false and the caller keeps the HLS route — the probe must
+    ' never be the reason a playable stream does not play.
+    function ProbeServerMedia(serverAddress as string, infoHash as string, fileIdx as integer) as object
+        result = { ok: false, status: 0, format: "", streams: [], error: "" }
+        if serverAddress = "" or infoHash = "" then
+            result.error = "no server or infoHash"
+            return result
+        end if
+        mediaURL = m.LoopbackMediaBase(serverAddress) + "/" + infoHash + "/" + fileIdx.ToStr()
+        url = serverAddress + "/hlsv2/probe?mediaURL=" + m.transport.EncodeQueryValue(mediaURL)
+        response = m.transport.Get(url)
+        if response = invalid
+            result.error = "no transport"
+            return result
+        end if
+        result.status = response.status
+        if response.error <> invalid then result.error = response.error
+        if not response.ok or response.json = invalid
+            if result.error = "" then result.error = "media probe failed"
+            return result
+        end if
+        result.format = response.json.format
+        if Type(response.json.streams) = "roArray" then result.streams = response.json.streams
+        result.ok = true
+        result.error = ""
+        return result
+    end function
+
     ' One plain GET of the playlist URL, with the body left as text.
     '
     ' This is the probe the player is NOT asked to make. Whatever the server says

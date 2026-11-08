@@ -201,6 +201,7 @@ sub StartResolve(stream as object, serverAddress as dynamic, season = 0 as integ
         episode: episode
         audioPassthrough: AudioPassthroughEnabled()
         audioTransmux: AudioTransmuxEnabled()
+        directPlay: DirectPlayEnabled()
     }, "playerResolve")
     m.resolveTask = task
 end sub
@@ -218,6 +219,11 @@ end function
 function AudioTransmuxEnabled() as boolean
     if m.stores = invalid then return false
     return m.stores.settings.callFunc("SettingsGetAudioTransmux")
+end function
+
+function DirectPlayEnabled() as boolean
+    if m.stores = invalid then return false
+    return m.stores.settings.callFunc("SettingsGetDirectPlay")
 end function
 
 ' Season and episode as whole numbers, 0 when the play has neither. Coerced
