@@ -36,7 +36,7 @@ class SettingsStore
         m.language = "en"
         m.audioPassthrough = false
         m.audioTransmux = false
-        m.directPlayMode = "ask"
+        m.directPlayMode = "off"
         m.hiddenHomeCatalogs = []
         m.saveRefused = false
         m.Load()
@@ -173,8 +173,8 @@ class SettingsStore
 
     ' How torrents are played, in three states:
     '   "on"   — always play the original file straight from the server
-    '   "ask"  — offer the choice before every torrent play (the default)
-    '   "off"  — always remux through the server's converter
+    '   "ask"  — offer the choice before every torrent play
+    '   "off"  — always remux through the server's converter (the default)
     ' Anything else stored is read as the default: an unknown value must not
     ' silently turn an experimental feature fully on.
     function GetDirectPlayMode() as string

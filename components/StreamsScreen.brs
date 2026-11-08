@@ -479,10 +479,10 @@ end sub
 ' per render, not cached: the only way to change it is leaving this screen
 ' for Settings, which rebuilds the visit (and the cards) on the way back.
 function DirectPlayMode() as string
-    if m.stores = invalid then return "ask"
+    if m.stores = invalid then return "off"
     mode = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
     if mode = "on" or mode = "ask" or mode = "off" then return mode
-    return "ask"
+    return "off"
 end function
 
 ' Probe once for this long-lived picker. The device calls are local and

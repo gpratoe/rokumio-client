@@ -227,10 +227,10 @@ function AudioTransmuxEnabled() as boolean
 end function
 
 function DirectPlayModeSetting() as string
-    if m.stores = invalid then return "ask"
+    if m.stores = invalid then return "off"
     mode = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
     if mode = "on" or mode = "ask" or mode = "off" then return mode
-    return "ask"
+    return "off"
 end function
 
 ' Season and episode as whole numbers, 0 when the play has neither. Coerced

@@ -161,7 +161,6 @@ sub resolve()
                     resolved.url = directUrl
                     resolved.streamFormat = store.StreamFormat(m.top.stream, directUrl)
                     resolved.direct = true
-                    print "[resolve] direct play -> original file"
                 end if
             end if
 
