@@ -87,42 +87,6 @@
                 keyValue="[0.15, 0.35, 1.0, 0.35, 0.15]" />
         </Animation>
 
-        <!-- A transient warning, for the one thing playback cannot fix itself:
-             captions that could not be fetched. Rides above the video on a
-             translucent plate so the text reads over any frame, holds for two
-             seconds, then fades. Not a status line: playerStatus below is the
-             play state, and a failed caption fetch would overwrite that.
-
-             The fade is an Animation on toastGroup.opacity, which cascades to
-             both children — RailTile dims its whole subtree the same way, so
-             the field is one this app has already proven on device. And because
-             a FloatFieldInterpolator on an OS that lacks the field would fail
-             SILENTLY (the easeFunction attribute that did nothing but print a
-             warning is the precedent above), toastHideTimer is armed for the
-             same window and force-hides the group regardless, so a no-op
-             interpolator cannot strand the label on screen over the video. -->
-        <Group id="toastGroup" visible="false" translation="[210, 860]">
-            <Rectangle id="toastPlate" width="1500" height="64"/>
-            <Label
-                id="toastLabel"
-                width="1500"
-                height="64"
-                font="font:MediumSystemFont"
-                horizAlign="center"
-                vertAlign="center" />
-            <Animation id="toastFade" delay="2" duration="0.5" repeat="false">
-                <FloatFieldInterpolator
-                    id="toastFadeOpacity"
-                    fieldToInterp="toastGroup.opacity"
-                    key="[0.0, 1.0]"
-                    keyValue="[1.0, 0.0]" />
-            </Animation>
-        </Group>
-
-        <!-- The Animation's own end is not trusted to hide anything: see above.
-             2s hold + 0.5s fade + margin. Armed by ShowToast alongside the fade. -->
-        <Timer id="toastHideTimer" duration="2.6" repeat="false" />
-
         <!-- Not cosmetic: StartPlayback hands the Video node its content and
              asks it to play from separate ticks, and this is the boundary. See
              StartPlayback for why the same tick is not good enough. -->

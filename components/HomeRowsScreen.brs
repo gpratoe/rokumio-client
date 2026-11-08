@@ -262,7 +262,7 @@ sub ReportSettingsSaveFault()
     if m.stores = invalid then return
     failed = m.stores.settings.callFunc("SettingsSaveFailed")
     scene = m.top.getScene()
-    if scene <> invalid then scene.callFunc("ReportStoreFault", "settings could not be saved", failed)
+    if scene <> invalid and failed then scene.callFunc("Notify", "settings could not be saved", "error")
     if failed
         m.status.text = Lang("homeRows", "notSaved")
     else

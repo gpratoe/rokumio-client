@@ -30,10 +30,10 @@
         <function name="ApplyLibrarySyncResult" />
         <function name="ClearAddonSyncFaults" />
         <function name="ReportAddonSyncFault" />
-        <!-- A screen whose store bind came up short reports the failing hop
-             here (Screen.brs's SetStores) and the Scene paints it, so a broken
+        <!-- Screens report transient events here (Screen.brs's SetStores
+             reports a failed bind) and the Scene paints them, so a broken
              store layer can never be mistaken for an empty catalog. -->
-        <function name="ReportStoreFault" />
+        <function name="Notify" />
         <function name="ReportAddonWriteFault" />
         <function name="HandleRevokedSession" />
     </interface>
@@ -88,10 +88,10 @@
             <PlayerScreen id="playerScreen" visible="false" />
         </Group>
 
-        <!-- Sticky store faults and short-lived sync warnings. The strip owns
-             its display nodes, state and dismissal timer; MainScene forwards
-             the reporting interface screens already use. -->
-        <FaultStrip id="faultStrip" />
+        <!-- Transient notifications. The toast owns its display nodes, state
+             and dismissal timer; MainScene forwards the reporting interface
+             screens use. -->
+        <Toast id="toast" />
 
         <!-- Single-flight whole-account collection replacement. -->
         <AddonWriteCoordinator id="addonWriteCoordinator" />

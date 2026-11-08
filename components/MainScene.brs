@@ -69,7 +69,7 @@ sub init()
     m.libraryScreen = m.top.FindNode("libraryScreen")
     m.libraryScreen.ObserveField("pushRequest", "onLibraryAction")
     m.uiRoot = m.top.FindNode("uiRoot")
-    m.faultStrip = m.top.FindNode("faultStrip")
+    m.toast = m.top.FindNode("toast")
     m.libraryWriteCoordinator = m.top.FindNode("libraryWriteCoordinator")
     m.addonWriteCoordinator = m.top.FindNode("addonWriteCoordinator")
     m.importCoordinator = m.top.FindNode("importCoordinator")
@@ -163,18 +163,9 @@ sub init()
     m.playerScreen.callFunc("SetStores", m.storeHost, m.top)
 end sub
 
-' Screens already report store faults through MainScene's interface. Keep this
-' entry point stable; the FaultStrip component owns state, timer and painting.
-sub ReportStoreFault(reason as string, active as boolean)
-    if m.faultStrip = invalid then return
-    m.faultStrip.callFunc("ReportStoreFault", reason, active)
-end sub
-
-' Transient reports stay internal to MainScene's sync paths, but use the same
-' component that owns their lease and display.
-sub ReportTransientFault(reason as string)
-    if m.faultStrip = invalid then return
-    m.faultStrip.callFunc("ReportTransientFault", reason)
+sub Notify(text as string, kind = "info" as string)
+    if m.toast = invalid then return
+    m.toast.callFunc("Notify", text, kind)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -774,12 +765,6 @@ sub AdoptAddonSyncResult(result as object)
 end sub
 
 sub ClearAddonSyncFaults()
-    if m.addonSyncFaults <> invalid
-        for each key in m.addonSyncFaults
-            ReportStoreFault(key, false)
-            if m.faultStrip <> invalid then m.faultStrip.callFunc("ClearTransientFault", key)
-        end for
-    end if
     m.addonSyncFaults = []
 end sub
 
@@ -788,12 +773,7 @@ sub ReportAddonSyncFault(reason as string)
 end sub
 
 sub AddAddonSyncFault(reason as string)
-    ' Transient, deliberately: a launch-time sync failure can heal on the very
-    ' next launch (flaky connection, server hiccup), and a glue-on strip is
-    ' not the UX for a recoverable fault. The retraction list below stays:
-    ' before every new sync attempt the previous attempt's wording goes, so
-    ' the strip never names a fault the current attempt has not confirmed.
-    ReportTransientFault(reason)
+    Notify(reason, "error")
     m.addonSyncFaults.Push(reason)
 end sub
 
@@ -916,10 +896,9 @@ sub ImportFinished(summary as object)
             if m.storeHost.callFunc("SettingsSetServerAddress", summary.settings.serverAddress)
                 if m.storeHost.callFunc("SettingsSaveFailed") then
                     lines.Push({ key: "importServerLinkedNotSaved" })
-                    ReportStoreFault("settings could not be saved", true)
+                    Notify("settings could not be saved", "error")
                 else
                     lines.Push({ key: "importServerLinked" })
-                    ReportStoreFault("settings could not be saved", false)
                 end if
             else
                 lines.Push({ key: "importInvalidAddress" })

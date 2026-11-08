@@ -125,7 +125,7 @@ function SetStores(storeHost as object, scene as object) as void
     ' a screen painting its own would need a color literal it deliberately does
     ' not depend on. Each is checked separately — a screen that got the host but
     ' not the Scene can still read data, and should say so rather than go quiet.
-    if scene <> invalid then scene.callFunc("ReportStoreFault", fault, fault <> "")
+    if scene <> invalid and fault <> "" then scene.callFunc("Notify", fault, "error")
 end function
 
 function OnEnter(params as object) as void

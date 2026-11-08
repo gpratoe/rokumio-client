@@ -23,6 +23,7 @@ async function writeCombinedScript() {
         'tests/harness.brs',
         'tests/mocks.brs',
         'components/NetDiagTask.brs',
+        'source/util/ToastMetrics.brs',
         'tests/screenstack.test.brs',
         'tests/transport.test.brs',
         'tests/helpers.test.brs',
@@ -60,6 +61,7 @@ async function writeCombinedScript() {
         'tests/devicecap.test.brs',
         'tests/codechints.test.brs',
         'tests/directplay.test.brs',
+        'tests/toast.test.brs',
         'tests/torrentprofile.test.brs',
         'tests/cachesize.test.brs',
         'tests/textsstore.test.brs',
@@ -581,8 +583,8 @@ function checkStoreHandoffContract() {
     if (!/callFunc\(\s*"AddonsGetAll"/.test(body)) {
         err('Screen.brs SetStores must probe the host (callFunc("AddonsGetAll")) — a bind that cannot say which hop failed is the silence that hid three shipping bugs');
     }
-    if (!/callFunc\(\s*"ReportStoreFault"/.test(body)) {
-        err('Screen.brs SetStores must report a failed bind to the Scene (callFunc("ReportStoreFault", reason, active)) — otherwise a broken store layer is indistinguishable from an empty catalog');
+    if (!/callFunc\(\s*"Notify"/.test(body)) {
+        err('Screen.brs SetStores must report a failed bind to the Scene (callFunc("Notify", reason, "error")) — otherwise a broken store layer is indistinguishable from an empty catalog');
     }
     if (/getScene\(\)/.test(screenBrs)) {
         err('Screen.brs calls getScene() — roSGNode.GetScene() returns invalid until screen.Show() has put the tree in a scene, which is after init(); bind from the nodes MainScene passes instead');
@@ -596,81 +598,62 @@ function checkStoreHandoffContract() {
         }
     }
 
-    // --- MainScene forwards the stable screen-facing API; FaultStrip owns it.
-    if (!/<function\s+name="ReportStoreFault"\s*\/>/.test(sceneXml)) {
-        err('MainScene.xml must declare ReportStoreFault() — screens report their bind failures through this stable interface');
+    // --- MainScene forwards the stable screen-facing API; Toast owns it.
+    if (!/<function\s+name="Notify"\s*\/>/.test(sceneXml)) {
+        err('MainScene.xml must declare Notify() — screens report through this stable interface');
     }
-    const report = mainScene.match(/^sub\s+ReportStoreFault\s*\(/m);
+    const report = mainScene.match(/^sub\s+Notify\s*\(/m);
     if (!report) {
-        err('MainScene.brs no longer defines ReportStoreFault — screens would report into nothing');
-    } else if (!/m\.faultStrip\.callFunc\("ReportStoreFault"/.test(bodyOf(mainScene, report[0]))) {
-        err('MainScene.ReportStoreFault must forward to FaultStrip; MainScene should not own the strip state');
+        err('MainScene.brs no longer defines Notify — screens would report into nothing');
+    } else if (!/m\.toast\.callFunc\("Notify"/.test(bodyOf(mainScene, report[0]))) {
+        err('MainScene.Notify must forward to the Toast; MainScene should not own the toast state');
     }
     const sceneInit = mainScene.match(/^sub\s+init\s*\(\)\s*$/m);
     const sceneInitBody = sceneInit ? bodyOf(mainScene, sceneInit[0]) : '';
-    if (!/m\.faultStrip\s*=\s*m\.top\.FindNode\("faultStrip"\)/.test(sceneInitBody) || !/<FaultStrip\s+id="faultStrip"/.test(sceneXml)) {
-        err('MainScene must hold the declared FaultStrip node — reporting through an absent node silently loses every fault');
+    if (!/m\.toast\s*=\s*m\.top\.FindNode\("toast"\)/.test(sceneInitBody) || !/<Toast\s+id="toast"/.test(sceneXml)) {
+        err('MainScene must hold the declared Toast node — reporting through an absent node silently loses every notification');
     }
 
-    const faultBrs = fs.readFileSync(path.join(dir, 'FaultStrip.brs'), 'utf8');
-    const faultXml = fs.readFileSync(path.join(dir, 'FaultStrip.xml'), 'utf8');
-    const faultDefined = new Set([...faultBrs.matchAll(/^(?:function|sub)\s+(\w+)\s*\(/gm)].map(m => m[1]));
-    const faultDeclared = new Set([...faultXml.matchAll(/<function\s+name="([^"]+)"/g)].map(m => m[1]));
-    for (const name of ['ReportStoreFault', 'ReportTransientFault', 'ClearTransientFault']) {
-        if (!faultDefined.has(name) || !faultDeclared.has(name)) {
-            err(`FaultStrip must define and declare ${name} — callFunc only reaches functions in the component interface`);
+    const toastBrs = fs.readFileSync(path.join(dir, 'Toast.brs'), 'utf8');
+    const toastXml = fs.readFileSync(path.join(dir, 'Toast.xml'), 'utf8');
+    if (!/^sub\s+Notify\s*\(/m.test(toastBrs) || !/<function\s+name="Notify"/.test(toastXml)) {
+        err('Toast must define and declare Notify — callFunc only reaches functions in the component interface');
+    }
+    const toastInit = toastBrs.match(/^sub\s+init\s*\(\)\s*$/m);
+    const toastInitBody = toastInit ? bodyOf(toastBrs, toastInit[0]) : '';
+    for (const [field, node] of [['m.plate', 'Poster'], ['m.label', 'Label']]) {
+        if (!new RegExp(field + '\\s*=\\s*CreateObject\\(\\s*"roSGNode"\\s*,\\s*"' + node + '"').test(toastInitBody) || !new RegExp('AppendChild\\(' + field + '\\)').test(toastInitBody)) {
+            err(`Toast init must create and attach ${field} (${node}) once — an unattached node renders nothing`);
         }
     }
-    const faultInit = faultBrs.match(/^sub\s+init\s*\(\)\s*$/m);
-    const faultInitBody = faultInit ? bodyOf(faultBrs, faultInit[0]) : '';
-    if (!/m\.storeFaults\s*=\s*\{\}/.test(faultInitBody) || !/m\.transientFaults\s*=\s*\{\}/.test(faultInitBody)) {
-        err('FaultStrip init must initialize both fault maps — an unassigned AA is invalid, and iterating it is a render-thread crash');
-    }
-    for (const [field, node] of [['m.bar', 'Rectangle'], ['m.label', 'Label']]) {
-        if (!new RegExp(field + '\\s*=\\s*CreateObject\\(\\s*"roSGNode"\\s*,\\s*"' + node + '"').test(faultInitBody) || !new RegExp('m\\.top\\.AppendChild\\(' + field + '\\)').test(faultInitBody)) {
-            err(`FaultStrip init must create and attach ${field} (${node}) once — an unattached node renders nothing`);
-        }
-    }
-    const paint = faultBrs.match(/^sub\s+Refresh\s*\(\)\s*$/m);
-    if (!paint) {
-        err('FaultStrip has no Refresh() — a reported fault would never be painted');
+    const notify = toastBrs.match(/^sub\s+Notify\s*\([^)]*\)\s*$/m);
+    if (!notify) {
+        err('Toast no longer defines Notify');
     } else {
-        const paintBody = bodyOf(faultBrs, paint[0]);
-        if (/CreateObject\(|AppendChild\(|FindNode\(|\.Join\(/.test(paintBody)) {
-            err('FaultStrip.Refresh() must update its existing nodes directly, building the line by concatenation');
-        }
-        if (!/m\.label\.text\s*=/.test(paintBody) || !/m\.bar\.visible\s*=/.test(paintBody) || !/m\.label\.visible\s*=/.test(paintBody)) {
-            err('FaultStrip.Refresh() must set the label and both visibility fields — otherwise a fault may paint as a blank bar');
+        const body = bodyOf(toastBrs, notify[0]);
+        if (!/m\.timer\.control\s*=\s*"start"/.test(body) && !/RestartTimer\(/.test(body)) {
+            err('Toast.Notify must restart the dismissal timer');
         }
     }
-    const transient = faultBrs.match(/^sub\s+ReportTransientFault\s*\([^)]*\)\s*$/m);
-    if (!transient) {
-        err('FaultStrip no longer defines ReportTransientFault');
-    } else {
-        const body = bodyOf(faultBrs, transient[0]);
-        if (!/m\.timer\.control\s*=\s*"start"/.test(body) || !/Refresh\(\)/.test(body)) {
-            err('FaultStrip.ReportTransientFault must restart the shared timer and repaint');
-        }
-    }
-    const expiry = faultBrs.match(/^sub\s+onDismissTimerFire\s*\(\)\s*$/m);
+    const expiry = toastBrs.match(/^sub\s+onDismissTimerFire\s*\(\)\s*$/m);
     if (!expiry) {
-        err('FaultStrip no longer defines onDismissTimerFire — transient faults would outlive their deadline');
+        err('Toast no longer defines onDismissTimerFire — toasts would outlive their deadline');
     } else {
-        const expiryBody = bodyOf(faultBrs, expiry[0]);
-        if (!/m\.transientFaults\s*=\s*\{\}/.test(expiryBody) || !/Refresh\(\)/.test(expiryBody)) {
-            err('FaultStrip.onDismissTimerFire must clear transient faults and repaint');
+        const expiryBody = bodyOf(toastBrs, expiry[0]);
+        if (!/m\.hideTimer\.control\s*=\s*"start"/.test(expiryBody)) {
+            err('Toast.onDismissTimerFire must fade and schedule the hide');
         }
     }
-    if (!/m\.storeFaults/.test(faultBrs) || !/m\.transientFaults/.test(faultBrs)) {
-        err('FaultStrip must merge sticky and transient faults in its display');
+    if (/storeFaults|transientFaults|ReportStoreFault/.test(toastBrs)) {
+        err('Toast still carries sticky-fault state — every notification is temporary');
     }
     const addonFault = mainScene.match(/^sub\s+AddAddonSyncFault\s*\([^)]*\)\s*$/m);
     if (!addonFault) {
         err('MainScene.brs no longer defines AddAddonSyncFault');
     } else {
         const addonFaultBody = bodyOf(mainScene, addonFault[0]);
-        if (!/ReportTransientFault\(/.test(addonFaultBody) || /ReportStoreFault\(/.test(addonFaultBody)) {
-            err('MainScene.brs AddAddonSyncFault must report through the transient channel only — sync faults heal by retry and must not outlive the strip');
+        if (!/Notify\(reason,\s*"error"\)/.test(addonFaultBody)) {
+            err('MainScene.brs AddAddonSyncFault must report through Notify');
         }
     }
     return ok;

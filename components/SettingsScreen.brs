@@ -215,6 +215,21 @@ sub SetStatusRaw(text as string) as void
     m.status.text = text
 end sub
 
+' A finished outcome as a toast instead of the status line: the line is for
+' work still running, the toast for what it came back with. Clears the line
+' it replaces.
+sub NotifyStatus(key as string, values = invalid as object, kind = "info" as string, suffixKey = "" as string) as void
+    m.statusKey = ""
+    m.statusValues = invalid
+    m.statusSuffixKey = ""
+    m.status.text = ""
+    text = Fill(Lang("settings", key), values)
+    if suffixKey <> "" then text = text + Lang("common", suffixKey)
+    if key = "statusInvalidAddress" then kind = "error"
+    scene = m.top.getScene()
+    if scene <> invalid then scene.callFunc("Notify", text, kind)
+end sub
+
 function StatusText() as string
     if m.statusKey = "" then return ""
     text = Fill(Lang("settings", m.statusKey), m.statusValues)
@@ -721,7 +736,7 @@ sub CycleTorrentProfile()
     if m.stores = invalid then return
     address = m.stores.settings.callFunc("SettingsGetServerAddress")
     if address = ""
-        SetStatus("statusSetServerFirst")
+        NotifyStatus("statusSetServerFirst")
         return
     end if
     nextId = TorrentProfileNext(m.serverProfile)
@@ -751,9 +766,9 @@ sub onServerSettingsWritten()
     AsyncTask_Reap(task, m.top, false)
     if not result.ok
         if m.pendingWriteType = "cacheSize"
-            SetStatus("statusCouldNotCache", { error: result.error })
+            NotifyStatus("statusCouldNotCache", { error: result.error }, "error")
         else
-            SetStatus("statusCouldNotProfile", { error: result.error })
+            NotifyStatus("statusCouldNotProfile", { error: result.error }, "error")
         end if
         m.pendingWriteType = ""
         return
@@ -827,11 +842,11 @@ sub CycleCacheSize()
     if m.stores = invalid then return
     address = m.stores.settings.callFunc("SettingsGetServerAddress")
     if address = ""
-        SetStatus("statusSetServerFirst")
+        NotifyStatus("statusSetServerFirst")
         return
     end if
     if m.serverCacheSizeChoices = invalid or m.serverCacheSizeChoices.Count() = 0
-        SetStatus("warnCacheNotAvailable")
+        NotifyStatus("warnCacheNotAvailable", invalid, "error")
         return
     end if
     if m.serverSettingsTask <> invalid then return
@@ -1007,7 +1022,7 @@ sub onRowSelected()
             ' was built before the gesture revealed them — so the section is
             ' rebuilt, not just the list, or the new rows never appear.
             RefreshSections()
-            SetStatus("statusDiagAdded")
+            NotifyStatus("statusDiagAdded")
         end if
         TestServer()
     else if action = "netdiag"
@@ -1116,7 +1131,7 @@ sub onServerChoice()
             ' written once, from the key, and the suffix rides along with it.
             suffixKey = ""
             if m.stores.settings.callFunc("SettingsSaveFailed") then suffixKey = "notSavedSuffix"
-            SetStatus(statusKey, invalid, suffixKey)
+            NotifyStatus(statusKey, invalid, "info", suffixKey)
             ReportSaveFault()
             RefreshValues()
         end if
@@ -1134,7 +1149,7 @@ sub ReportSaveFault()
     if m.stores = invalid then return
     failed = m.stores.settings.callFunc("SettingsSaveFailed")
     scene = m.top.getScene()
-    if scene <> invalid then scene.callFunc("ReportStoreFault", "settings could not be saved", failed)
+    if scene <> invalid and failed then scene.callFunc("Notify", "settings could not be saved", "error")
 end sub
 
 ' Repaint the whole screen in the language the store holds.
@@ -1193,7 +1208,7 @@ sub TestServer() as void
     if m.stores = invalid then return
     address = m.stores.settings.callFunc("SettingsGetServerAddress")
     if address = ""
-        SetStatus("statusSetServerFirst")
+        NotifyStatus("statusSetServerFirst")
         return
     end if
     if m.heartbeatTask <> invalid then return
@@ -1213,9 +1228,9 @@ sub onTestServerResult()
     AsyncTask_Reap(task, m.top, false)
 
     if result.alive
-        SetStatus("statusServerOk")
+        NotifyStatus("statusServerOk")
     else
-        SetStatus("statusServerUnreachable", { error: result.error })
+        NotifyStatus("statusServerUnreachable", { error: result.error }, "error")
     end if
 end sub
 
