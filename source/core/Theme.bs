@@ -28,7 +28,7 @@ function Theme() as object
             textPrimary: "0xE9F2ECFF"
             textSecondary: "0x8FA399FF"
             textWhite: "0xFFFFFFFF"
-            danger: "0xC0392BFF"
+            danger: "0x9E4034FF"
             screenBg: "0x0A0F0CFF"
             tileFace: "0x0B110DFF"
             tileFaceFocus: "0x18231CFF"
