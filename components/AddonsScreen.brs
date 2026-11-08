@@ -314,8 +314,7 @@ end sub
 
 ' The worker has ended. Any row still pending lost its result (or the task was
 ' cancelled); leave it on the no-description fallback rather than a spinner-like
-' "loading" line that will never change. A failed optional refresh is reported
-' only when it did not land on top of an install/remove status.
+' "loading" line that will never change. Failures land as a toast.
 sub FinishMetadataRefresh()
     for i = 0 to m.rows.Count() - 1
         row = m.rows[i]
@@ -326,8 +325,8 @@ sub FinishMetadataRefresh()
         end if
         PaintRowNode(m.rowNodes[i], row)
     end for
-    if m.metadataFailures > 0 and m.status.text = ""
-        m.status.text = Lang("addons", "metadataUnavailable")
+    if m.metadataFailures > 0
+        Notify(Lang("addons", "metadataUnavailable"), "error")
     end if
 end sub
 
