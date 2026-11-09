@@ -49,11 +49,16 @@ sub ApplyLayout(hasIcon as boolean, hasText as boolean)
         m.text.width = 0
         m.text.visible = false
     else
+        ' Text-only chips (section tabs, filter chips, dropdown rows) center
+        ' the label on the face; the label is the whole chip there, unlike the
+        ' icon+label action chips where the label starts after the icon.
         m.iconBg.width = m.tileWidth - 8
-        m.text.translation = [8, 16]
+        m.text.translation = [8, 20]
         m.text.width = m.tileWidth - 16
+        m.text.horizAlign = "center"
         m.text.visible = true
     end if
+    if hasIcon then m.text.horizAlign = "left"
 end sub
 
 sub ApplyState()
