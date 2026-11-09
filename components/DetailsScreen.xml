@@ -71,9 +71,9 @@
             vertAlign="top"
             font="font:SmallSystemFont" />
 
-        <!-- Icon-and-label actions: a Group of focusable ChipTiles, the same
-             direct-focus model as the Home rail. DetailsScreen owns
-             Left/Right/OK while a chip is focused. -->
-        <Group id="chipsRow" translation="[162, 610]" />
+        <!-- The shared chips row: a ChipsRow (standalone focusable tiles,
+             the rail model) — the row owns Left/Right/OK and publishes OK
+             through its `selection` field, which onChipSelected dispatches. -->
+        <ChipsRow id="chipsRow" translation="[162, 610]" />
     </children>
 </component>

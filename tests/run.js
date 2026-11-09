@@ -3270,14 +3270,15 @@ function checkSettingsSectionsContract() {
     const xml = read('components/SettingsScreen.xml');
     const brs = read('components/SettingsScreen.brs');
     const chipContent = read('components/ChipContent.xml');
+    const chipsRow = read('components/ChipsRow.brs');
     let ok = true;
     const err = (m) => { console.error(m); ok = false; };
 
     if (!/id="settingsChips"/.test(xml)) {
         err('SettingsScreen.xml has no settingsChips row — the sections have no selector and the screen is a flat list again');
     }
-    if (!/id="settingsChips"[\s\S]{0,600}itemComponentName="ChipTile"/.test(xml)) {
-        err('SettingsScreen.xml does not render settingsChips with the ChipTile — the section row would draw as plain list cells');
+    if (!/<ChipsRow\s+id="settingsChips"/.test(xml)) {
+        err('SettingsScreen.xml does not render settingsChips as a ChipsRow — the section row would not be a focusable chip row');
     }
     if (!/id="active"/.test(chipContent)) {
         err('ChipContent.xml has no `active` field — the selected section can then only be told apart by the focus ring, which answers "where am I" and not "what is showing"');
@@ -3285,11 +3286,14 @@ function checkSettingsSectionsContract() {
     if (!/m\.chips\s*=\s*m\.top\.FindNode\("settingsChips"\)/.test(brs)) {
         err('SettingsScreen.brs does not hold the chips row — the screen cannot switch sections without it');
     }
-    if (!/ObserveField\("rowItemSelected",\s*"onChipSelected"\)/.test(brs)) {
+    if (!/m\.chips\.ObserveField\("selection",\s*"onChipSelected"\)/.test(brs)) {
         err('SettingsScreen.brs does not observe the chip row — pressing a section would change nothing');
     }
-    if (!/item\.active\s*=/.test(brs)) {
+    if (!/active:\s*\(i\s*=\s*m\.activeSection\)/.test(brs)) {
         err('SettingsScreen.brs never marks the selected chip active — the chip row and the list below can disagree about which section is on screen');
+    }
+    if (!/key = "left"/.test(chipsRow) || !/key = "right"/.test(chipsRow) || !/key = "OK"/.test(chipsRow)) {
+        err('ChipsRow.brs does not answer Left/Right/OK itself — every screen embedding a chips row would have to re-plumb the keys');
     }
     if (!/section\s*=\s*m\.sections\[m\.activeSection\]/.test(brs)) {
         err('SettingsScreen.brs does not build the list from the selected section — the rows are flat again, so adding a setting scrambles the list');

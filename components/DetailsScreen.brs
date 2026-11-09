@@ -7,9 +7,9 @@
 ' is saved), the same "add to library" toggle, and an "Episodes" chip that
 ' pushes the dedicated EpisodesScreen.
 '
-' One shared chips RowList serves both kinds — the chips differ, the plumbing
-' doesn't. Each chip ContentNode maps to a stored action id, and a single
-' selection observer dispatches on that id.
+' One shared chips ChipsRow serves both kinds — the chips differ, the
+' plumbing doesn't. The row publishes OK through its `selection` field and
+' one observer dispatches on the stored action id.
 
 sub init()
     m.bgPoster = m.top.FindNode("bgPoster")
@@ -35,7 +35,7 @@ sub init()
     m.detailRatingText.color = t.accentWarm
     m.detailGenres.color = t.textSecondary
     m.detailDesc.color = t.textPrimary
-    m.chipFocusIndex = -1
+    m.chipsRow.ObserveField("selection", "onChipSelected")
 end sub
 
 function OnEnter(params as object) as void
@@ -190,41 +190,11 @@ sub onMetaLoaded()
     RenderHero(m.meta)
 end sub
 
-' Re-entry: the shared chip RowList just needs focus back. m.meta/m.resume
+' Re-entry: the shared chips row just needs focus back. m.meta/m.resume
 ' survive the push/pop, so a rebuild is not needed.
 sub RestoreFocus()
     if m.meta = invalid then return
-    if m.chipFocusIndex < 0 then m.chipFocusIndex = 0
-    if m.chipFocusIndex >= m.chipsRow.GetChildCount() then m.chipFocusIndex = 0
-    m.chipsRow.GetChild(m.chipFocusIndex).focused = true
-    m.chipsRow.GetChild(m.chipFocusIndex).SetFocus(true)
-end sub
-
-function OnKeyEvent(key as string, press as boolean) as boolean
-    if not press then return false
-    if m.chipFocusIndex >= 0
-        if key = "left"
-            MoveChipFocus(-1)
-            return true
-        else if key = "right"
-            MoveChipFocus(1)
-            return true
-        else if key = "OK"
-            SelectChip()
-            return true
-        end if
-    end if
-    return false
-end function
-
-sub MoveChipFocus(delta as integer)
-    if m.chipFocusIndex < 0 then return
-    nextIndex = m.chipFocusIndex + delta
-    if nextIndex < 0 or nextIndex >= m.chipsRow.GetChildCount() then return
-    m.chipsRow.GetChild(m.chipFocusIndex).focused = false
-    m.chipFocusIndex = nextIndex
-    m.chipsRow.GetChild(nextIndex).focused = true
-    m.chipsRow.GetChild(nextIndex).SetFocus(true)
+    m.chipsRow.callFunc("FocusChip", -1)
 end sub
 
 sub onHeroLogoStatus()
@@ -330,44 +300,36 @@ sub ShowMovie()
     ShowChips(actions)
 end sub
 
-' Fill the shared chips row and remember the action id per chip so OK can
-' dispatch. Chips are standalone focusable tiles — the same direct model as
-' the Home rail — so focus moves without RowList binding overhead.
+' Fill the shared chips row and remember the action id per chip so the
+' selection observer can dispatch. The row owns focus and the keys.
 sub ShowChips(actions as object)
     m.chips = actions
-    while m.chipsRow.GetChildCount() > 0
-        m.chipsRow.RemoveChildIndex(0)
-    end while
-    m.chipFocusIndex = -1
-    x = 0
+    entries = []
     for each chip in actions
-        tile = m.chipsRow.CreateChild("ChipTile")
-        tile.focusable = true
-        tile.translation = [x, 0]
-        width = ChipWidth(chip)
-        tile.callFunc("SetChip", chip.title, ChipIconOrEmpty(chip), width)
-        x = x + width + 16
+        entries.Push({ title: ChipTitle(chip), icon: ChipIconOrEmpty(chip), active: false })
     end for
-    RestoreFocus()
+    m.chipsRow.callFunc("SetChips", entries)
+    if m.top.screenActive then RestoreFocus()
 end sub
+
+function ChipTitle(chip as object) as string
+    if chip.title <> invalid then return chip.title
+    return ""
+end function
 
 function ChipIconOrEmpty(chip as object) as string
     if chip.icon <> invalid then return chip.icon
     return ""
 end function
 
-function ChipWidth(chip as object) as integer
-    if chip.title = invalid or chip.title = "" then return 80
-    return 130 + chip.title.Len() * 19
-end function
-
 function EpisodeCode(season as dynamic, episode as dynamic) as string
     return Fill(Lang("common", "episodeMarker"), { season: season.ToStr(), episode: episode.ToStr() })
 end function
 
-sub SelectChip()
-    if m.chips = invalid or m.chipFocusIndex < 0 or m.chipFocusIndex >= m.chips.Count() then return
-    action = m.chips[m.chipFocusIndex].action
+sub onChipSelected()
+    index = m.chipsRow.selection
+    if m.chips = invalid or index < 0 or index >= m.chips.Count() then return
+    action = m.chips[index].action
     if action = "resume"
         ResumeEpisode()
     else if action = "play"
@@ -482,7 +444,7 @@ sub ToggleLibrary()
     for i = 0 to m.chips.Count() - 1
         if m.chips[i].action = "library"
             if i < m.chipsRow.GetChildCount()
-                m.chipsRow.GetChild(i).callFunc("SetChip", m.chips[i].title, icon, ChipWidth(m.chips[i]))
+                m.chipsRow.GetChild(i).callFunc("SetChip", m.chips[i].title, icon, 80, false)
             end if
             exit for
         end if
