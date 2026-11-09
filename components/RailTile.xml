@@ -18,20 +18,20 @@
 
         <Poster
             id="railGlyph"
-            width="60"
-            height="60"
-            loadWidth="60"
-            loadHeight="60"
+            width="48"
+            height="48"
+            loadWidth="48"
+            loadHeight="48"
             loadDisplayMode="limitSize"
-            translation="[40, 10]" />
+            translation="[32, 16]" />
         <Label
             id="railLabel"
             translation="[84, 0]"
-            width="228"
-            height="80"
-            vertAlign="center"
-            scaleRotateCenter="[0, 40]"
-            font="font:MediumBoldSystemFont"
-            visible="false" />
+                width="228"
+                height="80"
+                vertAlign="center"
+                scaleRotateCenter="[0, 40]"
+                font="font:MediumSystemFont"
+                visible="false" />
     </children>
 </component>

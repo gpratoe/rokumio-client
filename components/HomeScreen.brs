@@ -30,8 +30,10 @@ sub init()
     m.railExpandAnim = m.top.FindNode("railExpandAnim")
     m.railCollapseAnim = m.top.FindNode("railCollapseAnim")
     m.railBrand = m.top.FindNode("railBrand")
+    m.railBrandExpanded = m.top.FindNode("railBrandExpanded")
     m.railBrandExpandAnim = m.top.FindNode("railBrandExpandAnim")
     m.railBrandCollapseAnim = m.top.FindNode("railBrandCollapseAnim")
+    m.railBg = m.top.FindNode("railBg")
     m.heroPoster = m.top.FindNode("heroPoster")
     m.heroScrim = m.top.FindNode("heroScrim")
     m.heroLogo = m.top.FindNode("heroLogo")
@@ -47,7 +49,6 @@ sub init()
     m.heroBeforeBusy = ""
 
     t = Theme()
-    m.railBrand.color = t.accent
     m.heroScrim.color = t.scrim
     m.heroTitle.color = t.textPrimary
     m.heroMeta.color = t.textSecondary
@@ -55,7 +56,7 @@ sub init()
     m.heroGenres.color = t.textSecondary
     m.heroDescription.color = t.textPrimary
     m.homeEmpty.color = t.textSecondary
-    m.top.FindNode("railBg").color = t.navBg
+    m.railBg.color = t.navBg
     m.catalog.rowLabelOffset = [0,10]
     m.catalog.focusBitmapBlendColor = t.accentFocus
 
@@ -378,8 +379,8 @@ sub FitHeroLogo()
     m.heroLogo.width = Int(logoWidth)
     m.heroLogo.height = Int(logoHeight)
     if ratio < 1.7
-        m.heroLogo.translation = [190, Int((540 - logoHeight) / 2)]
-        contentX = 190 + Int(logoWidth) + 48
+        m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
+        contentX = 162 + Int(logoWidth) + 48
         m.heroMeta.translation = [contentX, 110]
         m.heroRating.translation = [contentX, 158]
         m.heroGenres.translation = [contentX, 206]
@@ -387,11 +388,11 @@ sub FitHeroLogo()
         m.heroDescription.width = 1920 - contentX - 160
         m.heroDescription.height = 260
     else
-        m.heroLogo.translation = [190, 70 + Int((190 - logoHeight) / 2)]
-        m.heroMeta.translation = [194, 274]
-        m.heroRating.translation = [194, 316]
-        m.heroGenres.translation = [194, 360]
-        m.heroDescription.translation = [194, 402]
+        m.heroLogo.translation = [162, 70 + Int((190 - logoHeight) / 2)]
+        m.heroMeta.translation = [166, 274]
+        m.heroRating.translation = [166, 316]
+        m.heroGenres.translation = [166, 360]
+        m.heroDescription.translation = [166, 402]
         m.heroDescription.width = 1000
         m.heroDescription.height = 138
     end if
@@ -400,13 +401,13 @@ sub FitHeroLogo()
 end sub
 
 sub ResetHeroLogoLayout()
-    m.heroLogo.translation = [190, 72]
+    m.heroLogo.translation = [162, 72]
     m.heroLogo.width = 820
     m.heroLogo.height = 460
-    m.heroMeta.translation = [194, 216]
-    m.heroRating.translation = [194, 256]
-    m.heroGenres.translation = [194, 307]
-    m.heroDescription.translation = [194, 357]
+    m.heroMeta.translation = [166, 216]
+    m.heroRating.translation = [166, 256]
+    m.heroGenres.translation = [166, 307]
+    m.heroDescription.translation = [166, 357]
     m.heroDescription.width = 860
     m.heroDescription.height = 150
 end sub
@@ -794,10 +795,12 @@ sub SetRailExpanded(expanded as boolean)
         m.rail.GetChild(i).expanded = expanded
     end for
     if expanded
+        m.railBg.color = Theme().navBgExpanded
         m.railBrandCollapseAnim.control = "stop"
         m.railBrandExpandAnim.control = "stop"
         m.railBrandExpandAnim.control = "start"
     else
+        m.railBg.color = Theme().navBg
         m.railBrandExpandAnim.control = "stop"
         m.railBrandCollapseAnim.control = "stop"
         m.railBrandCollapseAnim.control = "start"
