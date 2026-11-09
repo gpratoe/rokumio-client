@@ -380,6 +380,8 @@ sub ResumeEpisode()
             posterShape: m.meta.posterShape
             logo: m.meta.logo
             background: m.meta.background
+            description: StreamDescription(m.meta)
+            runtime: m.meta.runtime
         }
     }
 end sub
@@ -412,9 +414,17 @@ sub PlayMedia()
             posterShape: m.meta.posterShape
             logo: m.meta.logo
             background: m.meta.background
+            description: StreamDescription(m.meta)
+            runtime: m.meta.runtime
         }
     }
 end sub
+
+function StreamDescription(meta as object) as string
+    description = StringOf(meta.description)
+    if description.Trim() = "" then description = StringOf(meta.overview)
+    return description
+end function
 
 sub OpenEpisodes()
     if m.meta = invalid then return
