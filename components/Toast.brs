@@ -12,7 +12,7 @@ sub init()
     m.shadow.blendColor = "0x00000066"
     m.group.AppendChild(m.shadow)
     m.border = CreateObject("roSGNode", "Poster")
-    m.border.uri = "pkg:/images/toast.9.png"
+    m.border.uri = "pkg:/images/toast-border.9.png"
     m.border.loadWidth = 84
     m.border.loadHeight = 84
     m.border.blendColor = palette.borderSoft
@@ -21,7 +21,7 @@ sub init()
     m.plate.uri = "pkg:/images/toast.9.png"
     m.plate.loadWidth = 84
     m.plate.loadHeight = 84
-    m.plate.blendColor = palette.dropdownBg
+    m.plate.blendColor = palette.toastBg
     m.group.AppendChild(m.plate)
     m.label = CreateObject("roSGNode", "Label")
     m.label.font = "font:MediumBoldSystemFont"
@@ -82,6 +82,7 @@ sub Paint()
     else
         m.border.blendColor = Theme().borderSoft
     end if
+    m.plate.blendColor = Theme().toastBg
     m.plate.width = width
     m.plate.height = height
     m.plate.translation = [x, y]
