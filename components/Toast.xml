@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="Toast" extends="Group">
+    <interface>
+        <function name="Notify" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/Toast.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ToastMetrics.brs" />
+
+    <children>
+        <Group id="toastGroup" visible="false" />
+        <Timer id="dismissTimer" duration="4.0" repeat="false" />
+        <Timer id="hideTimer" duration="0.35" repeat="false" />
+        <Animation id="toastFadeIn" duration="0.3" repeat="false">
+            <FloatFieldInterpolator
+                id="toastFadeInOpacity"
+                fieldToInterp="toastGroup.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]" />
+        </Animation>
+        <Animation id="toastFadeOut" duration="0.3" repeat="false">
+            <FloatFieldInterpolator
+                id="toastFadeOutOpacity"
+                fieldToInterp="toastGroup.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[1.0, 0.0]" />
+        </Animation>
+    </children>
+</component>

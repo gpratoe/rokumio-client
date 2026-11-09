@@ -13,7 +13,7 @@
 ' node from the same palette so the dialogs share the app's look.
 '
 ' danger is the one color that is not part of the app's look: it marks a broken
-' invariant (see MainScene's ReportStoreFault) rather than styling content, and
+' invariant (see MainScene's Notify) rather than styling content, and
 ' it lives here anyway so nothing in the codebase has to hardcode a hex literal.
 function Theme() as object
     if m._theme = invalid
@@ -28,7 +28,7 @@ function Theme() as object
             textPrimary: "0xE9F2ECFF"
             textSecondary: "0x8FA399FF"
             textWhite: "0xFFFFFFFF"
-            danger: "0xC0392BFF"
+            danger: "0x9E4034FF"
             screenBg: "0x0A0F0CFF"
             tileFace: "0x0B110DFF"
             tileFaceFocus: "0x18231CFF"
@@ -40,6 +40,8 @@ function Theme() as object
             progressTrack: "0x00000073"
             progressFill: "0x46E0A3FF"
             glyphPlate: "0x000000A6"
+            borderSoft: "0xFFFFFF26"
+            toastBg: "0x101813D9"
             segmentIdle: "0x2A3530FF"
         }
     end if

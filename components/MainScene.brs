@@ -69,7 +69,7 @@ sub init()
     m.libraryScreen = m.top.FindNode("libraryScreen")
     m.libraryScreen.ObserveField("pushRequest", "onLibraryAction")
     m.uiRoot = m.top.FindNode("uiRoot")
-    m.faultStrip = m.top.FindNode("faultStrip")
+    m.toast = m.top.FindNode("toast")
     m.libraryWriteCoordinator = m.top.FindNode("libraryWriteCoordinator")
     m.addonWriteCoordinator = m.top.FindNode("addonWriteCoordinator")
     m.importCoordinator = m.top.FindNode("importCoordinator")
@@ -163,18 +163,9 @@ sub init()
     m.playerScreen.callFunc("SetStores", m.storeHost, m.top)
 end sub
 
-' Screens already report store faults through MainScene's interface. Keep this
-' entry point stable; the FaultStrip component owns state, timer and painting.
-sub ReportStoreFault(reason as string, active as boolean)
-    if m.faultStrip = invalid then return
-    m.faultStrip.callFunc("ReportStoreFault", reason, active)
-end sub
-
-' Transient reports stay internal to MainScene's sync paths, but use the same
-' component that owns their lease and display.
-sub ReportTransientFault(reason as string)
-    if m.faultStrip = invalid then return
-    m.faultStrip.callFunc("ReportTransientFault", reason)
+sub Notify(text as string, kind = "info" as string)
+    if m.toast = invalid then return
+    m.toast.callFunc("Notify", text, kind)
 end sub
 
 ' The only action channel from Home: one push request, dispatched by the stack.
@@ -774,12 +765,6 @@ sub AdoptAddonSyncResult(result as object)
 end sub
 
 sub ClearAddonSyncFaults()
-    if m.addonSyncFaults <> invalid
-        for each key in m.addonSyncFaults
-            ReportStoreFault(key, false)
-            if m.faultStrip <> invalid then m.faultStrip.callFunc("ClearTransientFault", key)
-        end for
-    end if
     m.addonSyncFaults = []
 end sub
 
@@ -788,12 +773,7 @@ sub ReportAddonSyncFault(reason as string)
 end sub
 
 sub AddAddonSyncFault(reason as string)
-    ' Transient, deliberately: a launch-time sync failure can heal on the very
-    ' next launch (flaky connection, server hiccup), and a glue-on strip is
-    ' not the UX for a recoverable fault. The retraction list below stays:
-    ' before every new sync attempt the previous attempt's wording goes, so
-    ' the strip never names a fault the current attempt has not confirmed.
-    ReportTransientFault(reason)
+    Notify(reason, "error")
     m.addonSyncFaults.Push(reason)
 end sub
 
@@ -831,20 +811,21 @@ end sub
 ' Rokumio-import runs sequentially — one AddonsInstallTask per manifest URL,
 ' each parked off the render thread (a hung add-on costs a worker, not the UI,
 ' exactly like the Addons screen) — then applies serverAddress and shows a
-' single summary. ImportCoordinator owns the re-entrancy guard: a second deep
-' link while one runs is dropped.
+' single summary toast. ImportCoordinator owns the re-entrancy guard: a second
+' deep link while one runs is dropped.
 sub HandleDeepLink(args as object)
     if args = invalid then return
     if m.importCoordinator.callFunc("IsBusy") then return
 
     parse = DeepLinkStore().Parse(args)
     if parse.kind = "none" then return
+    RefreshSceneTexts()
     if parse.kind = "unknown"
-        ShowImportDialog("importTitle", [{ key: "importUnsupported", values: { error: parse.error } }])
+        Notify(Fill(Lang("main", "importUnsupported"), { error: parse.error }), "error")
         return
     end if
     if not parse.ok
-        ShowImportDialog("importTitle", [{ key: "importCouldNot", values: { error: parse.error } }])
+        Notify(Fill(Lang("main", "importCouldNot"), { error: parse.error }), "error")
         return
     end if
 
@@ -879,35 +860,30 @@ function ImportRegisterAddon(record as object, transportUrl as dynamic, manifest
 end function
 
 ' ImportCoordinator's finished summary. MainScene owns the cross-screen effects:
-' apply the optional server setting, show the localized result dialog, and let
+' apply the optional server setting, show the localized result toast, and let
 ' Home/player re-derive data that may have changed while the import ran.
 sub ImportFinished(summary as object)
     if summary = invalid then return
-    lines = []
-    bullets = []
+    RefreshSceneTexts()
+    parts = []
+    isError = false
 
     if summary.requested > 0
         if summary.failed = 0
             if summary.added = 0
-                lines.Push({ key: "importAlreadyInstalled" })
+                parts.Push(Lang("main", "importAlreadyInstalled"))
             else
-                lines.Push(ImportAddedLine(summary.added))
+                parts.Push(ImportLineText(ImportAddedLine(summary.added)))
             end if
         else
-            ' What landed and what did not are two lines, not one: "3 add-ons
-            ' added, 2 failed." is a sentence that has to be re-ordered (and
-            ' re-inflected) in every language, while two lines are two lines
-            ' everywhere.
+            isError = true
             addedLine = ImportAddedLine(summary.added)
-            if addedLine <> invalid then lines.Push(addedLine)
+            if addedLine <> invalid then parts.Push(ImportLineText(addedLine))
             if summary.failed = 1
-                lines.Push({ key: "importFailedOne" })
+                parts.Push(Lang("main", "importFailedOne"))
             else
-                lines.Push({ key: "importFailedMany", values: { count: summary.failed.ToStr() } })
+                parts.Push(Fill(Lang("main", "importFailedMany"), { count: summary.failed.ToStr() }))
             end if
-            for each failure in summary.failures
-                bullets.Push(failure)
-            end for
         end if
     end if
 
@@ -915,20 +891,25 @@ sub ImportFinished(summary as object)
         if m.storeHost <> invalid
             if m.storeHost.callFunc("SettingsSetServerAddress", summary.settings.serverAddress)
                 if m.storeHost.callFunc("SettingsSaveFailed") then
-                    lines.Push({ key: "importServerLinkedNotSaved" })
-                    ReportStoreFault("settings could not be saved", true)
+                    parts.Push(Lang("main", "importServerLinkedNotSaved"))
+                    isError = true
                 else
-                    lines.Push({ key: "importServerLinked" })
-                    ReportStoreFault("settings could not be saved", false)
+                    parts.Push(Lang("main", "importServerLinked"))
                 end if
             else
-                lines.Push({ key: "importInvalidAddress" })
+                parts.Push(Lang("main", "importInvalidAddress"))
+                isError = true
             end if
         end if
     end if
 
-    if lines.Count() = 0 then lines.Push({ key: "importNoChanges" })
-    ShowImportDialog("importTitle", lines, bullets)
+    if parts.Count() = 0 then parts.Push(Lang("main", "importNoChanges"))
+    text = ""
+    for each part in parts
+        if text <> "" then text = text + " "
+        text = text + part
+    end for
+    if isError then Notify(text, "error") else Notify(text)
 
     ' The import may have changed catalog providers or subtitle providers. These
     ' calls are unconditional: the screens compare their actual provider set and
@@ -937,47 +918,6 @@ sub ImportFinished(summary as object)
     if m.playerScreen <> invalid then m.playerScreen.callFunc("EnsureSubtitleProviders")
 end sub
 
-function ImportAddedLine(count as integer) as object
-    if count = 0 then return invalid
-    if count = 1 then return { key: "importAddedOne" }
-    return { key: "importAddedMany", values: { count: count.ToStr() } }
-end function
-
-' The import result dialog. It takes the KEYS of its lines, not the words: the
-' slice is pulled here, first, and the table is read afterwards, so a dialog
-' built after the user changed the language speaks the language they have now.
-'
-' The lines are { key, values } records — the key says which sentence, the
-' values fill its placeholders. The caller decides WHAT happened; this says it.
-sub ShowImportDialog(titleKey as string, lines as object, bullets = invalid as object)
-    RefreshSceneTexts()
-    dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.id = "deepLinkImportDialog"
-    dialog.title = Lang("main", titleKey)
-    dialog.message = ImportLinesText(lines)
-    if bullets <> invalid and bullets.Count() > 0
-        dialog.bulletText = ImportFailuresText(bullets)
-    end if
-    dialog.buttons = [Lang("common", "ok")]
-    dialog.observeField("buttonSelected", "onImportButtonSelected")
-    dialog.observeField("wasClosed", "onImportDialogClosed")
-    m.top.dialog = dialog
-end sub
-
-' The summary lines, in words.
-function ImportLinesText(lines as object) as object
-    out = []
-    if lines = invalid then return out
-    for each line in lines
-        text = ImportLineText(line)
-        if text <> "" then out.Push(text)
-    end for
-    return out
-end function
-
-' One summary line: the table's sentence for a key, with the values the caller
-' supplied. A line without a key says nothing — a malformed record is dropped
-' rather than painted as a blank line in the middle of the summary.
 function ImportLineText(line as object) as string
     if line = invalid then return ""
     key = line.key
@@ -987,49 +927,11 @@ function ImportLineText(line as object) as string
     return Fill(Lang("main", key), values)
 end function
 
-' The per-add-on failure lines. The add-on's own error is the server's text
-' and stays as it came; the fallback we write ourselves is ours, so it is a
-' key read with the rest.
-function ImportFailuresText(failures as object) as object
-    out = []
-    if failures = invalid then return out
-    for each failure in failures
-        text = ImportFailureText(failure)
-        if text <> "" then out.Push(text)
-    end for
-    return out
+function ImportAddedLine(count as integer) as object
+    if count = 0 then return invalid
+    if count = 1 then return { key: "importAddedOne" }
+    return { key: "importAddedMany", values: { count: count.ToStr() } }
 end function
-
-function ImportFailureText(failure as object) as string
-    if failure = invalid then return ""
-    id = failure.id
-    error = failure.error
-    if error = invalid or error = "" then error = Lang("main", "importItemFailed")
-    if id <> invalid and id <> "" then return id + ": " + error
-    return error
-end function
-
-' A button press does not dismiss a StandardMessageDialog on its own — it only
-' sets buttonSelected. Mirror the exit confirm: close through the dialog's own
-' close field, which funnels into the same wasClosed path the scene uses to
-' clear the slot and hand focus back to Home.
-sub onImportButtonSelected()
-    if m.top.dialog <> invalid and m.top.dialog.id = "deepLinkImportDialog"
-        m.top.dialog.close = true
-    end if
-end sub
-
-' The import dialog dismissed (OK, Back or Home). Clear the Scene's dialog slot
-' by id — roSGNode references cannot be compared with "=" — then give focus
-' back to Home.
-sub onImportDialogClosed()
-    if m.top.dialog <> invalid and m.top.dialog.id = "deepLinkImportDialog"
-        m.top.dialog = invalid
-    end if
-    if m.stack.top() <> invalid and m.stack.top().id = "homeScreen"
-        m.homeScreen.SetFocus(true)
-    end if
-end sub
 
 ' Back routing: the top screen gets first crack; if it declines and more screens
 ' remain, pop. On the bottom Home screen, Back opens the exit dialog.

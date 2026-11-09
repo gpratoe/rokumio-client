@@ -59,22 +59,9 @@ sub init()
     m.logoBack = m.top.FindNode("logoBack")
     m.logoFront = m.top.FindNode("logoFront")
     m.preVideoPulse = m.top.FindNode("preVideoPulse")
-    m.toastGroup = m.top.FindNode("toastGroup")
-    m.toastPlate = m.top.FindNode("toastPlate")
-    m.toastLabel = m.top.FindNode("toastLabel")
-    m.toastFade = m.top.FindNode("toastFade")
-
     t = Theme()
     m.top.FindNode("playerBg").color = t.playerBg
     m.status.color = t.textPrimary
-    if m.toastPlate <> invalid then m.toastPlate.color = t.scrim
-    if m.toastLabel <> invalid then m.toastLabel.color = t.textPrimary
-
-    ' Two of these, both observed here rather than armed at the call site: the
-    ' Animation is what actually fades the toast, the Timer is what guarantees it
-    ' is gone even if the Animation is a silent no-op on this OS.
-    m.toastHideTimer = m.top.FindNode("toastHideTimer")
-    if m.toastHideTimer <> invalid then m.toastHideTimer.ObserveField("fire", "onToastHideFire")
 
     ' Observed here rather than in CreateVideo: this screen is a static child
     ' that survives every pop, so CreateVideo runs once per play and observing
@@ -505,33 +492,9 @@ function PreVideoWaitLabel() as string
     return Lang("player", "preparingStream")
 end function
 
-' Put a message over the video for two seconds and fade it out. Armed through
-' `control` rather than Start()/Stop(): an roSGNode Timer and Animation have no
-' such methods and calling one is a runtime &hf4 "Member function not found" —
-' the same trap playKick below documents.
-'
-' Opacity is forced back to 1 first because the fade leaves it at 0, and a second
-' toast inside that window would otherwise be born invisible.
-sub ShowToast(message as string)
-    if m.toastGroup = invalid or m.toastLabel = invalid then return
-    m.toastLabel.text = message
-    m.toastGroup.opacity = 1
-    m.toastGroup.visible = true
-    if m.toastFade <> invalid
-        m.toastFade.control = "stop"
-        m.toastFade.control = "start"
-    end if
-    if m.toastHideTimer <> invalid
-        m.toastHideTimer.control = "stop"
-        m.toastHideTimer.control = "start"
-    end if
-end sub
-
-sub onToastHideFire()
-    if m.toastGroup <> invalid
-        m.toastGroup.visible = false
-        m.toastGroup.opacity = 1
-    end if
+sub Notify(message as string, kind = "info" as string)
+    scene = m.top.getScene()
+    if scene <> invalid then scene.callFunc("Notify", message, kind)
 end sub
 
 ' How many add-ons the registry holds right now. Reporting it separately from the
@@ -801,9 +764,9 @@ sub onSubtitleResult()
         if not result.ok and (kind = "retry" or kind = "server") then
             name = SubtitleProviderName(m.subtitleAsked)
             if name = "" then
-                ShowToast(Lang("player", "subtitlesOneUnreachable"))
+                Notify(Lang("player", "subtitlesOneUnreachable"), "error")
             else
-                ShowToast(Fill(Lang("player", "subtitlesOneUnreachableNamed"), { name: name }))
+                Notify(Fill(Lang("player", "subtitlesOneUnreachableNamed"), { name: name }), "error")
             end if
         end if
 
@@ -829,7 +792,7 @@ sub onSubtitleResult()
         ' last case is worth a word on screen, because the list the Options dialog
         ' shows is empty and otherwise says nothing about why.
         if m.subtitleTried > 0 and m.subtitleReached = 0 then
-            ShowToast(Lang("player", "subtitlesSomeUnreachable"))
+            Notify(Lang("player", "subtitlesSomeUnreachable"), "error")
         end if
 
         if m.subtitleTracks = invalid or m.subtitleTracks.Count() = 0 then ClearSubtitles()
@@ -1526,16 +1489,6 @@ sub ResetVideoNode()
     m.video.content = invalid
     ClearSubtitleTrack()
     HideBuffering()
-    ' The fade leaves toastGroup at opacity 0 with its Animation still counting.
-    ' Stopped and re-opened so the next play cannot come back to a label frozen
-    ' mid-fade, or worse, be born invisible because a previous toast already drove
-    ' the opacity down and this play's ShowToast lands before the timer clears it.
-    if m.toastFade <> invalid then m.toastFade.control = "stop"
-    if m.toastHideTimer <> invalid then m.toastHideTimer.control = "stop"
-    if m.toastGroup <> invalid
-        m.toastGroup.visible = false
-        m.toastGroup.opacity = 1
-    end if
 end sub
 
 ' video.subtitleTrack is a write-only selector on the LIVE node, so unlike
@@ -1802,7 +1755,7 @@ sub TryRecover(reason as string)
     resumeAt = base - 3
     if resumeAt < 0 then resumeAt = 0
     print "[recover] " ; reason ; " — attempt " ; m.recoverCount ; "/" ; STALL_MAX_RECOVERIES() ; " lastGoodPos=" ; m.lastGoodPos ; " nodePos=" ; m.video.position ; " resumeAt=" ; resumeAt ; " dur=" ; m.video.duration ; " up=" ; UpTime(0)
-    ShowToast(Lang("player", "reconnecting"))
+    Notify(Lang("player", "reconnecting"))
 
     ' A fresh copy of the same ContentNode (url, format, subtitle tracks) so the
     ' platform treats it as a new open rather than a no-op re-assign.

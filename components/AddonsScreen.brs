@@ -314,8 +314,7 @@ end sub
 
 ' The worker has ended. Any row still pending lost its result (or the task was
 ' cancelled); leave it on the no-description fallback rather than a spinner-like
-' "loading" line that will never change. A failed optional refresh is reported
-' only when it did not land on top of an install/remove status.
+' "loading" line that will never change. Failures land as a toast.
 sub FinishMetadataRefresh()
     for i = 0 to m.rows.Count() - 1
         row = m.rows[i]
@@ -326,8 +325,8 @@ sub FinishMetadataRefresh()
         end if
         PaintRowNode(m.rowNodes[i], row)
     end for
-    if m.metadataFailures > 0 and m.status.text = ""
-        m.status.text = Lang("addons", "metadataUnavailable")
+    if m.metadataFailures > 0
+        Notify(Lang("addons", "metadataUnavailable"), "error")
     end if
 end sub
 
@@ -430,6 +429,11 @@ sub onAddChoice()
     m.list.callFunc("SetListFocus")
 end sub
 
+sub Notify(text as string, kind = "info" as string)
+    scene = m.top.getScene()
+    if scene <> invalid then scene.callFunc("Notify", text, kind)
+end sub
+
 ' Kick the manifest fetch off the render thread. AddonsInstallTask runs
 ' AddonsStore.Install against a registry-less store and returns the installed
 ' record (or a validation/fetch error); the real store adopts it on success.
@@ -459,14 +463,14 @@ sub onInstallResult()
             ' MainScene, which mutates the mirror and pumps one collection
             ' put. Nothing to sync from the screen's side.
             m.top.addonInstalled = { transportUrl: result.transportUrl, manifest: result.manifest }
-            m.status.text = Fill(Lang("addons", "statusInstalled"), { id: result.id })
+            Notify(Fill(Lang("addons", "statusInstalled"), { id: result.id }))
         else
-            m.status.text = Lang("addons", "statusInstallDuplicate")
+            Notify(Lang("addons", "statusInstallDuplicate"))
         end if
     else
         error = ""
         if result <> invalid and result.error <> invalid then error = result.error
-        m.status.text = Fill(Lang("addons", "statusInstallFailed"), { error: error })
+        Notify(Fill(Lang("addons", "statusInstallFailed"), { error: error }), "error")
     end if
     BuildRows()
 end sub
@@ -508,9 +512,9 @@ sub onRemoveChoice()
                 ' account never had) is reported from MainScene on its fault
                 ' strip; the local state is final either way.
                 if m.pendingRow.builtin = false then m.top.addonRemoved = { id: m.pendingRow.id }
-                m.status.text = Fill(Lang("addons", "statusRemoved"), { name: m.pendingRow.name })
+                Notify(Fill(Lang("addons", "statusRemoved"), { name: m.pendingRow.name }))
             else
-                m.status.text = Fill(Lang("addons", "statusRemoveFailed"), { name: m.pendingRow.name })
+                Notify(Fill(Lang("addons", "statusRemoveFailed"), { name: m.pendingRow.name }), "error")
             end if
             BuildRows()
         end if
