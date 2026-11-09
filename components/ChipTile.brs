@@ -1,8 +1,7 @@
-' ChipTile — focusable icon+label tile for the single-row RowLists (season
-' chips, movie action buttons). Same field plumbing as PosterTile: RowList
-' feeds the ContentNode through itemContent and drives focus through
-' itemHasFocus / rowHasFocus. Text is read from itemContent.title; an
-' optional icon from itemContent.icon.
+' ChipTile — focusable icon+label tile for the Details actions row. It is a
+' standalone focusable Group (like the Home rail tiles), not a RowList item:
+' focus and selection are handled by DetailsScreen's key handling, the same
+' direct model the rail uses.
 
 sub init()
     m.iconBg = m.top.FindNode("iconBg")
@@ -11,15 +10,36 @@ sub init()
 
     t = Theme()
     m.text.color = t.textPrimary
-
-    m.top.ObserveField("itemContent", "onItemContentChanged")
-    m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
-    m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
+    m.top.ObserveField("focused", "onFocusedChanged")
+    m.top.ObserveField("chipWidth", "onWidthChanged")
 end sub
 
-sub UpdateLook()
+sub SetChip(title as string, iconUri as string, chipWidth as integer)
+    m.text.text = title
+    if iconUri <> ""
+        m.icon.uri = iconUri
+        m.icon.visible = true
+        m.iconBg.visible = true
+    else
+        m.icon.visible = false
+        m.iconBg.visible = false
+    end if
+    if title <> ""
+        m.text.visible = true
+        m.text.translation = [88, 20]
+        m.text.width = chipWidth - 96
+        m.iconBg.width = chipWidth - 8
+    else
+        m.text.visible = false
+        m.iconBg.width = 72
+    end if
+    m.top.chipWidth = chipWidth
+    ApplyState()
+end sub
+
+sub ApplyState()
     t = Theme()
-    if m.top.itemHasFocus
+    if m.top.focused
         m.iconBg.color = t.textPrimary
         m.icon.blendColor = t.screenBg
         m.text.color = t.screenBg
@@ -28,61 +48,19 @@ sub UpdateLook()
         m.icon.blendColor = t.textSecondary
         m.text.color = t.textPrimary
     end if
-    if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub
 
-sub onItemContentChanged()
-    content = m.top.itemContent
-    if content = invalid then return
-    ApplyContent(content)
-    UpdateLook()
-end sub
-
-sub ApplyContent(content as object)
-    if content.HasField("icon") and content.icon <> invalid and content.icon <> ""
-        m.icon.uri = content.icon
-        m.icon.visible = true
-        m.iconBg.visible = true
-    else
-        m.icon.visible = false
-        m.iconBg.visible = false
-    end if
-
-    m.text.text = content.title
-    if content.title <> invalid and content.title <> ""
-        m.text.visible = true
-    else
-        m.text.visible = false
-    end if
-
-    if content.width <> invalid
+sub onWidthChanged()
+    if m.top.chipWidth > 0
         if m.text.visible
-            m.iconBg.width = content.width - 8
-            m.text.translation = [88, 20]
-            m.text.width = content.width - 96
+            m.iconBg.width = m.top.chipWidth - 8
+            m.text.width = m.top.chipWidth - 96
         else if m.icon.visible
             m.iconBg.width = 72
-            m.text.width = 0
-        else
-            m.text.translation = [8, 16]
-            m.text.width = content.width - 16
         end if
     end if
-
-    if content.HasField("icon") then content.ObserveField("icon", "onIconChanged")
 end sub
 
-sub onIconChanged()
-    content = m.top.itemContent
-    if content = invalid then return
-    ApplyContent(content)
-    UpdateLook()
-end sub
-
-sub onItemHasFocusChanged()
-    UpdateLook()
-end sub
-
-sub onRowHasFocusChanged()
-    UpdateLook()
+sub onFocusedChanged()
+    ApplyState()
 end sub

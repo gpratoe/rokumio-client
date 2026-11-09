@@ -35,9 +35,7 @@ sub init()
     m.detailRatingText.color = t.accentWarm
     m.detailGenres.color = t.textSecondary
     m.detailDesc.color = t.textPrimary
-    m.chipsRow.focusBitmapBlendColor = t.accentFocus
-
-    m.chipsRow.ObserveField("rowItemSelected", "onChipSelected")
+    m.chipFocusIndex = -1
 end sub
 
 function OnEnter(params as object) as void
@@ -59,8 +57,8 @@ function OnEnter(params as object) as void
         end if
     end if
     ' Re-entry after a push (EpisodesScreen, streams, …): params is invalid and
-    ' the screen Group (not a focus target) was handed focus by the stack. The
-    ' chip RowList must take it back, or nothing inside is reachable.
+    ' the screen Group (not a focus target) was handed focus by the stack. A
+    ' chip must take focus back, or nothing inside is reachable.
     if params = invalid
         RestoreFocus()
         return
@@ -196,7 +194,37 @@ end sub
 ' survive the push/pop, so a rebuild is not needed.
 sub RestoreFocus()
     if m.meta = invalid then return
-    m.chipsRow.SetFocus(true)
+    if m.chipFocusIndex < 0 then m.chipFocusIndex = 0
+    if m.chipFocusIndex >= m.chipsRow.GetChildCount() then m.chipFocusIndex = 0
+    m.chipsRow.GetChild(m.chipFocusIndex).focused = true
+    m.chipsRow.GetChild(m.chipFocusIndex).SetFocus(true)
+end sub
+
+function OnKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if m.chipFocusIndex >= 0
+        if key = "left"
+            MoveChipFocus(-1)
+            return true
+        else if key = "right"
+            MoveChipFocus(1)
+            return true
+        else if key = "OK"
+            SelectChip()
+            return true
+        end if
+    end if
+    return false
+end function
+
+sub MoveChipFocus(delta as integer)
+    if m.chipFocusIndex < 0 then return
+    nextIndex = m.chipFocusIndex + delta
+    if nextIndex < 0 or nextIndex >= m.chipsRow.GetChildCount() then return
+    m.chipsRow.GetChild(m.chipFocusIndex).focused = false
+    m.chipFocusIndex = nextIndex
+    m.chipsRow.GetChild(nextIndex).focused = true
+    m.chipsRow.GetChild(nextIndex).SetFocus(true)
 end sub
 
 sub onHeroLogoStatus()
@@ -302,55 +330,44 @@ sub ShowMovie()
     ShowChips(actions)
 end sub
 
-' Fill the shared chips row and remember the action id per chip so the single
-' selection observer can dispatch.
+' Fill the shared chips row and remember the action id per chip so OK can
+' dispatch. Chips are standalone focusable tiles — the same direct model as
+' the Home rail — so focus moves without RowList binding overhead.
 sub ShowChips(actions as object)
     m.chips = actions
-    longest = 0
+    while m.chipsRow.GetChildCount() > 0
+        m.chipsRow.RemoveChildIndex(0)
+    end while
+    m.chipFocusIndex = -1
+    x = 0
     for each chip in actions
-        if chip.title <> invalid and chip.title <> ""
-            needed = ChipTitleWidth(chip.title)
-            if needed > longest then longest = needed
-        end if
+        tile = m.chipsRow.CreateChild("ChipTile")
+        tile.focusable = true
+        tile.translation = [x, 0]
+        width = ChipWidth(chip)
+        tile.callFunc("SetChip", chip.title, ChipIconOrEmpty(chip), width)
+        x = x + width + 16
     end for
-    rowWidth = longest
-    if rowWidth < 140 then rowWidth = 140
-    if rowWidth > 380 then rowWidth = 380
-    m.chipsRow.rowItemSize = [[rowWidth, 80]]
-    root = CreateObject("roSGNode", "ContentNode")
-    row = root.CreateChild("ContentNode")
-    for each chip in actions
-        item = row.CreateChild("ChipContent")
-        item.title = chip.title
-        if chip.icon <> invalid then item.icon = chip.icon
-        if chip.title <> invalid and chip.title <> ""
-            item.width = rowWidth
-        else
-            item.width = 80
-        end if
-        item.height = 80
-    end for
-    m.chipsRow.content = root
-    m.chipsRow.jumpToRowItem = [0, 0]
-    if m.top.screenActive then m.chipsRow.SetFocus(true)
+    RestoreFocus()
 end sub
 
-' A chip's width from its label: the icon area plus the measured text.
-function ChipTitleWidth(title as string) as integer
-    if title.Len() <= 5 then return 140
-    return 108 + title.Len() * 19
+function ChipIconOrEmpty(chip as object) as string
+    if chip.icon <> invalid then return chip.icon
+    return ""
+end function
+
+function ChipWidth(chip as object) as integer
+    if chip.title = invalid or chip.title = "" then return 80
+    return 130 + chip.title.Len() * 19
 end function
 
 function EpisodeCode(season as dynamic, episode as dynamic) as string
     return Fill(Lang("common", "episodeMarker"), { season: season.ToStr(), episode: episode.ToStr() })
 end function
 
-sub onChipSelected()
-    data = m.chipsRow.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    index = data[1]
-    if m.chips = invalid or index < 0 or index >= m.chips.Count() then return
-    action = m.chips[index].action
+sub SelectChip()
+    if m.chips = invalid or m.chipFocusIndex < 0 or m.chipFocusIndex >= m.chips.Count() then return
+    action = m.chips[m.chipFocusIndex].action
     if action = "resume"
         ResumeEpisode()
     else if action = "play"
@@ -464,9 +481,8 @@ sub ToggleLibrary()
     icon = LibraryIcon()
     for i = 0 to m.chips.Count() - 1
         if m.chips[i].action = "library"
-            if m.chipsRow.content <> invalid and m.chipsRow.content.GetChildCount() > 0
-                row = m.chipsRow.content.GetChild(0)
-                if row <> invalid and i < row.GetChildCount() then row.GetChild(i).icon = icon
+            if i < m.chipsRow.GetChildCount()
+                m.chipsRow.GetChild(i).callFunc("SetChip", m.chips[i].title, icon, ChipWidth(m.chips[i]))
             end if
             exit for
         end if

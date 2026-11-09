@@ -71,18 +71,9 @@
             vertAlign="top"
             font="font:SmallSystemFont" />
 
-        <!-- Icon-and-label actions, kept in the existing focusable RowList. -->
-        <RowList
-            id="chipsRow"
-            translation="[162, 610]"
-            itemSize="[1596, 80]"
-            itemSpacing="[0, 8]"
-            numRows="1"
-            rowItemSize="[[220, 80]]"
-            rowItemSpacing="[[16, 0]]"
-            showRowLabel="false"
-            drawFocusFeedback="false"
-            skipFocusAnimations="true"
-            itemComponentName="ChipTile" />
+        <!-- Icon-and-label actions: a Group of focusable ChipTiles, the same
+             direct-focus model as the Home rail. DetailsScreen owns
+             Left/Right/OK while a chip is focused. -->
+        <Group id="chipsRow" translation="[162, 610]" />
     </children>
 </component>
