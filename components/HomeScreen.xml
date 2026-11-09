@@ -25,16 +25,48 @@
 
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
+        <Poster
+            id="heroPoster"
+            translation="[0, 0]"
+            width="1920"
+            height="1080"
+            loadWidth="1920"
+            loadHeight="1080"
+            loadDisplayMode="scaleToZoom"
+            opacity="1.0" />
+        <Rectangle
+            id="heroScrim"
+            translation="[0, 0]"
+            width="1920"
+            height="1080"
+            color="0x00000099" />
+        <Poster
+            id="heroLogo"
+            translation="[190, 82]"
+            width="680"
+            height="190"
+            loadWidth="680"
+            loadHeight="190"
+            loadDisplayMode="scaleToFit"
+            visible="false" />
         <Label
-            id="homeSub"
-            translation="[150, 128]"
-            width="1760"
-            height="40"
-            text="Move between rows, OK for details, Back to exit, * Focus nav-rail and back"
-            font="font:SmallSystemFont" />
+            id="heroTitle"
+            translation="[190, 112]"
+            width="680"
+            height="100"
+            wrap="true"
+            font="font:LargeBoldSystemFont" />
+        <Label
+            id="heroDescription"
+            translation="[194, 284]"
+            width="860"
+            height="176"
+            wrap="true"
+            vertAlign="top"
+            font="font:MediumSystemFont" />
         <Label
             id="homeEmpty"
-            translation="[200, 360]"
+            translation="[200, 570]"
             width="1500"
             height="90"
             horizAlign="center"
@@ -48,7 +80,7 @@
              item renders as a PosterTile component. Content is set in code. -->
         <RowList
             id="catalog"
-            translation="[150, 210]"
+            translation="[150, 570]"
             numRows="2"
             itemSize="[1780, 405]"
             itemSpacing="[0, 66]"

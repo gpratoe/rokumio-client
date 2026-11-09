@@ -25,19 +25,26 @@
 sub init()
     m.catalog = m.top.FindNode("catalog")
     m.catalog.ObserveField("rowItemSelected", "onRowItemSelected")
+    m.catalog.ObserveField("rowItemFocused", "onCatalogItemFocused")
     m.rail = m.top.FindNode("rail")
     m.railExpandAnim = m.top.FindNode("railExpandAnim")
     m.railCollapseAnim = m.top.FindNode("railCollapseAnim")
     m.railBrand = m.top.FindNode("railBrand")
     m.railBrandExpandAnim = m.top.FindNode("railBrandExpandAnim")
     m.railBrandCollapseAnim = m.top.FindNode("railBrandCollapseAnim")
-    m.homeSub = m.top.FindNode("homeSub")
+    m.heroPoster = m.top.FindNode("heroPoster")
+    m.heroScrim = m.top.FindNode("heroScrim")
+    m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroTitle = m.top.FindNode("heroTitle")
+    m.heroDescription = m.top.FindNode("heroDescription")
     m.homeEmpty = m.top.FindNode("homeEmpty")
-    m.homeHint = ""
+    m.heroBeforeBusy = ""
 
     t = Theme()
     m.railBrand.color = t.accent
-    m.homeSub.color = t.textSecondary
+    m.heroScrim.color = t.scrim
+    m.heroTitle.color = t.textPrimary
+    m.heroDescription.color = t.textSecondary
     m.homeEmpty.color = t.textSecondary
     m.top.FindNode("railBg").color = t.navBg
     m.catalog.rowLabelOffset = [0,10]
@@ -189,6 +196,7 @@ sub ApplyCatalogRow(row as object)
     m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
     ResyncRowLabels()
+    RefreshHomeHeroFromFocus()
 end sub
 
 ' Rewrite row titles so duplicated catalog names carry their type suffix; only
@@ -242,6 +250,48 @@ sub BuildRows()
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
     UpdateHomeEmptyState()
+    RefreshHomeHeroFromFocus()
+end sub
+
+' Keep the top hero synchronized with the focused poster. The focused row is
+' supplied by RowList as [rowIndex, itemIndex]; all display data is already in
+' the same meta the tile uses.
+sub onCatalogItemFocused()
+    UpdateHomeHero(m.catalog.rowItemFocused)
+end sub
+
+sub RefreshHomeHeroFromFocus()
+    data = m.catalog.rowItemFocused
+    if data <> invalid then UpdateHomeHero(data)
+end sub
+
+sub UpdateHomeHero(position as dynamic)
+    if position = invalid or position.Count() < 2 then return
+    rowIndex = position[0]
+    itemIndex = position[1]
+    if rowIndex < 0 or rowIndex >= m.gridRows.Count() then return
+    metas = m.gridRows[rowIndex].metas
+    if metas = invalid or itemIndex < 0 or itemIndex >= metas.Count() then return
+    meta = metas[itemIndex]
+    title = StringOf(meta.name)
+    if title.Trim() = "" then title = StringOf(meta.title)
+    if title.Trim() = "" then title = StringOf(m.gridRows[rowIndex].title)
+    description = StringOf(meta.description)
+    if description.Trim() = "" then description = StringOf(meta.overview)
+    if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
+        description = "S" + StringOf(meta.season) + "E" + StringOf(meta.episode)
+    end if
+    if title.Len() > 44 then title = Left(title, 41) + "..."
+    if description.Len() > 150 then description = Left(description, 147) + "..."
+    logo = StringOf(meta.logo)
+    m.heroLogo.uri = logo
+    m.heroLogo.visible = logo <> ""
+    m.heroTitle.visible = logo = ""
+    m.heroTitle.text = title
+    m.heroDescription.text = description
+    m.heroDescription.visible = description.Trim() <> ""
+    m.heroPoster.uri = StringOf(meta.background)
+    m.heroPoster.visible = m.heroPoster.uri <> ""
 end sub
 
 ' If Continue Watching and every catalog row are absent, explain where catalog
@@ -454,6 +504,7 @@ sub RefreshContinueWatching()
         m.catalog.numRows = m.gridRows.Count()
         ApplyCatalogSizes()
     end if
+    RefreshHomeHeroFromFocus()
 end sub
 
 ' Refresh a row node's poster children to match a fresh meta list, reusing the
@@ -500,12 +551,8 @@ function TypeLabel(metaType as string) as string
 end function
 
 function OnEnter(params as object) as void
-    ' The language first, then the hint line this screen owns: it lives in the
-    ' markup as the English default, and the busy line below saves and
-    ' restores whatever is there — so the hint has to be the table's word
-    ' before anything saves it.
+    ' Pull the current language before rebuilding the rail or grid labels.
     RefreshTexts()
-    m.homeSub.text = Lang("home", "hint")
     if not m.railBuilt or m.railLanguage <> TextsLanguage()
         BuildRail()
         m.railLanguage = TextsLanguage()
@@ -540,6 +587,7 @@ function OnEnter(params as object) as void
     else
         m.catalog.SetFocus(true)
     end if
+    if m.catalog.rowItemFocused <> invalid then UpdateHomeHero(m.catalog.rowItemFocused)
 end function
 
 function OnExit() as void
@@ -808,14 +856,14 @@ end sub
 ' A brief "Loading…" on the hint line while the Continue-Watching meta is
 ' fetched; the original hint text comes back when the open resolves or cancels.
 sub ShowHomeBusy(show as boolean)
-    if m.homeSub = invalid then return
+    if m.heroDescription = invalid then return
     if show
-        if m.homeSub.text <> Lang("home", "loading")
-            m.homeHint = m.homeSub.text
-            m.homeSub.text = Lang("home", "loading")
+        if m.heroDescription.text <> Lang("home", "loading")
+            m.heroBeforeBusy = m.heroDescription.text
+            m.heroDescription.text = Lang("home", "loading")
         end if
     else
-        if m.homeHint <> invalid and m.homeHint <> "" then m.homeSub.text = m.homeHint
-        m.homeHint = ""
+        if m.heroBeforeBusy <> invalid then m.heroDescription.text = m.heroBeforeBusy
+        m.heroBeforeBusy = ""
     end if
 end sub
