@@ -36,6 +36,7 @@ sub init()
     m.heroScrim = m.top.FindNode("heroScrim")
     m.heroLogo = m.top.FindNode("heroLogo")
     m.heroTitle = m.top.FindNode("heroTitle")
+    m.heroMeta = m.top.FindNode("heroMeta")
     m.heroDescription = m.top.FindNode("heroDescription")
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
@@ -44,6 +45,7 @@ sub init()
     m.railBrand.color = t.accent
     m.heroScrim.color = t.scrim
     m.heroTitle.color = t.textPrimary
+    m.heroMeta.color = t.accent
     m.heroDescription.color = t.textSecondary
     m.homeEmpty.color = t.textSecondary
     m.top.FindNode("railBg").color = t.navBg
@@ -281,6 +283,15 @@ sub UpdateHomeHero(position as dynamic)
     if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
         description = "S" + StringOf(meta.season) + "E" + StringOf(meta.episode)
     end if
+    kind = TypeLabel(StringOf(meta.type))
+    releaseInfo = StringOf(meta.releaseInfo)
+    if releaseInfo <> "" then kind = kind + " · " + releaseInfo
+    rating = StringOf(meta.imdbRating)
+    if rating <> "" then kind = kind + " · ★ " + rating
+    if StringOf(meta.type) <> "series"
+        runtime = FormatRuntime(meta.runtime)
+        if runtime <> "" then kind = kind + " · " + runtime
+    end if
     if title.Len() > 44 then title = Left(title, 41) + "..."
     if description.Len() > 150 then description = Left(description, 147) + "..."
     logo = StringOf(meta.logo)
@@ -288,6 +299,7 @@ sub UpdateHomeHero(position as dynamic)
     m.heroLogo.visible = logo <> ""
     m.heroTitle.visible = logo = ""
     m.heroTitle.text = title
+    m.heroMeta.text = kind
     m.heroDescription.text = description
     m.heroDescription.visible = description.Trim() <> ""
     m.heroPoster.uri = StringOf(meta.background)
@@ -384,7 +396,10 @@ function RowCellSize(row as object) as object
         mt = row.metaType
         if row.posterShape <> invalid then ps = row.posterShape
     end if
-    return TileCellSize(mt, ps)
+    ' Compact Home tiles and their row slots together, preserving each poster
+    ' shape while revealing more of the next row at the bottom of the screen.
+    size = TileCellSize(mt, ps)
+    return [Int(size[0] * 0.92), Int(size[1] * 0.92)]
 end function
 
 ' Per-row item sizes, one vector2d per grid row, in grid order. Rebuilt with the

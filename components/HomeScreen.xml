@@ -41,26 +41,39 @@
             height="1080"
             color="0x00000099" />
         <Poster
+            id="heroMask"
+            translation="[0, 320]"
+            width="1920"
+            height="760"
+            loadDisplayMode="scaleToFill"
+            uri="pkg:/images/mask.png" />
+        <Poster
             id="heroLogo"
             translation="[190, 82]"
             width="680"
-            height="190"
+            height="150"
             loadWidth="680"
-            loadHeight="190"
+            loadHeight="150"
             loadDisplayMode="scaleToFit"
             visible="false" />
         <Label
             id="heroTitle"
             translation="[190, 112]"
             width="680"
-            height="100"
+            height="82"
             wrap="true"
             font="font:LargeBoldSystemFont" />
         <Label
+            id="heroMeta"
+            translation="[194, 246]"
+            width="900"
+            height="38"
+            font="font:MediumSystemFont" />
+        <Label
             id="heroDescription"
-            translation="[194, 284]"
+            translation="[194, 294]"
             width="860"
-            height="176"
+            height="160"
             wrap="true"
             vertAlign="top"
             font="font:MediumSystemFont" />
