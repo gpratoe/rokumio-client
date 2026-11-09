@@ -45,6 +45,14 @@ sub init()
     m.heroRatingText = m.top.FindNode("heroRatingText")
     m.heroGenres = m.top.FindNode("heroGenres")
     m.heroDescription = m.top.FindNode("heroDescription")
+    m.heroMetaDelay = m.top.FindNode("heroMetaDelay")
+    m.heroMetaDelay.ObserveField("fire", "onHeroMetaDelayFire")
+    m.heroMetaCache = {}
+    m.heroMetaRequest = invalid
+    m.heroMetaTask = invalid
+    m.heroMetaTaskKey = ""
+    m.heroFocusKey = ""
+    m.heroMetaCache = {}
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
 
@@ -284,9 +292,47 @@ sub UpdateHomeHero(position as dynamic)
     metas = m.gridRows[rowIndex].metas
     if metas = invalid or itemIndex < 0 or itemIndex >= metas.Count() then return
     meta = metas[itemIndex]
+    key = HomeHeroMetaKey(meta)
+    if key <> m.heroFocusKey
+        CancelHeroMetaRequest()
+        m.heroFocusKey = key
+    end if
+
+    if m.heroMetaCache.DoesExist(key)
+        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", meta, m.heroMetaCache[key])
+        metas[itemIndex] = meta
+        UpdateHomeTileMeta(rowIndex, itemIndex, meta)
+    end if
+    RenderHomeHero(meta)
+
+    needsHeroMeta = false
+    if m.stores <> invalid and m.gridRows[rowIndex].source = "library"
+        needsHeroMeta = m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta)
+        if StringOf(meta.background).Trim() = "" or StringOf(meta.description).Trim() = "" then needsHeroMeta = true
+        if StringOf(meta.logo).Trim() = "" or Type(meta.genres) <> "roArray" then needsHeroMeta = true
+    end if
+    if m.gridRows[rowIndex].source = "library" and not m.heroMetaCache.DoesExist(key)
+        if needsHeroMeta and m.stores <> invalid
+            if m.heroMetaRequest = invalid or m.heroMetaRequest.key <> key
+                m.heroMetaRequest = { key: key, row: rowIndex, item: itemIndex, meta: meta }
+                m.heroMetaDelay.control = "stop"
+                m.heroMetaDelay.control = "start"
+            end if
+        end if
+    else
+        CancelHeroMetaRequest()
+    end if
+end sub
+
+function HomeHeroMetaKey(meta as object) as string
+    if meta = invalid then return ""
+    return StringOf(meta.type) + "|" + StringOf(meta.id)
+end function
+
+sub RenderHomeHero(meta as object)
     title = StringOf(meta.name)
     if title.Trim() = "" then title = StringOf(meta.title)
-    if title.Trim() = "" then title = StringOf(m.gridRows[rowIndex].title)
+    if title.Trim() = "" then title = Lang("home", "continueWatching")
     description = StringOf(meta.description)
     if description.Trim() = "" then description = StringOf(meta.overview)
     if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
@@ -321,6 +367,65 @@ sub UpdateHomeHero(position as dynamic)
     m.heroPoster.visible = m.heroPoster.uri <> ""
     m.heroLogo.uri = logo
     if logo <> "" and logo = previousLogoUri and m.heroLogo.loadStatus = "ready" then FitHeroLogo()
+end sub
+
+sub UpdateHomeTileMeta(rowIndex as integer, itemIndex as integer, meta as object)
+    if m.catalog.content = invalid then return
+    if rowIndex < 0 or rowIndex >= m.catalog.content.GetChildCount() then return
+    rowNode = m.catalog.content.GetChild(rowIndex)
+    if rowNode = invalid or itemIndex < 0 or itemIndex >= rowNode.GetChildCount() then return
+    tile = rowNode.GetChild(itemIndex)
+    if tile = invalid then return
+    PaintTileFields(tile, meta, tile.watchedGlyph)
+end sub
+
+sub onHeroMetaDelayFire()
+    if m.heroMetaRequest = invalid or m.heroMetaTask <> invalid then return
+    if m.heroMetaRequest.key <> m.heroFocusKey then return
+    address = MetaAddress()
+    if address = "" then return
+    request = m.heroMetaRequest
+    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onHomeHeroMetaLoaded", {
+        addonAddress: address
+        metaType: request.meta.type
+        metaId: request.meta.id
+    }, "homeHeroMeta")
+    m.heroMetaTask = task
+    m.heroMetaTaskKey = request.key
+end sub
+
+sub onHomeHeroMetaLoaded()
+    if m.heroMetaTask = invalid then return
+    task = m.heroMetaTask
+    result = task.result
+    if result = invalid then return
+    m.heroMetaTask = invalid
+    m.heroMetaTaskKey = ""
+    AsyncTask_Reap(task, m.top, false)
+    request = m.heroMetaRequest
+    m.heroMetaRequest = invalid
+    if request = invalid or request.key <> m.heroFocusKey then return
+    if result.ok <> true or result.meta = invalid then return
+    merged = m.stores.episodes.callFunc("EpisodesMergeMeta", request.meta, result.meta)
+    m.heroMetaCache[request.key] = merged
+    if request.row < 0 or request.row >= m.gridRows.Count() then return
+    row = m.gridRows[request.row]
+    if request.item < 0 or request.item >= row.metas.Count() then return
+    if HomeHeroMetaKey(row.metas[request.item]) <> request.key then return
+    row.metas[request.item] = merged
+    UpdateHomeTileMeta(request.row, request.item, merged)
+    RenderHomeHero(merged)
+end sub
+
+sub CancelHeroMetaRequest()
+    if m.heroMetaDelay <> invalid then m.heroMetaDelay.control = "stop"
+    m.heroMetaRequest = invalid
+    if m.heroMetaTask <> invalid
+        task = m.heroMetaTask
+        m.heroMetaTask = invalid
+        m.heroMetaTaskKey = ""
+        AsyncTask_Reap(task, m.top, true)
+    end if
 end sub
 
 function HomeHeroGenres(values as dynamic) as string
@@ -429,6 +534,7 @@ end sub
 ' rows one at a time behind it, and the existing guards (gridBuilt /
 ' catalogRowsBuilt / catalogTask) keep later OnEnter visits consistent.
 function RebuildRows() as void
+    CancelHeroMetaRequest()
     if m.catalogTask <> invalid
         ' STOP, and not a bare RemoveChild. The walk is a Task on its own thread,
         ' so removing a running Task node frees the node WITHOUT killing the
@@ -728,6 +834,7 @@ end function
 sub BlurFocus()
     m.railWasFocus = m.railFocusIndex >= 0
     CollapseRail()
+    CancelHeroMetaRequest()
     CancelOpen()
 end sub
 
@@ -912,14 +1019,23 @@ end sub
 sub OpenContinueWatching(item as object)
     address = MetaAddress()
     CancelOpen()
+    CancelHeroMetaRequest()
+    key = HomeHeroMetaKey(item)
+    if m.heroMetaCache.DoesExist(key)
+        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", item, m.heroMetaCache[key])
+        m.top.pushRequest = {
+            screen: "detailsScreen"
+            params: {
+                addonAddress: address
+                meta: meta
+                resume: { videoId: item.videoId, season: item.season, episode: item.episode, position: item.position }
+            }
+        }
+        return
+    end if
     m.pendingOpen = {
         address: address
-        meta: {
-            id: item.id
-            type: item.type
-            name: item.name
-            poster: item.poster
-        }
+        meta: item
         resume: {
             videoId: item.videoId
             season: item.season
@@ -969,7 +1085,11 @@ sub onContinueWatchingLoaded()
     if pending = invalid then return
 
     meta = pending.meta
-    if result <> invalid and result.ok and result.meta <> invalid then meta = result.meta
+    if result <> invalid and result.ok and result.meta <> invalid
+        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", pending.meta, result.meta)
+        key = HomeHeroMetaKey(meta)
+        if key <> "" then m.heroMetaCache[key] = meta
+    end if
     m.top.pushRequest = {
         screen: "detailsScreen"
         params: {

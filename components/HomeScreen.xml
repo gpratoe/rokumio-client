@@ -25,6 +25,7 @@
 
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
+        <Timer id="heroMetaDelay" duration="0.35" repeat="false" />
         <Poster
             id="heroPoster"
             translation="[0, 0]"
