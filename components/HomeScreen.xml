@@ -65,18 +65,41 @@
             font="font:LargeBoldSystemFont" />
         <Label
             id="heroMeta"
-            translation="[194, 222]"
+            translation="[194, 216]"
             width="900"
-            height="38"
-            font="font:MediumSystemFont" />
+            height="30"
+            font="font:SmallSystemFont" />
+        <Group id="heroRating" translation="[194, 256]" visible="false">
+            <Poster
+                id="heroImdbLogo"
+                width="64"
+                height="32"
+                loadWidth="64"
+                loadHeight="32"
+                loadDisplayMode="scaleToFit"
+                uri="pkg:/images/imdb.png" />
+            <Label
+                id="heroRatingText"
+                translation="[76, 0]"
+                width="110"
+                height="36"
+                vertAlign="center"
+                font="font:LargeBoldSystemFont" />
+        </Group>
+        <Label
+            id="heroGenres"
+            translation="[194, 307]"
+            width="860"
+            height="32"
+            font="font:SmallSystemFont" />
         <Label
             id="heroDescription"
-            translation="[194, 272]"
+            translation="[194, 357]"
             width="860"
-            height="180"
+            height="145"
             wrap="true"
             vertAlign="top"
-            font="font:MediumSystemFont" />
+            font="font:SmallSystemFont" />
         <Label
             id="homeEmpty"
             translation="[200, 570]"

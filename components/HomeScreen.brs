@@ -39,6 +39,9 @@ sub init()
     m.heroLogoUri = ""
     m.heroTitle = m.top.FindNode("heroTitle")
     m.heroMeta = m.top.FindNode("heroMeta")
+    m.heroRating = m.top.FindNode("heroRating")
+    m.heroRatingText = m.top.FindNode("heroRatingText")
+    m.heroGenres = m.top.FindNode("heroGenres")
     m.heroDescription = m.top.FindNode("heroDescription")
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
@@ -47,8 +50,10 @@ sub init()
     m.railBrand.color = t.accent
     m.heroScrim.color = t.scrim
     m.heroTitle.color = t.textPrimary
-    m.heroMeta.color = t.accent
-    m.heroDescription.color = t.textSecondary
+    m.heroMeta.color = t.textSecondary
+    m.heroRatingText.color = t.accentWarm
+    m.heroGenres.color = t.textSecondary
+    m.heroDescription.color = t.textPrimary
     m.homeEmpty.color = t.textSecondary
     m.top.FindNode("railBg").color = t.navBg
     m.catalog.rowLabelOffset = [0,10]
@@ -285,15 +290,15 @@ sub UpdateHomeHero(position as dynamic)
     if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
         description = "S" + StringOf(meta.season) + "E" + StringOf(meta.episode)
     end if
-    kind = TypeLabel(StringOf(meta.type))
+    kind = HeroTypeLabel(StringOf(meta.type))
     releaseInfo = StringOf(meta.releaseInfo)
     if releaseInfo <> "" then kind = kind + " · " + releaseInfo
     rating = StringOf(meta.imdbRating)
-    if rating <> "" then kind = kind + " · ★ " + rating
     if StringOf(meta.type) <> "series"
         runtime = FormatRuntime(meta.runtime)
         if runtime <> "" then kind = kind + " · " + runtime
     end if
+    genres = HomeHeroGenres(meta.genres)
     if title.Len() > 44 then title = Left(title, 41) + "..."
     if description.Len() > 150 then description = Left(description, 147) + "..."
     logo = StringOf(meta.logo)
@@ -304,6 +309,10 @@ sub UpdateHomeHero(position as dynamic)
     m.heroTitle.visible = true
     m.heroTitle.text = title
     m.heroMeta.text = kind
+    m.heroRatingText.text = rating
+    m.heroRating.visible = rating.Trim() <> ""
+    m.heroGenres.text = genres
+    m.heroGenres.visible = genres <> ""
     m.heroDescription.text = description
     m.heroDescription.visible = description.Trim() <> ""
     m.heroPoster.uri = StringOf(meta.background)
@@ -311,6 +320,29 @@ sub UpdateHomeHero(position as dynamic)
     m.heroLogo.uri = logo
     if logo <> "" and logo = previousLogoUri and m.heroLogo.loadStatus = "ready" then FitHeroLogo()
 end sub
+
+function HomeHeroGenres(values as dynamic) as string
+    if Type(values) <> "roArray" then return ""
+    text = ""
+    count = 0
+    for each value in values
+        genre = StringOf(value).Trim()
+        if genre = "" then continue for
+        if text <> "" then text = text + "  ·  "
+        text = text + genre
+        count = count + 1
+        if count >= 5 then exit for
+    end for
+    if text = "" then return ""
+    if text.Len() > 96 then text = Left(text, 93) + "..."
+    return text
+end function
+
+function HeroTypeLabel(metaType as string) as string
+    if metaType = "movie" then return Lang("common", "kindMovie")
+    if metaType = "series" then return Lang("common", "kindSeries")
+    return metaType
+end function
 
 sub onHeroLogoStatus()
     if m.heroLogo.uri <> m.heroLogoUri then return
@@ -347,16 +379,20 @@ sub FitHeroLogo()
     if ratio < 1.7
         m.heroLogo.translation = [190, Int((540 - logoHeight) / 2)]
         contentX = 190 + Int(logoWidth) + 48
-        m.heroMeta.translation = [contentX, 150]
-        m.heroDescription.translation = [contentX, 202]
+        m.heroMeta.translation = [contentX, 110]
+        m.heroRating.translation = [contentX, 158]
+        m.heroGenres.translation = [contentX, 206]
+        m.heroDescription.translation = [contentX, 256]
         m.heroDescription.width = 1920 - contentX - 160
-        m.heroDescription.height = 220
+        m.heroDescription.height = 260
     else
         m.heroLogo.translation = [190, 70 + Int((190 - logoHeight) / 2)]
-        m.heroMeta.translation = [194, 286]
-        m.heroDescription.translation = [194, 332]
+        m.heroMeta.translation = [194, 274]
+        m.heroRating.translation = [194, 316]
+        m.heroGenres.translation = [194, 360]
+        m.heroDescription.translation = [194, 402]
         m.heroDescription.width = 1000
-        m.heroDescription.height = 140
+        m.heroDescription.height = 138
     end if
     m.heroLogo.visible = true
     m.heroTitle.visible = false
@@ -366,10 +402,12 @@ sub ResetHeroLogoLayout()
     m.heroLogo.translation = [190, 72]
     m.heroLogo.width = 820
     m.heroLogo.height = 460
-    m.heroMeta.translation = [194, 222]
-    m.heroDescription.translation = [194, 272]
+    m.heroMeta.translation = [194, 216]
+    m.heroRating.translation = [194, 256]
+    m.heroGenres.translation = [194, 307]
+    m.heroDescription.translation = [194, 357]
     m.heroDescription.width = 860
-    m.heroDescription.height = 180
+    m.heroDescription.height = 150
 end sub
 
 ' If Continue Watching and every catalog row are absent, explain where catalog
