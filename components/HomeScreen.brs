@@ -72,6 +72,7 @@ sub init()
     m.railBuilt = false
     m.railLanguage = ""
     m.railFocusIndex = -1
+    m.railRememberedIndex = 0
 end sub
 
 ' Kick off the catalog walk. The walking happens off the UI thread in a
@@ -746,6 +747,7 @@ sub BuildRail()
     ]
     m.railEntries = entries
     m.railFocusIndex = -1
+    if m.railRememberedIndex >= entries.Count() then m.railRememberedIndex = 0
     while m.rail.GetChildCount() > 0
         m.rail.RemoveChildIndex(0)
     end while
@@ -760,8 +762,9 @@ sub BuildRail()
 end sub
 
 sub FocusRail()
-    if m.railFocusIndex < 0 then m.railFocusIndex = 0
+    if m.railFocusIndex < 0 then m.railFocusIndex = m.railRememberedIndex
     if m.railFocusIndex >= m.rail.GetChildCount() then m.railFocusIndex = 0
+    m.railRememberedIndex = m.railFocusIndex
     SetRailExpanded(true)
     m.rail.GetChild(m.railFocusIndex).focused = true
     m.rail.GetChild(m.railFocusIndex).SetFocus(true)
@@ -774,6 +777,7 @@ end sub
 
 sub CollapseRail()
     if m.railFocusIndex >= 0 and m.railFocusIndex < m.rail.GetChildCount()
+        m.railRememberedIndex = m.railFocusIndex
         m.rail.GetChild(m.railFocusIndex).focused = false
     end if
     m.railFocusIndex = -1
@@ -806,6 +810,7 @@ sub MoveRailFocus(delta as integer)
     if nextIndex < 0 or nextIndex >= m.rail.GetChildCount() then return
     m.rail.GetChild(m.railFocusIndex).focused = false
     m.railFocusIndex = nextIndex
+    m.railRememberedIndex = nextIndex
     m.rail.GetChild(nextIndex).focused = true
     m.rail.GetChild(nextIndex).SetFocus(true)
 end sub
