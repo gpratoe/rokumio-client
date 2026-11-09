@@ -49,31 +49,31 @@
             uri="pkg:/images/mask.png" />
         <Poster
             id="heroLogo"
-            translation="[190, 82]"
-            width="680"
-            height="150"
-            loadWidth="680"
-            loadHeight="150"
+            translation="[190, 72]"
+            width="820"
+            height="460"
+            loadWidth="820"
+            loadHeight="460"
             loadDisplayMode="scaleToFit"
             visible="false" />
         <Label
             id="heroTitle"
             translation="[190, 112]"
             width="680"
-            height="82"
+            height="90"
             wrap="true"
             font="font:LargeBoldSystemFont" />
         <Label
             id="heroMeta"
-            translation="[194, 246]"
+            translation="[194, 222]"
             width="900"
             height="38"
             font="font:MediumSystemFont" />
         <Label
             id="heroDescription"
-            translation="[194, 294]"
+            translation="[194, 272]"
             width="860"
-            height="160"
+            height="180"
             wrap="true"
             vertAlign="top"
             font="font:MediumSystemFont" />

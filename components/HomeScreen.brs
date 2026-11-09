@@ -35,6 +35,8 @@ sub init()
     m.heroPoster = m.top.FindNode("heroPoster")
     m.heroScrim = m.top.FindNode("heroScrim")
     m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
+    m.heroLogoUri = ""
     m.heroTitle = m.top.FindNode("heroTitle")
     m.heroMeta = m.top.FindNode("heroMeta")
     m.heroDescription = m.top.FindNode("heroDescription")
@@ -295,15 +297,79 @@ sub UpdateHomeHero(position as dynamic)
     if title.Len() > 44 then title = Left(title, 41) + "..."
     if description.Len() > 150 then description = Left(description, 147) + "..."
     logo = StringOf(meta.logo)
-    m.heroLogo.uri = logo
-    m.heroLogo.visible = logo <> ""
-    m.heroTitle.visible = logo = ""
+    previousLogoUri = m.heroLogo.uri
+    m.heroLogoUri = logo
+    ResetHeroLogoLayout()
+    m.heroLogo.visible = false
+    m.heroTitle.visible = true
     m.heroTitle.text = title
     m.heroMeta.text = kind
     m.heroDescription.text = description
     m.heroDescription.visible = description.Trim() <> ""
     m.heroPoster.uri = StringOf(meta.background)
     m.heroPoster.visible = m.heroPoster.uri <> ""
+    m.heroLogo.uri = logo
+    if logo <> "" and logo = previousLogoUri and m.heroLogo.loadStatus = "ready" then FitHeroLogo()
+end sub
+
+sub onHeroLogoStatus()
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    if m.heroLogo.loadStatus = "ready"
+        FitHeroLogo()
+    else if m.heroLogo.loadStatus = "failed"
+        m.heroLogo.visible = false
+        m.heroTitle.visible = true
+        ResetHeroLogoLayout()
+    end if
+end sub
+
+' Fit each loaded logo into a ratio-aware envelope. Bitmap dimensions are
+' available only after Poster reports ready; loadWidth/loadHeight remain capped
+' in XML to bound texture memory.
+sub FitHeroLogo()
+    bitmapWidth = m.heroLogo.bitmapWidth
+    bitmapHeight = m.heroLogo.bitmapHeight
+    if bitmapWidth <= 0 or bitmapHeight <= 0 then return
+    ratio = bitmapWidth / bitmapHeight
+    if ratio < 1.7
+        maxWidth = 420
+        maxHeight = 460
+    else
+        maxWidth = 820
+        maxHeight = 190
+    end if
+    logoWidth = ratio * maxHeight
+    if logoWidth > maxWidth then logoWidth = maxWidth
+    logoHeight = logoWidth / ratio
+
+    m.heroLogo.width = Int(logoWidth)
+    m.heroLogo.height = Int(logoHeight)
+    if ratio < 1.7
+        m.heroLogo.translation = [190, Int((540 - logoHeight) / 2)]
+        contentX = 190 + Int(logoWidth) + 48
+        m.heroMeta.translation = [contentX, 150]
+        m.heroDescription.translation = [contentX, 202]
+        m.heroDescription.width = 1920 - contentX - 160
+        m.heroDescription.height = 220
+    else
+        m.heroLogo.translation = [190, 70 + Int((190 - logoHeight) / 2)]
+        m.heroMeta.translation = [194, 286]
+        m.heroDescription.translation = [194, 332]
+        m.heroDescription.width = 1000
+        m.heroDescription.height = 140
+    end if
+    m.heroLogo.visible = true
+    m.heroTitle.visible = false
+end sub
+
+sub ResetHeroLogoLayout()
+    m.heroLogo.translation = [190, 72]
+    m.heroLogo.width = 820
+    m.heroLogo.height = 460
+    m.heroMeta.translation = [194, 222]
+    m.heroDescription.translation = [194, 272]
+    m.heroDescription.width = 860
+    m.heroDescription.height = 180
 end sub
 
 ' If Continue Watching and every catalog row are absent, explain where catalog
