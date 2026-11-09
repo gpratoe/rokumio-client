@@ -26,16 +26,20 @@ sub init()
     m.catalog = m.top.FindNode("catalog")
     m.catalog.ObserveField("rowItemSelected", "onRowItemSelected")
     m.rail = m.top.FindNode("rail")
-    m.rail.ObserveField("rowItemSelected", "onRailItemSelected")
+    m.railExpandAnim = m.top.FindNode("railExpandAnim")
+    m.railCollapseAnim = m.top.FindNode("railCollapseAnim")
+    m.railBrand = m.top.FindNode("railBrand")
+    m.railBrandExpandAnim = m.top.FindNode("railBrandExpandAnim")
+    m.railBrandCollapseAnim = m.top.FindNode("railBrandCollapseAnim")
     m.homeSub = m.top.FindNode("homeSub")
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.homeHint = ""
 
     t = Theme()
-    m.top.FindNode("homeTitle").color = t.accent
+    m.railBrand.color = t.accent
     m.homeSub.color = t.textSecondary
     m.homeEmpty.color = t.textSecondary
-    m.top.FindNode("railBg").color = t.railTint
+    m.top.FindNode("railBg").color = t.navBg
     m.catalog.rowLabelOffset = [0,10]
     m.catalog.focusBitmapBlendColor = t.accentFocus
 
@@ -50,6 +54,8 @@ sub init()
     m.catalogSignature = ""
     m.catalogVisibilitySignature = ""
     m.railBuilt = false
+    m.railLanguage = ""
+    m.railFocusIndex = -1
 end sub
 
 ' Kick off the catalog walk. The walking happens off the UI thread in a
@@ -500,7 +506,10 @@ function OnEnter(params as object) as void
     ' before anything saves it.
     RefreshTexts()
     m.homeSub.text = Lang("home", "hint")
-    if not m.railBuilt then BuildRail()
+    if not m.railBuilt or m.railLanguage <> TextsLanguage()
+        BuildRail()
+        m.railLanguage = TextsLanguage()
+    end if
     StartCatalogLoad()
     sig = ContinueWatchingSignature()
     ' The grid is not rebuilt on every visit — that is what m.gridBuilt is
@@ -527,7 +536,7 @@ function OnEnter(params as object) as void
     ' into the tiles, the rail — at the icon the user left it on — for a trip
     ' opened from the rail. BlurFocus records which had it.
     if m.railWasFocus = true
-        m.rail.SetFocus(true)
+        FocusRail()
     else
         m.catalog.SetFocus(true)
     end if
@@ -548,47 +557,99 @@ end function
 ' Continue-Watching open still in flight is cancelled: the user moved on, so
 ' its Details push must not land on the next screen.
 sub BlurFocus()
-    m.railWasFocus = m.rail.HasFocus()
+    m.railWasFocus = m.railFocusIndex >= 0
+    CollapseRail()
     CancelOpen()
 end sub
 
 ' The left rail: a fixed one-column icon menu. Built once (nodes created in init
 ' can be dropped pre-Show, so it happens on first OnEnter like the catalog). The
 ' last row is a modal (the support dialog), so its entry carries dialog = true
-' and onRailItemSelected routes it through the pushRequest contract the same
-' way; MainScene picks it up and shows the native dialog instead of pushing a
+' and selection routes it through the pushRequest contract the same way;
+' MainScene picks it up and shows the native dialog instead of pushing a
 ' stack screen.
 sub BuildRail()
     entries = [
-        { glyph: "pkg:/images/search.png", screen: "searchScreen" }
-        { glyph: "pkg:/images/discover.png", screen: "discoverScreen" }
-        { glyph: "pkg:/images/library.png", screen: "libraryScreen" }
-        { glyph: "pkg:/images/puzzle.png", screen: "addonsScreen" }
-        { glyph: "pkg:/images/settings.png", screen: "settingsScreen" }
-        { glyph: "pkg:/images/support.png", screen: "supportDialog", dialog: true }
+        { glyph: "pkg:/images/search.png", name: Lang("home", "railSearch"), screen: "searchScreen" }
+        { glyph: "pkg:/images/discover.png", name: Lang("home", "railDiscover"), screen: "discoverScreen" }
+        { glyph: "pkg:/images/library.png", name: Lang("home", "railLibrary"), screen: "libraryScreen" }
+        { glyph: "pkg:/images/puzzle.png", name: Lang("home", "railAddons"), screen: "addonsScreen" }
+        { glyph: "pkg:/images/settings.png", name: Lang("home", "railSettings"), screen: "settingsScreen" }
+        { glyph: "pkg:/images/support.png", name: Lang("home", "railSupport"), screen: "supportDialog", dialog: true }
     ]
     m.railEntries = entries
-    content = CreateObject("roSGNode", "ContentNode")
-    for each entry in entries
-        row = content.CreateChild("ContentNode")
-        item = row.CreateChild("ContentNode")
-        item.title = entry.glyph
+    m.railFocusIndex = -1
+    while m.rail.GetChildCount() > 0
+        m.rail.RemoveChildIndex(0)
+    end while
+    for i = 0 to entries.Count() - 1
+        entry = entries[i]
+        tile = m.rail.CreateChild("RailTile")
+        tile.focusable = true
+        tile.translation = [0, i * 120]
+        tile.callFunc("SetTile", entry.glyph, entry.name)
     end for
-    m.rail.content = content
-    m.rail.numRows = entries.Count()
     m.railBuilt = true
+end sub
+
+sub FocusRail()
+    if m.railFocusIndex < 0 then m.railFocusIndex = 0
+    if m.railFocusIndex >= m.rail.GetChildCount() then m.railFocusIndex = 0
+    SetRailExpanded(true)
+    m.rail.GetChild(m.railFocusIndex).focused = true
+    m.rail.GetChild(m.railFocusIndex).SetFocus(true)
+    if m.railExpandAnim <> invalid
+        m.railCollapseAnim.control = "stop"
+        m.railExpandAnim.control = "stop"
+        m.railExpandAnim.control = "start"
+    end if
+end sub
+
+sub CollapseRail()
+    if m.railFocusIndex >= 0 and m.railFocusIndex < m.rail.GetChildCount()
+        m.rail.GetChild(m.railFocusIndex).focused = false
+    end if
+    m.railFocusIndex = -1
+    SetRailExpanded(false)
+    if m.railCollapseAnim <> invalid
+        m.railExpandAnim.control = "stop"
+        m.railCollapseAnim.control = "stop"
+        m.railCollapseAnim.control = "start"
+    end if
+end sub
+
+sub SetRailExpanded(expanded as boolean)
+    for i = 0 to m.rail.GetChildCount() - 1
+        m.rail.GetChild(i).expanded = expanded
+    end for
+    if expanded
+        m.railBrandCollapseAnim.control = "stop"
+        m.railBrandExpandAnim.control = "stop"
+        m.railBrandExpandAnim.control = "start"
+    else
+        m.railBrandExpandAnim.control = "stop"
+        m.railBrandCollapseAnim.control = "stop"
+        m.railBrandCollapseAnim.control = "start"
+    end if
+end sub
+
+sub MoveRailFocus(delta as integer)
+    if m.railFocusIndex < 0 then return
+    nextIndex = m.railFocusIndex + delta
+    if nextIndex < 0 or nextIndex >= m.rail.GetChildCount() then return
+    m.rail.GetChild(m.railFocusIndex).focused = false
+    m.railFocusIndex = nextIndex
+    m.rail.GetChild(nextIndex).focused = true
+    m.rail.GetChild(nextIndex).SetFocus(true)
 end sub
 
 ' OK on a rail icon: an action request the Scene routes. Stack screens publish
 ' screen + params; the support modal adds dialog = true, which must survive into
 ' the pushRequest or the Scene would push the dialog node as a bogus stack
 ' screen and hide Home instead of showing the native dialog over it.
-sub onRailItemSelected()
-    data = m.rail.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    row = data[0]
-    if row < 0 or m.railEntries = invalid or row >= m.railEntries.Count() then return
-    entry = m.railEntries[row]
+sub SelectRailEntry()
+    if m.railFocusIndex < 0 or m.railEntries = invalid or m.railFocusIndex >= m.railEntries.Count() then return
+    entry = m.railEntries[m.railFocusIndex]
     request = {
         screen: entry.screen
         params: {}
@@ -598,23 +659,36 @@ sub onRailItemSelected()
 end sub
 
 ' Cross-focus between the rail and the catalog grid. Left from the grid enters
-' the rail; Right from the rail enters the grid. Whether a RowList at its left
-' edge lets Left bubble here is device-dependent — if the grid swallows it, the
-' fallback is starting Home focus on the rail. Verify on-device.
+' the rail; Right from the rail enters the grid. The rail tiles are plain
+' focusable nodes, so Up/Down/OK are handled here and the default focus
+' navigation is suppressed while the rail owns focus.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
-    if key = "right" and m.rail.HasFocus()
-        m.catalog.SetFocus(true)
-        return true
+    if m.railFocusIndex >= 0
+        if key = "right"
+            CollapseRail()
+            m.catalog.SetFocus(true)
+            return true
+        else if key = "up"
+            MoveRailFocus(-1)
+            return true
+        else if key = "down"
+            MoveRailFocus(1)
+            return true
+        else if key = "OK"
+            SelectRailEntry()
+            return true
+        else if key = "options"
+            CollapseRail()
+            m.catalog.SetFocus(true)
+            return true
+        end if
     else if key = "left" and m.catalog.HasFocus()
-        m.rail.SetFocus(true)
+        FocusRail()
         return true
     else if key = "options"
         if m.catalog.HasFocus()
-            m.rail.SetFocus(true)
-            return true
-        else if m.rail.HasFocus()
-            m.catalog.SetFocus(true)
+            FocusRail()
             return true
         end if
     end if

@@ -26,13 +26,6 @@
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
         <Label
-            id="homeTitle"
-            translation="[150, 48]"
-            width="1760"
-            height="70"
-            text="Rokumio"
-            font="font:LargeBoldSystemFont" />
-        <Label
             id="homeSub"
             translation="[150, 128]"
             width="1760"
@@ -50,26 +43,6 @@
             visible="false"
             font="font:MediumSystemFont" />
 
-        <!-- Left rail: the vertical icon menu (Search, Discover, Library,
-             Add-ons, Settings, Support). A one-column RowList of RailTiles; OK
-             on an icon publishes a pushRequest the Scene routes. Focus reaches
-             it from the grid via Left/Right. -->
-        <Rectangle id="railBg" width="140" height="1080"/>
-        <RowList
-            id="rail"
-            translation="[0, 380]"
-            numRows="6"
-            itemSize="[140, 80]"
-            itemSpacing="[0, 40]"
-            rowItemSize="[[80, 80]]"
-            focusXOffset="[30]"
-            rowItemSpacing="[[0, 0]]"
-            showRowLabel="[false]"
-            drawFocusFeedback="false"
-            skipFocusAnimations="true"
-            itemComponentName="RailTile"
-            vertFocusAnimationStyle="floatingFocus"/>
-
         <!-- Poster rows: a single RowList owns the whole grid physics (vertical
              row scrolling/clipping, horizontal per-row tiles, row labels). Each
              item renders as a PosterTile component. Content is set in code. -->
@@ -85,5 +58,48 @@
             rowLabelFont="font:MediumBoldSystemFont"
             drawFocusFeedback="true"
             itemComponentName="PosterTile" />
+        <!-- Left rail: the vertical icon menu (Search, Discover, Library,
+             Add-ons, Settings, Support). Collapsed to icons; focusing it
+             widens the backdrop over the grid and the focused tile shows
+             its name. Tiles are RailTile children of the rail group. -->
+        <Rectangle id="railBg" width="140" height="1080"/>
+        <Label
+            id="railBrand"
+            translation="[20, 52]"
+            width="280"
+            height="56"
+            scale="[0.72, 0.72]"
+            scaleRotateCenter="[0, 28]"
+            text="Rokumio"
+            font="font:MediumBoldSystemFont" />
+        <Group id="rail" translation="[0, 380]" />
+        <Animation id="railBrandExpandAnim" duration="0.28" repeat="false">
+            <Vector2DFieldInterpolator
+                id="railBrandExpandInterp"
+                fieldToInterp="railBrand.scale"
+                key="[0.0, 1.0]"
+                keyValue="[[0.72, 0.72], [1.0, 1.0]]" />
+        </Animation>
+        <Animation id="railBrandCollapseAnim" duration="0.18" repeat="false">
+            <Vector2DFieldInterpolator
+                id="railBrandCollapseInterp"
+                fieldToInterp="railBrand.scale"
+                key="[0.0, 1.0]"
+                keyValue="[[1.0, 1.0], [0.72, 0.72]]" />
+        </Animation>
+        <Animation id="railExpandAnim" duration="0.28" repeat="false">
+            <FloatFieldInterpolator
+                id="railExpandInterp"
+                fieldToInterp="railBg.width"
+                key="[0.0, 0.6, 1.0]"
+                keyValue="[140.0, 290.0, 320.0]" />
+        </Animation>
+        <Animation id="railCollapseAnim" duration="0.18" repeat="false">
+            <FloatFieldInterpolator
+                id="railCollapseInterp"
+                fieldToInterp="railBg.width"
+                key="[0.0, 0.6, 1.0]"
+                keyValue="[320.0, 200.0, 140.0]" />
+        </Animation>
     </children>
 </component>
