@@ -10,22 +10,18 @@
 ' One shared chips RowList serves both kinds — the chips differ, the plumbing
 ' doesn't. Each chip ContentNode maps to a stored action id, and a single
 ' selection observer dispatches on that id.
-'
-' Params: { addonAddress, meta } for a hero rendered from the catalog data
-' immediately, plus an optional resume hint { videoId, season, episode, position }
-' from the Continue-Watching row. CW tiles fetch their own full meta by id
-' before this screen opens, so the hero there matches a catalog-opened title.
-' Search and Discover catalog metas are slim ({ id, type, name }) — those top up
-' their missing fields with a MetaLoaderTask fetch merged into the passed-in
-' record, so the caller's own values always win. When no resume hint arrives,
-' the local LibraryStore supplies the most recent position for the meta, so a
-' catalog-opened show still offers to pick up where the user left off.
 
 sub init()
-    m.heroPoster = m.top.FindNode("heroPoster")
     m.bgPoster = m.top.FindNode("bgPoster")
+    m.bgScrim = m.top.FindNode("bgScrim")
+    m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
+    m.heroLogoUri = ""
     m.detailName = m.top.FindNode("detailName")
     m.detailType = m.top.FindNode("detailType")
+    m.detailRating = m.top.FindNode("detailRating")
+    m.detailRatingText = m.top.FindNode("detailRatingText")
+    m.detailGenres = m.top.FindNode("detailGenres")
     m.detailDesc = m.top.FindNode("detailDesc")
     m.chipsRow = m.top.FindNode("chipsRow")
     ' The language the chips were built in — a language change rebuilds them.
@@ -33,10 +29,12 @@ sub init()
 
     t = Theme()
     m.top.FindNode("detailsBg").color = t.screenBg
-    m.top.FindNode("bgScrim").color = t.scrim
+    m.bgScrim.color = t.scrim
     m.detailName.color = t.textPrimary
-    m.detailType.color = t.accent
-    m.detailDesc.color = t.textSecondary
+    m.detailType.color = t.textSecondary
+    m.detailRatingText.color = t.accentWarm
+    m.detailGenres.color = t.textSecondary
+    m.detailDesc.color = t.textPrimary
     m.chipsRow.focusBitmapBlendColor = t.accentFocus
 
     m.chipsRow.ObserveField("rowItemSelected", "onChipSelected")
@@ -99,27 +97,41 @@ end function
 sub RenderHero(meta as object)
     if meta = invalid then return
 
-    ' Add-ons answer these with the type the Stremio spec says, or with
-    ' whatever they felt like: a name as a number, a poster as a float. The
-    ' coercion is StringOf's whole job (see source/util/Helpers.brs), and it is
-    ' worth doing at the field rather than at each consumer because every one of
-    ' these ends up in a typed string field or concatenated into a label.
-    name = meta.name
-    m.detailName.text = StringOf(name)
-
-    RenderKind(meta)
-    ApplyHeroSize(meta.type)
-
-    poster = meta.poster
-    m.heroPoster.uri = StringOf(poster)
-
-    ' Cinemeta catalog metas carry a `background` artwork URL; fill the screen
-    ' behind everything. Missing background leaves the flat theme base showing.
     bg = meta.background
     m.bgPoster.uri = StringOf(bg)
+    m.bgPoster.visible = m.bgPoster.uri <> ""
 
-    desc = meta.description
-    m.detailDesc.text = StringOf(desc)
+    title = StringOf(meta.name)
+    if title.Trim() = "" then title = StringOf(meta.title)
+    description = StringOf(meta.description)
+    if description.Trim() = "" then description = StringOf(meta.overview)
+    if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
+        description = "S" + StringOf(meta.season) + "E" + StringOf(meta.episode)
+    end if
+    kind = TypeLabel(StringOf(meta.type))
+    releaseInfo = StringOf(meta.releaseInfo)
+    if releaseInfo <> "" then kind = kind + " · " + releaseInfo
+    runtime = ""
+    if StringOf(meta.type) <> "series" then runtime = FormatRuntime(meta.runtime)
+    if runtime <> "" then kind = kind + " · " + runtime
+    rating = StringOf(meta.imdbRating)
+    genres = HeroGenresText(meta.genres)
+    logo = StringOf(meta.logo)
+    previousLogoUri = m.heroLogo.uri
+    m.heroLogoUri = logo
+    ResetHeroLogoLayout()
+    m.heroLogo.visible = false
+    m.detailName.visible = true
+    m.detailName.text = title
+    m.detailType.text = kind
+    m.detailRatingText.text = rating
+    m.detailRating.visible = rating.Trim() <> ""
+    m.detailGenres.text = genres
+    m.detailGenres.visible = genres <> ""
+    m.detailDesc.text = description
+    m.detailDesc.visible = description.Trim() <> ""
+    m.heroLogo.uri = logo
+    if logo <> "" and logo = previousLogoUri and m.heroLogo.loadStatus = "ready" then FitHeroLogo()
 end sub
 
 ' Search and Discover hand over slim catalog metas ({ id, type, name }) whose
@@ -184,40 +196,84 @@ sub RestoreFocus()
     m.chipsRow.SetFocus(true)
 end sub
 
-' Channel-family metas (Stremio "channel"/"tv", one family — the same rule
-' TileCellSize uses for grid rows) ship 1:1 artwork; every other type ships the
-' 2:3 poster slab. The node must take the source's shape or limitSize decodes an
-' off-ratio bitmap smaller than its node and leaves an uncovered strip. The load
-' caps ride the node so the memory policy holds for both shapes, exactly as
-' PosterTile does for a square cell. Called on every render, so a screen reused
-' across entries always resets to the type it is showing now.
-sub ApplyHeroSize(metaType as dynamic)
-    w = 340
-    h = 510
-    if metaType <> invalid and metaType <> ""
-        lower = LCase(metaType)
-        if lower = "channel" or lower = "tv"
-            w = 420
-            h = 420
-        end if
+sub onHeroLogoStatus()
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    if m.heroLogo.loadStatus = "ready"
+        FitHeroLogo()
+    else if m.heroLogo.loadStatus = "failed"
+        m.heroLogo.visible = false
+        m.detailName.visible = true
+        ResetHeroLogoLayout()
     end if
-    m.heroPoster.width = w
-    m.heroPoster.height = h
-    m.heroPoster.loadWidth = w
-    m.heroPoster.loadHeight = h
 end sub
 
-' The second header line: "{type} · {releaseInfo} · ★ {imdbRating}", with the
-' movie runtime appended when the meta carries it (Cinemeta does).
-sub RenderKind(meta as object)
-    kind = TypeLabel(meta.type)
-    if meta.releaseInfo <> invalid and StringOf(meta.releaseInfo) <> "" then kind = kind + " · " + StringOf(meta.releaseInfo)
-    if meta.imdbRating <> invalid and StringOf(meta.imdbRating) <> "" then kind = kind + " · ★ " + StringOf(meta.imdbRating)
-    if meta.runtime <> invalid and StringOf(meta.type) <> "series"
-        runtime = FormatRuntime(meta.runtime)
-        if runtime <> "" then kind = kind + " · " + runtime
+sub FitHeroLogo()
+    bitmapWidth = m.heroLogo.bitmapWidth
+    bitmapHeight = m.heroLogo.bitmapHeight
+    if bitmapWidth <= 0 or bitmapHeight <= 0 then return
+    ratio = bitmapWidth / bitmapHeight
+    if ratio < 1.7
+        maxWidth = 420
+        maxHeight = 460
+    else
+        maxWidth = 820
+        maxHeight = 190
     end if
-    m.detailType.text = kind
+    logoWidth = ratio * maxHeight
+    if logoWidth > maxWidth then logoWidth = maxWidth
+    logoHeight = logoWidth / ratio
+
+    m.heroLogo.width = Int(logoWidth)
+    m.heroLogo.height = Int(logoHeight)
+    if ratio < 1.7
+        m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
+        contentX = 162 + Int(logoWidth) + 48
+        m.detailType.translation = [contentX, 110]
+        m.detailRating.translation = [contentX, 154]
+        m.detailGenres.translation = [contentX, 198]
+        m.detailDesc.translation = [contentX, 244]
+        m.detailDesc.width = 1920 - contentX - 160
+        m.detailDesc.height = 260
+    else
+        m.heroLogo.translation = [162, 70 + Int((190 - logoHeight) / 2)]
+        m.detailType.translation = [166, 274]
+        m.detailRating.translation = [166, 316]
+        m.detailGenres.translation = [166, 360]
+        m.detailDesc.translation = [166, 402]
+        m.detailDesc.width = 1000
+        m.detailDesc.height = 215
+    end if
+    m.heroLogo.visible = true
+    m.detailName.visible = false
+end sub
+
+sub ResetHeroLogoLayout()
+    m.heroLogo.translation = [162, 72]
+    m.heroLogo.width = 820
+    m.heroLogo.height = 460
+    m.detailType.translation = [166, 216]
+    m.detailRating.translation = [166, 256]
+    m.detailGenres.translation = [166, 307]
+    m.detailDesc.translation = [166, 357]
+    m.detailDesc.width = 860
+    m.detailDesc.height = 215
+end sub
+
+function TypeLabel(metaType as string) as string
+    if metaType = "movie" then return Lang("common", "kindMovie")
+    if metaType = "series" then return Lang("common", "kindSeries")
+    return metaType
+end function
+
+function OnExit() as void
+    CancelMetaLoad()
+end function
+
+function OnBackPressed() as boolean
+    return false
+end function
+
+sub BlurFocus()
 end sub
 
 ' Series chips: Resume for the saved spot when there is one, otherwise a "Play
@@ -227,19 +283,19 @@ end sub
 sub ShowSeries()
     actions = []
     if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
-        actions.Push({ action: "resume", title: Fill(Lang("details", "resume"), { season: m.resume.season.ToStr(), episode: m.resume.episode.ToStr() }) })
+        actions.Push({ action: "resume", title: "S" + m.resume.season.ToStr() + "E" + m.resume.episode.ToStr(), icon: "pkg:/images/play.png" })
     else
-        actions.Push({ action: "play", title: Lang("details", "playFirstEpisode") })
+        actions.Push({ action: "play", title: "S1E1", icon: "pkg:/images/play.png" })
     end if
-    actions.Push({ action: "episodes", title: Lang("details", "episodes") })
-    actions.Push({ action: "library", title: LibraryActionLabel() })
+    actions.Push({ action: "episodes", title: Lang("details", "episodes"), icon: "pkg:/images/episodes.png" })
+    actions.Push({ action: "library", title: "", icon: LibraryIcon() })
     ShowChips(actions)
 end sub
 
 sub ShowMovie()
     actions = []
-    actions.Push({ action: "play", title: Lang("details", "play") })
-    actions.Push({ action: "library", title: LibraryActionLabel() })
+    actions.Push({ action: "play", title: Lang("details", "play"), icon: "pkg:/images/play.png" })
+    actions.Push({ action: "library", title: "", icon: LibraryIcon() })
     ShowChips(actions)
 end sub
 
@@ -247,13 +303,29 @@ end sub
 ' selection observer can dispatch.
 sub ShowChips(actions as object)
     m.chips = actions
+    longest = 0
+    for each chip in actions
+        if chip.title <> invalid and chip.title <> ""
+            needed = 108 + chip.title.Len() * 19
+            if needed > longest then longest = needed
+        end if
+    end for
+    rowWidth = longest
+    if rowWidth < 240 then rowWidth = 240
+    if rowWidth > 380 then rowWidth = 380
+    m.chipsRow.rowItemSize = [[rowWidth, 80]]
     root = CreateObject("roSGNode", "ContentNode")
     row = root.CreateChild("ContentNode")
     for each chip in actions
         item = row.CreateChild("ChipContent")
         item.title = chip.title
-        item.width = m.chipsRow.rowItemSize[0][0]
-        item.height = m.chipsRow.rowItemSize[0][1]
+        if chip.icon <> invalid then item.icon = chip.icon
+        if chip.title <> invalid and chip.title <> ""
+            item.width = rowWidth
+        else
+            item.width = 80
+        end if
+        item.height = 80
     end for
     m.chipsRow.content = root
     m.chipsRow.jumpToRowItem = [0, 0]
@@ -277,8 +349,6 @@ sub onChipSelected()
     end if
 end sub
 
-' Resume sends the user into stream selection for the saved episode. The Streams
-' screen is the picker; this push carries the full context for it.
 sub ResumeEpisode()
     if m.resume = invalid or m.stores = invalid then return
     videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, m.resume.season, m.resume.episode)
@@ -291,7 +361,7 @@ sub ResumeEpisode()
             videoId: videoId
             season: m.resume.season
             episode: m.resume.episode
-            position: ResumePosition()
+            position: m.resume.position
             name: m.meta.name
             poster: m.meta.poster
             posterShape: m.meta.posterShape
@@ -301,74 +371,54 @@ sub ResumeEpisode()
     }
 end sub
 
-' The generic Play action: for a movie it is the only play path; for a series it
-' covers the no-resume "Play S1E1" fallback. Both push stream selection.
 sub PlayMedia()
-    if m.stores = invalid then return
-    if m.meta.type = "series"
-        m.top.pushRequest = {
-            screen: "streamsScreen"
-            params: {
-                addonAddress: m.addonAddress
-                metaType: m.meta.type
-                metaId: m.meta.id
-                videoId: m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, 1, 1)
-                season: 1
-                episode: 1
-                position: ResumePosition()
+    if m.meta = invalid or m.stores = invalid then return
+    videoId = m.meta.id
+    season = 1
+    episode = 1
+    if m.meta.type = "movie"
+        videoId = m.meta.id
+    else if m.meta.videos <> invalid and m.meta.videos.Count() > 0
+        video = m.meta.videos[0]
+        season = video.season
+        episode = video.episode
+        videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, season, episode)
+    end if
+    m.top.pushRequest = {
+        screen: "streamsScreen"
+        params: {
+            addonAddress: m.addonAddress
+            metaType: m.meta.type
+            metaId: m.meta.id
+            videoId: videoId
+            season: season
+            episode: episode
+            position: 0
             name: m.meta.name
             poster: m.meta.poster
             posterShape: m.meta.posterShape
             logo: m.meta.logo
             background: m.meta.background
-            }
         }
-    else
-        m.top.pushRequest = {
-            screen: "streamsScreen"
-            params: {
-                addonAddress: m.addonAddress
-                metaType: m.meta.type
-                metaId: m.meta.id
-                videoId: m.meta.id
-                position: ResumePosition()
-                name: m.meta.name
-                poster: m.meta.poster
-                posterShape: m.meta.posterShape
-                logo: m.meta.logo
-                background: m.meta.background
-                description: m.meta.description
-                runtime: m.meta.runtime
-            }
-        }
-    end if
+    }
 end sub
 
 sub OpenEpisodes()
+    if m.meta = invalid then return
     m.top.pushRequest = {
         screen: "episodesScreen"
         params: {
             addonAddress: m.addonAddress
-            meta: { id: m.meta.id, type: m.meta.type, name: m.meta.name, poster: m.meta.poster, posterShape: m.meta.posterShape, background: m.meta.background, logo: m.meta.logo }
-            resume: m.resume
+            meta: m.meta
+            season: m.resume.season
+            episode: m.resume.episode
+            position: m.resume.position
         }
     }
 end sub
 
-' Keep an accurate resume for the current meta: the saved position when the user
-' came back from a spot, else zero (a brand-new start).
-function ResumePosition() as integer
-    if m.resume <> invalid and m.resume.position <> invalid then return m.resume.position
-    return 0
-end function
-
 sub ToggleLibrary()
-    if m.stores = invalid then return
-    ' A meta from an add-on that ships no shape (or no poster) leaves those fields
-    ' invalid. Every library boundary here is a typed string param, and Roku
-    ' refuses to cast an explicitly-passed invalid (a default only fills in when
-    ' the arg is OMITTED), so normalize once and reuse for both the save and the
-    ' write-back packet MainScene turns into a typed LibraryBuildLibraryChangeItem.
+    if m.meta = invalid or m.stores = invalid then return
     poster = ""
     if m.meta.poster <> invalid then poster = m.meta.poster
     posterShape = ""
@@ -380,12 +430,12 @@ sub ToggleLibrary()
         m.stores.library.callFunc("LibraryAddSaved", m.meta.id, m.meta.type, m.meta.name, poster, posterShape)
         added = true
     end if
-    label = LibraryActionLabel()
+    icon = LibraryIcon()
     for i = 0 to m.chips.Count() - 1
         if m.chips[i].action = "library"
             if m.chipsRow.content <> invalid and m.chipsRow.content.GetChildCount() > 0
                 row = m.chipsRow.content.GetChild(0)
-                if row <> invalid and i < row.GetChildCount() then row.GetChild(i).title = label
+                if row <> invalid and i < row.GetChildCount() then row.GetChild(i).icon = icon
             end if
             exit for
         end if
@@ -411,19 +461,7 @@ function LibraryActionLabel() as string
     return Lang("details", "addToLibrary")
 end function
 
-function TypeLabel(metaType as string) as string
-    if metaType = "movie" then return Lang("common", "kindMovie")
-    if metaType = "series" then return Lang("common", "kindSeries")
-    return metaType
+function LibraryIcon() as string
+    if m.stores <> invalid and m.stores.library.callFunc("LibraryIsSaved", m.meta.id) then return "pkg:/images/library_add_check.png"
+    return "pkg:/images/library_add.png"
 end function
-
-function OnExit() as void
-    CancelMetaLoad()
-end function
-
-function OnBackPressed() as boolean
-    return false
-end function
-
-sub BlurFocus()
-end sub

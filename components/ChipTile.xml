@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="ChipTile" extends="Group">
-    <!-- Focusable label tile used by single-row RowLists: season chips and the
-         movie action buttons. RowList drives it through the same read-only
-         interface fields as PosterTile (itemContent / itemHasFocus /
-         rowHasFocus). Text comes from itemContent.title. -->
+    <!-- Focusable icon+label tile used by single-row RowLists: the movie
+         action buttons and the series action chips. RowList drives it through
+         the same read-only interface fields as PosterTile (itemContent /
+         itemHasFocus / rowHasFocus). Text comes from itemContent.title; an
+         optional icon comes from itemContent.icon. -->
     <interface>
         <field id="itemContent" type="node" />
         <field id="itemHasFocus" type="boolean" />
@@ -14,16 +15,27 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <!-- chipBorder is the frame, chipFace the inset face so focus draws a
-             border instead of painting over the chip. -->
-        <Rectangle id="chipFace" width="232" height="48" translation="[4, 4]" />
+        <!-- iconBg is the only background: a square behind the icon that
+             turns white on focus (icon dark on white) and stays dimmed when
+             idle. Labels sit outside it, on the dark screen. -->
+        <Rectangle id="iconBg" width="72" height="72" translation="[4, 4]" />
+        <Poster
+            id="chipIcon"
+            width="48"
+            height="48"
+            loadWidth="48"
+            loadHeight="48"
+            loadDisplayMode="limitSize"
+            translation="[16, 16]"
+            visible="false" />
         <Label
             id="chipText"
-            width="224"
+            width="176"
             height="40"
-            translation="[8, 8]"
-            horizAlign="center"
+            translation="[88, 20]"
+            horizAlign="left"
             vertAlign="middle"
-            font="font:MediumSystemFont" />
+            font="font:MediumSystemFont"
+            visible="false" />
     </children>
 </component>

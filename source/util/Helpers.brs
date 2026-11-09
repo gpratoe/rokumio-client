@@ -60,6 +60,24 @@ function FormatRuntime(runtime as dynamic) as string
     return StringOf(runtime).Trim()
 end function
 
+' A compact genre line shared by the Home and Details heroes. Keep only a few
+' entries so a noisy add-on cannot take over the hero copy.
+function HeroGenresText(genres as dynamic) as string
+    if Type(genres) <> "roArray" then return ""
+    text = ""
+    count = 0
+    for each value in genres
+        genre = StringOf(value).Trim()
+        if genre = "" then continue for
+        if text <> "" then text = text + "  ·  "
+        text = text + genre
+        count = count + 1
+        if count >= 5 then exit for
+    end for
+    if text.Len() > 96 then text = Left(text, 93) + "..."
+    return text
+end function
+
 ' ---------------------------------------------------------------------------
 ' The UI-language helpers. The Settings screen speaks them first; every other
 ' screen and the Scene adopt the same calls as they migrate.
@@ -189,4 +207,3 @@ function Fill(template as string, values as object) as string
     end if
     return text
 end function
-
