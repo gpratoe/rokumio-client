@@ -283,9 +283,9 @@ end sub
 sub ShowSeries()
     actions = []
     if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
-        actions.Push({ action: "resume", title: "S" + m.resume.season.ToStr() + "E" + m.resume.episode.ToStr(), icon: "pkg:/images/play.png" })
+        actions.Push({ action: "resume", title: EpisodeCode(m.resume.season, m.resume.episode), icon: "pkg:/images/play.png" })
     else
-        actions.Push({ action: "play", title: "S1E1", icon: "pkg:/images/play.png" })
+        actions.Push({ action: "play", title: EpisodeCode(1, 1), icon: "pkg:/images/play.png" })
     end if
     actions.Push({ action: "episodes", title: Lang("details", "episodes"), icon: "pkg:/images/episodes.png" })
     actions.Push({ action: "library", title: "", icon: LibraryIcon() })
@@ -306,12 +306,12 @@ sub ShowChips(actions as object)
     longest = 0
     for each chip in actions
         if chip.title <> invalid and chip.title <> ""
-            needed = 108 + chip.title.Len() * 19
+            needed = ChipTitleWidth(chip.title)
             if needed > longest then longest = needed
         end if
     end for
     rowWidth = longest
-    if rowWidth < 240 then rowWidth = 240
+    if rowWidth < 140 then rowWidth = 140
     if rowWidth > 380 then rowWidth = 380
     m.chipsRow.rowItemSize = [[rowWidth, 80]]
     root = CreateObject("roSGNode", "ContentNode")
@@ -331,6 +331,16 @@ sub ShowChips(actions as object)
     m.chipsRow.jumpToRowItem = [0, 0]
     if m.top.screenActive then m.chipsRow.SetFocus(true)
 end sub
+
+' A chip's width from its label: the icon area plus the measured text.
+function ChipTitleWidth(title as string) as integer
+    if title.Len() <= 5 then return 140
+    return 108 + title.Len() * 19
+end function
+
+function EpisodeCode(season as dynamic, episode as dynamic) as string
+    return Fill(Lang("common", "episodeMarker"), { season: season.ToStr(), episode: episode.ToStr() })
+end function
 
 sub onChipSelected()
     data = m.chipsRow.rowItemSelected

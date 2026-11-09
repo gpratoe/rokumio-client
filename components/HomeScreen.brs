@@ -336,7 +336,7 @@ sub RenderHomeHero(meta as object)
     description = StringOf(meta.description)
     if description.Trim() = "" then description = StringOf(meta.overview)
     if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
-        description = "S" + StringOf(meta.season) + "E" + StringOf(meta.episode)
+        description = Fill(Lang("common", "episodeMarker"), { season: StringOf(meta.season), episode: StringOf(meta.episode) })
     end if
     kind = HeroTypeLabel(StringOf(meta.type))
     releaseInfo = StringOf(meta.releaseInfo)
