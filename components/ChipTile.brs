@@ -40,11 +40,11 @@ end sub
 sub ApplyState()
     t = Theme()
     if m.top.focused
-        m.iconBg.color = t.textPrimary
+        m.iconBg.blendColor = t.textPrimary
         m.icon.blendColor = t.screenBg
         m.text.color = t.screenBg
     else
-        m.iconBg.color = t.tileFace
+        m.iconBg.blendColor = t.tileFace
         m.icon.blendColor = t.textSecondary
         m.text.color = t.textPrimary
     end if

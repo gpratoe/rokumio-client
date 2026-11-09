@@ -18,7 +18,15 @@
         <!-- iconBg is the only background: a square behind the icon that
              turns white on focus (icon dark on white) and stays dimmed when
              idle. Labeled chips widen it across the label. -->
-        <Rectangle id="iconBg" width="72" height="72" translation="[4, 4]" />
+        <Poster
+            id="iconBg"
+            width="72"
+            height="72"
+            loadWidth="72"
+            loadHeight="72"
+            loadDisplayMode="limitSize"
+            translation="[4, 4]"
+            uri="pkg:/images/chip.9.png" />
         <Poster
             id="chipIcon"
             width="48"
