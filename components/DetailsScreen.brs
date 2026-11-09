@@ -309,7 +309,10 @@ sub ShowChips(actions as object)
         entries.Push({ title: ChipTitle(chip), icon: ChipIconOrEmpty(chip), active: false })
     end for
     m.chipsRow.callFunc("SetChips", entries)
-    if m.top.screenActive then RestoreFocus()
+    ' A fresh Details always opens on the first chip — the row's remembered
+    ' position is only for re-entry after a push (RestoreFocus below), not
+    ' for carrying a stale cursor from the previous Details visit.
+    if m.top.screenActive then m.chipsRow.callFunc("FocusChip", 0)
 end sub
 
 function ChipTitle(chip as object) as string
