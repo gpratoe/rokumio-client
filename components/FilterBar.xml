@@ -1,12 +1,12 @@
 <component name="FilterBar" extends="Group">
 
     <!-- FilterBar — a filter-chip row with a pull-down option menu, shared by
-         DiscoverScreen and LibraryScreen. The chips are one row of ChipTiles;
-         OK on a chip opens the dropdown for it under that chip; Up/Down move
-         inside the menu, OK picks, Back/options dismisses without changing
-         anything. The screen supplies the option data and the commit effect;
-         the component owns the row, the dropdown geometry, the focus
-         hand-off, and the menu-open key guard.
+         DiscoverScreen and LibraryScreen. The chips are one ChipsRow; OK on a
+         chip opens the dropdown for it under that chip; Up/Down move inside
+         the menu, OK picks, Back/options dismisses without changing anything.
+         The screen supplies the option data and the commit effect; the
+         component owns the row, the dropdown geometry, the focus hand-off,
+         and the menu-open key guard.
 
          Interface:
            chipActivated (int)   — fires with the chip index when OK is
@@ -41,16 +41,7 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <RowList
-            id="chips"
-            numRows="1"
-            itemSize="[1760, 56]"
-            itemSpacing="[0, 8]"
-            rowItemSize="[[260, 56]]"
-            rowItemSpacing="[[12, 0]]"
-            showRowLabel="false"
-            drawFocusFeedback="true"
-            itemComponentName="ChipTile" />
+        <ChipsRow id="chips" />
 
         <!-- The dropdown: a panel below the chips listing one chip's options in
              a single-column RowList (vertical clipping free). Opens on chip OK;

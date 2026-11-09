@@ -12,40 +12,33 @@ sub init()
     t = Theme()
     m.menuBackdrop.color = t.dropdownBg
     m.menu.focusBitmapBlendColor = t.accentFocus
-    m.chips.focusBitmapBlendColor = t.accentFocus
 
-    m.chips.ObserveField("rowItemSelected", "onChipPressed")
+    m.chips.ObserveField("selection", "onChipPressed")
     m.menu.ObserveField("rowItemSelected", "onMenuPressed")
 
-    m.chipPitch = 272
+    m.chipPitch = 276
     m.menuY = 68
     m.entries = []
     m.activeChip = 0
 end sub
 
-' Rebuild the chip row from {raw,label} entries, keeping the focused chip within
-' range. Focus is untouched — the screen decides where focus lands.
+' Rebuild the chip row from {raw,label} entries. Chips keep a fixed width so
+' the dropdown keeps hanging exactly under the chip that opened it. Focus is
+' untouched — the screen decides where focus lands.
 sub SetChips(entries as object)
     m.entries = entries
     if m.activeChip >= entries.Count() then m.activeChip = entries.Count() - 1
 
-    content = CreateObject("roSGNode", "ContentNode")
-    row = content.CreateChild("ContentNode")
+    chips = []
     for each entry in entries
-        item = row.CreateChild("ChipContent")
-        item.title = entry.label
-        item.width = m.chips.rowItemSize[0][0]
-        item.height = m.chips.rowItemSize[0][1]
+        chips.Push({ title: entry.label, width: 260 })
     end for
-    m.chips.content = content
-    m.chips.jumpToRowItem = [0, m.activeChip]
+    m.chips.callFunc("SetChips", chips)
 end sub
 
 ' OK on a chip: publish the activated chip; the screen answers with ShowMenu.
 sub onChipPressed()
-    data = m.chips.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    chip = data[1]
+    chip = m.chips.selection
     if chip < 0 or chip >= m.entries.Count() then return
     m.activeChip = chip
     m.top.chipActivated = chip
@@ -76,6 +69,9 @@ sub ShowMenu(options as object, currentIndex as integer)
     m.menuGroup.visible = true
     m.menu.jumpToRowItem = [currentIndex, 0]
     m.menu.SetFocus(true)
+    ' The dropdown has the focus now; the chips drop their ring so the row
+    ' does not look focused while it is not.
+    m.chips.callFunc("Blur")
 end sub
 
 ' OK inside the dropdown: publish {chip, index} so the screen commits its own
@@ -92,15 +88,15 @@ end sub
 ' Dismiss the dropdown and hand focus back to the chips.
 sub HideMenu()
     m.menuGroup.visible = false
-    m.chips.SetFocus(true)
+    m.chips.callFunc("FocusChip", m.activeChip)
 end sub
 
 sub FocusChips()
-    m.chips.SetFocus(true)
+    m.chips.callFunc("FocusChip", m.activeChip)
 end sub
 
 function FocusIsOnChips() as boolean
-    return m.chips.HasFocus()
+    return m.chips.callFunc("HoldingFocus")
 end function
 
 function IsMenuOpen() as boolean

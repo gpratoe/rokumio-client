@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="ChipsRow" extends="Group">
+    <!-- ChipsRow — one horizontal row of focusable ChipTiles as a standalone
+         Group (the nav-rail model, not a RowList). The row owns the tiles,
+         the focus index, and the arrow-key travel; OK publishes the focused
+         chip through the selection field. The screen owns the actions, the
+         dispatch, and where focus starts (FocusChip); it also decides when
+         the row lets go (Blur) before handing focus elsewhere. -->
+    <interface>
+        <field id="selection" type="int" value="-1" alwaysNotify="true" />
+        <function name="SetChips" />
+        <function name="FocusChip" />
+        <function name="Selected" />
+        <function name="HoldingFocus" />
+        <function name="Blur" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/ChipsRow.brs" />
+
+    <children />
+</component>

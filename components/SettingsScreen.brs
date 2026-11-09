@@ -54,7 +54,6 @@ sub init()
     m.title.color = palette.accent
     m.sub.color = palette.textSecondary
     m.status.color = palette.accent
-    m.chips.focusBitmapBlendColor = palette.accentFocus
     m.list.focusBitmapBlendColor = palette.accent
     m.infoPlate.color = palette.screenBg
     m.infoTitle.color = palette.accent
@@ -71,7 +70,7 @@ sub init()
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
     m.list.ObserveField("rowItemFocused", "onRowFocused")
-    m.chips.ObserveField("rowItemSelected", "onChipSelected")
+    m.chips.ObserveField("selection", "onChipSelected")
 
     m.rows = []
     ' The content node of each row, by action. A value change is written into
@@ -356,22 +355,15 @@ function SignedIn() as boolean
 end function
 
 ' The chip row: one chip per section, in the order the sections are defined.
-' The selected chip is marked `active` on its content, and ChipTile paints
-' that one in the accent — so the row above and the list below always agree
-' about which section is on screen, even when the focus is somewhere else.
+' The selected chip is marked `active`, and ChipTile paints that one in the
+' accent — so the row above and the list below always agree about which
+' section is on screen, even when the focus is somewhere else.
 sub BuildChips()
-    content = CreateObject("roSGNode", "ContentNode")
-    row = content.CreateChild("ContentNode")
+    entries = []
     for i = 0 to m.sections.Count() - 1
-        section = m.sections[i]
-        item = row.CreateChild("ChipContent")
-        item.title = SectionLabel(section.id)
-        item.width = m.chips.rowItemSize[0][0]
-        item.height = m.chips.rowItemSize[0][1]
-        item.active = (i = m.activeSection)
+        entries.Push({ title: SectionLabel(m.sections[i].id), active: (i = m.activeSection) })
     end for
-    m.chips.content = content
-    m.chips.jumpToRowItem = [0, m.activeSection]
+    m.chips.callFunc("SetChips", entries)
 end sub
 
 ' The list under the chips: the rows of the selected section and nothing else.
@@ -432,9 +424,7 @@ end sub
 ' another section is one press away and the rows are one press down — the
 ' same travel Discover uses between its filter chips and its results.
 sub onChipSelected()
-    data = m.chips.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    index = data[1]
+    index = m.chips.selection
     if index < 0 or index >= m.sections.Count() then return
     if index = m.activeSection then return
     m.activeSection = index
@@ -455,13 +445,14 @@ end sub
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if key = "up" and m.list.callFunc("HasListFocus") then
-        m.chips.SetFocus(true)
+        m.chips.callFunc("FocusChip", -1)
         return true
-    else if key = "down" and m.chips.HasFocus() then
+    else if key = "down" and m.chips.callFunc("HoldingFocus") then
+        m.chips.callFunc("Blur")
         m.list.callFunc("SetListFocus")
         return true
     else if key = "options" and m.list.callFunc("HasListFocus") then
-        m.chips.SetFocus(true)
+        m.chips.callFunc("FocusChip", -1)
         return true
     end if
     return false

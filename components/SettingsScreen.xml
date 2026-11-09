@@ -36,21 +36,11 @@
             text="OK edits a row's value, Back returns to Home"
             font="font:SmallSystemFont" />
 
-        <!-- The sections. One chip each, the selected one marked `active` on
-             its content so ChipTile paints it in the accent: the chip row and
-             the list below then cannot disagree about which section is on
-             screen. Same chip tile the season row and the movie actions use. -->
-        <RowList
-            id="settingsChips"
-            translation="[80, 176]"
-            numRows="1"
-            itemSize="[1760, 56]"
-            itemSpacing="[0, 8]"
-            rowItemSize="[[260, 56]]"
-            rowItemSpacing="[[12, 0]]"
-            showRowLabel="false"
-            drawFocusFeedback="true"
-            itemComponentName="ChipTile" />
+        <!-- The sections. One chip each, the selected one marked `active` so
+             ChipTile paints it in the accent: the chip row and the list
+             below then cannot disagree about which section is on screen.
+             A ChipsRow (the rail model) — the row owns Left/Right/OK. -->
+        <ChipsRow id="settingsChips" translation="[80, 176]" />
 
         <!-- The rows of the selected section. A ChevronList rather than a plain
              RowList: the list is going to grow, and the chevrons are how a

@@ -336,7 +336,7 @@ sub RenderHomeHero(meta as object)
     description = StringOf(meta.description)
     if description.Trim() = "" then description = StringOf(meta.overview)
     if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
-        description = "S" + StringOf(meta.season) + "E" + StringOf(meta.episode)
+        description = Fill(Lang("common", "episodeMarker"), { season: StringOf(meta.season), episode: StringOf(meta.episode) })
     end if
     kind = HeroTypeLabel(StringOf(meta.type))
     releaseInfo = StringOf(meta.releaseInfo)
@@ -346,7 +346,7 @@ sub RenderHomeHero(meta as object)
         runtime = FormatRuntime(meta.runtime)
         if runtime <> "" then kind = kind + " · " + runtime
     end if
-    genres = HomeHeroGenres(meta.genres)
+    genres = HeroGenresText(meta.genres)
     if title.Len() > 44 then title = Left(title, 41) + "..."
     if description.Len() > 150 then description = Left(description, 147) + "..."
     logo = StringOf(meta.logo)
@@ -427,23 +427,6 @@ sub CancelHeroMetaRequest()
         AsyncTask_Reap(task, m.top, true)
     end if
 end sub
-
-function HomeHeroGenres(values as dynamic) as string
-    if Type(values) <> "roArray" then return ""
-    text = ""
-    count = 0
-    for each value in values
-        genre = StringOf(value).Trim()
-        if genre = "" then continue for
-        if text <> "" then text = text + "  ·  "
-        text = text + genre
-        count = count + 1
-        if count >= 5 then exit for
-    end for
-    if text = "" then return ""
-    if text.Len() > 96 then text = Left(text, 93) + "..."
-    return text
-end function
 
 function HeroTypeLabel(metaType as string) as string
     if metaType = "movie" then return Lang("common", "kindMovie")

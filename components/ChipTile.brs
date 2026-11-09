@@ -1,91 +1,111 @@
-' ChipTile — focusable label tile for the single-row RowLists (season chips,
-' movie action buttons). Same field plumbing as PosterTile: RowList feeds the
-' ContentNode through itemContent and drives focus through itemHasFocus /
-' rowHasFocus. Text is read from itemContent.title.
+' ChipTile — focusable icon+label tile. Two drivers share one tile and one
+' paint: standalone rows (ChipsRow writes fields and calls SetChip) and
+' RowLists (the FilterBar dropdown feeds itemContent — the same fields as
+' PosterTile). Focus lights the tile white either way; `active` paints the
+' selected chip in the accent so a row and the list under it can agree
+' about which one is showing even when focus is elsewhere.
 
 sub init()
-    m.face = m.top.FindNode("chipFace")
+    m.iconBg = m.top.FindNode("iconBg")
+    m.icon = m.top.FindNode("chipIcon")
     m.text = m.top.FindNode("chipText")
-
+    m.active = false
+    m.tileWidth = 0
     t = Theme()
-    m.text.color = t.textSecondary
-
+    m.text.color = t.textPrimary
     m.top.ObserveField("itemContent", "onItemContentChanged")
-    m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
-    m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
+    m.top.ObserveField("focused", "onStateChanged")
+    m.top.ObserveField("rowFocused", "onStateChanged")
+    m.top.ObserveField("chipWidth", "onWidthChanged")
+    m.top.ObserveField("itemHasFocus", "onStateChanged")
+    m.top.ObserveField("rowHasFocus", "onStateChanged")
 end sub
 
-' Every inbound field change re-applies the whole look from the tile's current
-' field values. RowList recycles item components for new cells and content
-' swaps, and rowHasFocus/itemHasFocus only fire on value *changes* — on a
-' recycle nothing may change except itemContent, so unless the look is rebuilt
-' there a tile carries stale dimming (opacity 0.55) into a fresh RowList on
-' another screen/media.
-sub UpdateLook()
+' Standalone entry point (ChipsRow).
+sub SetChip(title as string, iconUri as string, chipWidth as integer, isActive = false as boolean)
+    ApplyContent(title, iconUri, isActive, chipWidth)
+end sub
+
+sub ApplyContent(title as string, iconUri as string, isActive as boolean, tileWidth as integer)
+    hasIcon = iconUri <> ""
+    if hasIcon then m.icon.uri = iconUri
+    m.text.text = title
+    m.active = isActive
+    m.tileWidth = tileWidth
+    ApplyLayout(hasIcon, title <> "")
+    ApplyState()
+end sub
+
+sub ApplyLayout(hasIcon as boolean, hasText as boolean)
+    m.icon.visible = hasIcon
+    m.iconBg.visible = true
+    if hasIcon and hasText
+        m.iconBg.width = m.tileWidth - 8
+        m.text.translation = [88, 20]
+        m.text.width = m.tileWidth - 96
+        m.text.visible = true
+    else if hasIcon
+        m.iconBg.width = 72
+        m.text.width = 0
+        m.text.visible = false
+    else
+        ' Text-only chips (section tabs, filter chips, dropdown rows) center
+        ' the label on the face; the label is the whole chip there, unlike the
+        ' icon+label action chips where the label starts after the icon.
+        m.iconBg.width = m.tileWidth - 8
+        m.text.translation = [8, 20]
+        m.text.width = m.tileWidth - 16
+        m.text.horizAlign = "center"
+        m.text.visible = true
+    end if
+    if hasIcon then m.text.horizAlign = "left"
+end sub
+
+sub ApplyState()
     t = Theme()
-    if m.top.itemHasFocus
-        m.face.color = t.itemFace
-        m.text.color = t.textPrimary
-    else if IsActive() then
-        ' The chip that stands for the current state of its group is painted in
-        ' the accent whether or not it has the focus. The focus ring answers
-        ' "where am I", which is not the same question as "which one is
-        ' selected" — and on a section tab the two come apart the moment the
-        ' user walks away from the chips.
-        m.face.color = t.accentDim
+    focused = (m.top.focused = true) or (m.top.itemHasFocus = true)
+    rowLit = focused or (m.top.rowFocused = true) or (m.top.rowHasFocus = true)
+    if focused
+        m.iconBg.blendColor = t.textPrimary
+        m.icon.blendColor = t.screenBg
+        m.text.color = t.screenBg
+    else if m.active
+        m.iconBg.blendColor = t.accentDim
+        m.icon.blendColor = t.textPrimary
         m.text.color = t.accent
     else
-        m.face.color = t.tileFace
-        m.text.color = t.textSecondary
+        m.iconBg.blendColor = t.tileFace
+        m.icon.blendColor = t.textSecondary
+        m.text.color = t.textPrimary
     end if
-    if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
+    if rowLit then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub
 
-' Whether this chip's content carries the active marker. HasField, because
-' not every user of this tile builds ChipContent nodes: reading a field the
-' node does not have is a runtime error, not a false, so the question has to
-' be asked before it is answered.
-function IsActive() as boolean
-    content = m.top.itemContent
-    if content = invalid then return false
-    if not content.HasField("active") then return false
-    return content.active = true
-end function
+sub onStateChanged()
+    ApplyState()
+end sub
 
+sub onWidthChanged()
+    if m.top.chipWidth > 0
+        m.tileWidth = m.top.chipWidth
+        ApplyLayout(m.icon.visible, m.text.visible and m.text.text <> "")
+        ApplyState()
+    end if
+end sub
+
+' RowList entry point (the FilterBar dropdown): the content node carries
+' title / icon / width / active the same way ChipContent defines them.
 sub onItemContentChanged()
     content = m.top.itemContent
     if content = invalid then return
-    m.text.text = content.title
-
+    iconUri = ""
+    if content.HasField("icon") and content.icon <> invalid then iconUri = content.icon
+    title = ""
+    if content.title <> invalid then title = content.title
+    active = content.HasField("active") and content.active = true
     if content.width <> invalid
-        m.face.width = content.width
-        m.text.width = content.width - 8
+        ApplyContent(title, iconUri, active, content.width)
+    else
+        ApplyContent(title, iconUri, active, m.tileWidth)
     end if
-
-    if content.chipHeight <> invalid
-        m.face.height = content.height
-        m.text.height = content.height - 8
-    end if
-
-    ' The active marker lives on the content node, so the observation is made
-    ' ON THAT NODE — ObserveField watches a field of the node it is called on,
-    ' and the tile has no field of that name. Only when the node has the field
-    ' at all: observing a field that is not there is an error, not a no-op.
-    if content.HasField("active") then content.ObserveField("active", "onActiveChanged")
-
-    UpdateLook()
-end sub
-
-' The selected chip changed without the content changing: the same chip row
-' now stands for a different state. Repaint.
-sub onActiveChanged()
-    UpdateLook()
-end sub
-
-sub onItemHasFocusChanged()
-    UpdateLook()
-end sub
-
-sub onRowHasFocusChanged()
-    UpdateLook()
 end sub

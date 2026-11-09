@@ -1,29 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="ChipTile" extends="Group">
-    <!-- Focusable label tile used by single-row RowLists: season chips and the
-         movie action buttons. RowList drives it through the same read-only
-         interface fields as PosterTile (itemContent / itemHasFocus /
-         rowHasFocus). Text comes from itemContent.title. -->
+    <!-- Focusable icon+label tile shared by two drivers: standalone rows
+         (ChipsRow writes `focused`/`rowFocused`/`chipWidth` and calls
+         SetChip) and RowLists (the FilterBar dropdown feeds itemContent —
+         title / icon / width / active). iconBg is the rounded-backdrop
+         nine-patch: white on focus, dimmed idle, accent when `active`.
+         Icon+label chips widen it across the label; icon-only chips keep
+         it square; text-only chips use it as the full face. -->
     <interface>
         <field id="itemContent" type="node" />
         <field id="itemHasFocus" type="boolean" />
         <field id="rowHasFocus" type="boolean" />
+        <field id="focused" type="boolean" alwaysNotify="true" />
+        <field id="rowFocused" type="boolean" alwaysNotify="true" />
+        <field id="chipWidth" type="integer" alwaysNotify="true" />
+        <function name="SetChip" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/ChipTile.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <!-- chipBorder is the frame, chipFace the inset face so focus draws a
-             border instead of painting over the chip. -->
-        <Rectangle id="chipFace" width="232" height="48" translation="[4, 4]" />
+        <!-- Rounded face behind the whole chip (see the header note): the
+             nine-patch keeps the corners at 5px whatever the width. -->
+        <Poster
+            id="iconBg"
+            width="72"
+            height="72"
+            loadWidth="72"
+            loadHeight="72"
+            loadDisplayMode="limitSize"
+            translation="[4, 4]"
+            uri="pkg:/images/chip.9.png" />
+        <Poster
+            id="chipIcon"
+            width="48"
+            height="48"
+            loadWidth="48"
+            loadHeight="48"
+            loadDisplayMode="limitSize"
+            translation="[16, 16]"
+            visible="false" />
         <Label
             id="chipText"
-            width="224"
+            width="128"
             height="40"
-            translation="[8, 8]"
-            horizAlign="center"
+            translation="[88, 20]"
+            horizAlign="left"
             vertAlign="middle"
-            font="font:MediumSystemFont" />
+            font="font:MediumSystemFont"
+            visible="false" />
     </children>
 </component>

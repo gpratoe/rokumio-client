@@ -2,6 +2,7 @@
     <interface>
         <field id="width" type="int" />
         <field id="height" type="int" />
+        <field id="icon" type="string" />
         <!-- Set on the chip that stands for the CURRENT state of its group (a
              section tab, a chosen value). ChipTile paints such a chip in the
              accent even when it does not hold the focus, because a group of
