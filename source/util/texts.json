@@ -140,8 +140,13 @@
     },
     "home": {
       "continueWatching": "Continue Watching",
+      "railSearch": "Search",
+      "railDiscover": "Discover",
+      "railLibrary": "Library",
+      "railAddons": "Add-ons",
+      "railSettings": "Settings",
+      "railSupport": "Support",
       "loading": "Loading…",
-      "hint": "Move between rows, OK for details, Back to exit, * Focus nav-rail and back",
       "emptyCatalogRows": "No catalog rows are showing. Install catalog add-ons or enable rows in Settings → Home."
     },
     "homeRows": {
@@ -437,8 +442,13 @@
     },
     "home": {
       "continueWatching": "Seguir viendo",
+      "railSearch": "Buscar",
+      "railDiscover": "Descubrir",
+      "railLibrary": "Biblioteca",
+      "railAddons": "Add-ons",
+      "railSettings": "Ajustes",
+      "railSupport": "Apoyar",
       "loading": "Cargando…",
-      "hint": "Muevete entre filas, OK para ver detalles, Atrás para salir, * Enfoca la barra de navegación y vuelve",
       "emptyCatalogRows": "No se muestran filas de catálogo. Instala add-ons de catálogo o activa filas en Ajustes → Inicio."
     },
     "homeRows": {

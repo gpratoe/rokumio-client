@@ -25,17 +25,46 @@
 sub init()
     m.catalog = m.top.FindNode("catalog")
     m.catalog.ObserveField("rowItemSelected", "onRowItemSelected")
+    m.catalog.ObserveField("rowItemFocused", "onCatalogItemFocused")
     m.rail = m.top.FindNode("rail")
-    m.rail.ObserveField("rowItemSelected", "onRailItemSelected")
-    m.homeSub = m.top.FindNode("homeSub")
+    m.railExpandAnim = m.top.FindNode("railExpandAnim")
+    m.railCollapseAnim = m.top.FindNode("railCollapseAnim")
+    m.railBrand = m.top.FindNode("railBrand")
+    m.railBrandExpanded = m.top.FindNode("railBrandExpanded")
+    m.railBrandExpandAnim = m.top.FindNode("railBrandExpandAnim")
+    m.railBrandCollapseAnim = m.top.FindNode("railBrandCollapseAnim")
+    m.railBg = m.top.FindNode("railBg")
+    m.heroPoster = m.top.FindNode("heroPoster")
+    m.heroScrim = m.top.FindNode("heroScrim")
+    m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
+    m.heroLogoUri = ""
+    m.heroTitle = m.top.FindNode("heroTitle")
+    m.heroMeta = m.top.FindNode("heroMeta")
+    m.heroRating = m.top.FindNode("heroRating")
+    m.heroRatingText = m.top.FindNode("heroRatingText")
+    m.heroGenres = m.top.FindNode("heroGenres")
+    m.heroDescription = m.top.FindNode("heroDescription")
+    m.heroMetaDelay = m.top.FindNode("heroMetaDelay")
+    m.heroMetaDelay.ObserveField("fire", "onHeroMetaDelayFire")
+    m.heroMetaCache = {}
+    m.heroMetaRequest = invalid
+    m.heroMetaTask = invalid
+    m.heroMetaTaskKey = ""
+    m.heroFocusKey = ""
+    m.heroMetaCache = {}
     m.homeEmpty = m.top.FindNode("homeEmpty")
-    m.homeHint = ""
+    m.heroBeforeBusy = ""
 
     t = Theme()
-    m.top.FindNode("homeTitle").color = t.accent
-    m.homeSub.color = t.textSecondary
+    m.heroScrim.color = t.scrim
+    m.heroTitle.color = t.textPrimary
+    m.heroMeta.color = t.textSecondary
+    m.heroRatingText.color = t.accentWarm
+    m.heroGenres.color = t.textSecondary
+    m.heroDescription.color = t.textPrimary
     m.homeEmpty.color = t.textSecondary
-    m.top.FindNode("railBg").color = t.railTint
+    m.railBg.color = t.navBg
     m.catalog.rowLabelOffset = [0,10]
     m.catalog.focusBitmapBlendColor = t.accentFocus
 
@@ -50,6 +79,9 @@ sub init()
     m.catalogSignature = ""
     m.catalogVisibilitySignature = ""
     m.railBuilt = false
+    m.railLanguage = ""
+    m.railFocusIndex = -1
+    m.railRememberedIndex = 0
 end sub
 
 ' Kick off the catalog walk. The walking happens off the UI thread in a
@@ -183,6 +215,7 @@ sub ApplyCatalogRow(row as object)
     m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
     ResyncRowLabels()
+    RefreshHomeHeroFromFocus()
 end sub
 
 ' Rewrite row titles so duplicated catalog names carry their type suffix; only
@@ -236,6 +269,252 @@ sub BuildRows()
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
     UpdateHomeEmptyState()
+    RefreshHomeHeroFromFocus()
+end sub
+
+' Keep the top hero synchronized with the focused poster. The focused row is
+' supplied by RowList as [rowIndex, itemIndex]; all display data is already in
+' the same meta the tile uses.
+sub onCatalogItemFocused()
+    UpdateHomeHero(m.catalog.rowItemFocused)
+end sub
+
+sub RefreshHomeHeroFromFocus()
+    data = m.catalog.rowItemFocused
+    if data <> invalid then UpdateHomeHero(data)
+end sub
+
+sub UpdateHomeHero(position as dynamic)
+    if position = invalid or position.Count() < 2 then return
+    rowIndex = position[0]
+    itemIndex = position[1]
+    if rowIndex < 0 or rowIndex >= m.gridRows.Count() then return
+    metas = m.gridRows[rowIndex].metas
+    if metas = invalid or itemIndex < 0 or itemIndex >= metas.Count() then return
+    meta = metas[itemIndex]
+    key = HomeHeroMetaKey(meta)
+    if key <> m.heroFocusKey
+        CancelHeroMetaRequest()
+        m.heroFocusKey = key
+    end if
+
+    if m.heroMetaCache.DoesExist(key)
+        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", meta, m.heroMetaCache[key])
+        metas[itemIndex] = meta
+        UpdateHomeTileMeta(rowIndex, itemIndex, meta)
+    end if
+    RenderHomeHero(meta)
+
+    needsHeroMeta = false
+    if m.stores <> invalid and m.gridRows[rowIndex].source = "library"
+        needsHeroMeta = m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta)
+        if StringOf(meta.background).Trim() = "" or StringOf(meta.description).Trim() = "" then needsHeroMeta = true
+        if StringOf(meta.logo).Trim() = "" or Type(meta.genres) <> "roArray" then needsHeroMeta = true
+    end if
+    if m.gridRows[rowIndex].source = "library" and not m.heroMetaCache.DoesExist(key)
+        if needsHeroMeta and m.stores <> invalid
+            if m.heroMetaRequest = invalid or m.heroMetaRequest.key <> key
+                m.heroMetaRequest = { key: key, row: rowIndex, item: itemIndex, meta: meta }
+                m.heroMetaDelay.control = "stop"
+                m.heroMetaDelay.control = "start"
+            end if
+        end if
+    else
+        CancelHeroMetaRequest()
+    end if
+end sub
+
+function HomeHeroMetaKey(meta as object) as string
+    if meta = invalid then return ""
+    return StringOf(meta.type) + "|" + StringOf(meta.id)
+end function
+
+sub RenderHomeHero(meta as object)
+    title = StringOf(meta.name)
+    if title.Trim() = "" then title = StringOf(meta.title)
+    if title.Trim() = "" then title = Lang("home", "continueWatching")
+    description = StringOf(meta.description)
+    if description.Trim() = "" then description = StringOf(meta.overview)
+    if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
+        description = "S" + StringOf(meta.season) + "E" + StringOf(meta.episode)
+    end if
+    kind = HeroTypeLabel(StringOf(meta.type))
+    releaseInfo = StringOf(meta.releaseInfo)
+    if releaseInfo <> "" then kind = kind + " · " + releaseInfo
+    rating = StringOf(meta.imdbRating)
+    if StringOf(meta.type) <> "series"
+        runtime = FormatRuntime(meta.runtime)
+        if runtime <> "" then kind = kind + " · " + runtime
+    end if
+    genres = HomeHeroGenres(meta.genres)
+    if title.Len() > 44 then title = Left(title, 41) + "..."
+    if description.Len() > 150 then description = Left(description, 147) + "..."
+    logo = StringOf(meta.logo)
+    previousLogoUri = m.heroLogo.uri
+    m.heroLogoUri = logo
+    ResetHeroLogoLayout()
+    m.heroLogo.visible = false
+    m.heroTitle.visible = true
+    m.heroTitle.text = title
+    m.heroMeta.text = kind
+    m.heroRatingText.text = rating
+    m.heroRating.visible = rating.Trim() <> ""
+    m.heroGenres.text = genres
+    m.heroGenres.visible = genres <> ""
+    m.heroDescription.text = description
+    m.heroDescription.visible = description.Trim() <> ""
+    m.heroPoster.uri = StringOf(meta.background)
+    m.heroPoster.visible = m.heroPoster.uri <> ""
+    m.heroLogo.uri = logo
+    if logo <> "" and logo = previousLogoUri and m.heroLogo.loadStatus = "ready" then FitHeroLogo()
+end sub
+
+sub UpdateHomeTileMeta(rowIndex as integer, itemIndex as integer, meta as object)
+    if m.catalog.content = invalid then return
+    if rowIndex < 0 or rowIndex >= m.catalog.content.GetChildCount() then return
+    rowNode = m.catalog.content.GetChild(rowIndex)
+    if rowNode = invalid or itemIndex < 0 or itemIndex >= rowNode.GetChildCount() then return
+    tile = rowNode.GetChild(itemIndex)
+    if tile = invalid then return
+    PaintTileFields(tile, meta, tile.watchedGlyph)
+end sub
+
+sub onHeroMetaDelayFire()
+    if m.heroMetaRequest = invalid or m.heroMetaTask <> invalid then return
+    if m.heroMetaRequest.key <> m.heroFocusKey then return
+    address = MetaAddress()
+    if address = "" then return
+    request = m.heroMetaRequest
+    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onHomeHeroMetaLoaded", {
+        addonAddress: address
+        metaType: request.meta.type
+        metaId: request.meta.id
+    }, "homeHeroMeta")
+    m.heroMetaTask = task
+    m.heroMetaTaskKey = request.key
+end sub
+
+sub onHomeHeroMetaLoaded()
+    if m.heroMetaTask = invalid then return
+    task = m.heroMetaTask
+    result = task.result
+    if result = invalid then return
+    m.heroMetaTask = invalid
+    m.heroMetaTaskKey = ""
+    AsyncTask_Reap(task, m.top, false)
+    request = m.heroMetaRequest
+    m.heroMetaRequest = invalid
+    if request = invalid or request.key <> m.heroFocusKey then return
+    if result.ok <> true or result.meta = invalid then return
+    merged = m.stores.episodes.callFunc("EpisodesMergeMeta", request.meta, result.meta)
+    m.heroMetaCache[request.key] = merged
+    if request.row < 0 or request.row >= m.gridRows.Count() then return
+    row = m.gridRows[request.row]
+    if request.item < 0 or request.item >= row.metas.Count() then return
+    if HomeHeroMetaKey(row.metas[request.item]) <> request.key then return
+    row.metas[request.item] = merged
+    UpdateHomeTileMeta(request.row, request.item, merged)
+    RenderHomeHero(merged)
+end sub
+
+sub CancelHeroMetaRequest()
+    if m.heroMetaDelay <> invalid then m.heroMetaDelay.control = "stop"
+    m.heroMetaRequest = invalid
+    if m.heroMetaTask <> invalid
+        task = m.heroMetaTask
+        m.heroMetaTask = invalid
+        m.heroMetaTaskKey = ""
+        AsyncTask_Reap(task, m.top, true)
+    end if
+end sub
+
+function HomeHeroGenres(values as dynamic) as string
+    if Type(values) <> "roArray" then return ""
+    text = ""
+    count = 0
+    for each value in values
+        genre = StringOf(value).Trim()
+        if genre = "" then continue for
+        if text <> "" then text = text + "  ·  "
+        text = text + genre
+        count = count + 1
+        if count >= 5 then exit for
+    end for
+    if text = "" then return ""
+    if text.Len() > 96 then text = Left(text, 93) + "..."
+    return text
+end function
+
+function HeroTypeLabel(metaType as string) as string
+    if metaType = "movie" then return Lang("common", "kindMovie")
+    if metaType = "series" then return Lang("common", "kindSeries")
+    return metaType
+end function
+
+sub onHeroLogoStatus()
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    if m.heroLogo.loadStatus = "ready"
+        FitHeroLogo()
+    else if m.heroLogo.loadStatus = "failed"
+        m.heroLogo.visible = false
+        m.heroTitle.visible = true
+        ResetHeroLogoLayout()
+    end if
+end sub
+
+' Fit each loaded logo into a ratio-aware envelope. Bitmap dimensions are
+' available only after Poster reports ready; loadWidth/loadHeight remain capped
+' in XML to bound texture memory.
+sub FitHeroLogo()
+    bitmapWidth = m.heroLogo.bitmapWidth
+    bitmapHeight = m.heroLogo.bitmapHeight
+    if bitmapWidth <= 0 or bitmapHeight <= 0 then return
+    ratio = bitmapWidth / bitmapHeight
+    if ratio < 1.7
+        maxWidth = 420
+        maxHeight = 460
+    else
+        maxWidth = 820
+        maxHeight = 190
+    end if
+    logoWidth = ratio * maxHeight
+    if logoWidth > maxWidth then logoWidth = maxWidth
+    logoHeight = logoWidth / ratio
+
+    m.heroLogo.width = Int(logoWidth)
+    m.heroLogo.height = Int(logoHeight)
+    if ratio < 1.7
+        m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
+        contentX = 162 + Int(logoWidth) + 48
+        m.heroMeta.translation = [contentX, 110]
+        m.heroRating.translation = [contentX, 158]
+        m.heroGenres.translation = [contentX, 206]
+        m.heroDescription.translation = [contentX, 256]
+        m.heroDescription.width = 1920 - contentX - 160
+        m.heroDescription.height = 260
+    else
+        m.heroLogo.translation = [162, 70 + Int((190 - logoHeight) / 2)]
+        m.heroMeta.translation = [166, 274]
+        m.heroRating.translation = [166, 316]
+        m.heroGenres.translation = [166, 360]
+        m.heroDescription.translation = [166, 402]
+        m.heroDescription.width = 1000
+        m.heroDescription.height = 138
+    end if
+    m.heroLogo.visible = true
+    m.heroTitle.visible = false
+end sub
+
+sub ResetHeroLogoLayout()
+    m.heroLogo.translation = [162, 72]
+    m.heroLogo.width = 820
+    m.heroLogo.height = 460
+    m.heroMeta.translation = [166, 216]
+    m.heroRating.translation = [166, 256]
+    m.heroGenres.translation = [166, 307]
+    m.heroDescription.translation = [166, 357]
+    m.heroDescription.width = 860
+    m.heroDescription.height = 150
 end sub
 
 ' If Continue Watching and every catalog row are absent, explain where catalog
@@ -255,6 +534,7 @@ end sub
 ' rows one at a time behind it, and the existing guards (gridBuilt /
 ' catalogRowsBuilt / catalogTask) keep later OnEnter visits consistent.
 function RebuildRows() as void
+    CancelHeroMetaRequest()
     if m.catalogTask <> invalid
         ' STOP, and not a bare RemoveChild. The walk is a Task on its own thread,
         ' so removing a running Task node frees the node WITHOUT killing the
@@ -328,7 +608,10 @@ function RowCellSize(row as object) as object
         mt = row.metaType
         if row.posterShape <> invalid then ps = row.posterShape
     end if
-    return TileCellSize(mt, ps)
+    ' Compact Home tiles and their row slots together, preserving each poster
+    ' shape while revealing more of the next row at the bottom of the screen.
+    size = TileCellSize(mt, ps)
+    return [Int(size[0] * 0.92), Int(size[1] * 0.92)]
 end function
 
 ' Per-row item sizes, one vector2d per grid row, in grid order. Rebuilt with the
@@ -448,6 +731,7 @@ sub RefreshContinueWatching()
         m.catalog.numRows = m.gridRows.Count()
         ApplyCatalogSizes()
     end if
+    RefreshHomeHeroFromFocus()
 end sub
 
 ' Refresh a row node's poster children to match a fresh meta list, reusing the
@@ -494,13 +778,12 @@ function TypeLabel(metaType as string) as string
 end function
 
 function OnEnter(params as object) as void
-    ' The language first, then the hint line this screen owns: it lives in the
-    ' markup as the English default, and the busy line below saves and
-    ' restores whatever is there — so the hint has to be the table's word
-    ' before anything saves it.
+    ' Pull the current language before rebuilding the rail or grid labels.
     RefreshTexts()
-    m.homeSub.text = Lang("home", "hint")
-    if not m.railBuilt then BuildRail()
+    if not m.railBuilt or m.railLanguage <> TextsLanguage()
+        BuildRail()
+        m.railLanguage = TextsLanguage()
+    end if
     StartCatalogLoad()
     sig = ContinueWatchingSignature()
     ' The grid is not rebuilt on every visit — that is what m.gridBuilt is
@@ -527,10 +810,11 @@ function OnEnter(params as object) as void
     ' into the tiles, the rail — at the icon the user left it on — for a trip
     ' opened from the rail. BlurFocus records which had it.
     if m.railWasFocus = true
-        m.rail.SetFocus(true)
+        FocusRail()
     else
         m.catalog.SetFocus(true)
     end if
+    if m.catalog.rowItemFocused <> invalid then UpdateHomeHero(m.catalog.rowItemFocused)
 end function
 
 function OnExit() as void
@@ -548,47 +832,106 @@ end function
 ' Continue-Watching open still in flight is cancelled: the user moved on, so
 ' its Details push must not land on the next screen.
 sub BlurFocus()
-    m.railWasFocus = m.rail.HasFocus()
+    m.railWasFocus = m.railFocusIndex >= 0
+    CollapseRail()
+    CancelHeroMetaRequest()
     CancelOpen()
 end sub
 
 ' The left rail: a fixed one-column icon menu. Built once (nodes created in init
 ' can be dropped pre-Show, so it happens on first OnEnter like the catalog). The
 ' last row is a modal (the support dialog), so its entry carries dialog = true
-' and onRailItemSelected routes it through the pushRequest contract the same
-' way; MainScene picks it up and shows the native dialog instead of pushing a
+' and selection routes it through the pushRequest contract the same way;
+' MainScene picks it up and shows the native dialog instead of pushing a
 ' stack screen.
 sub BuildRail()
     entries = [
-        { glyph: "pkg:/images/search.png", screen: "searchScreen" }
-        { glyph: "pkg:/images/discover.png", screen: "discoverScreen" }
-        { glyph: "pkg:/images/library.png", screen: "libraryScreen" }
-        { glyph: "pkg:/images/puzzle.png", screen: "addonsScreen" }
-        { glyph: "pkg:/images/settings.png", screen: "settingsScreen" }
-        { glyph: "pkg:/images/support.png", screen: "supportDialog", dialog: true }
+        { glyph: "pkg:/images/search.png", name: Lang("home", "railSearch"), screen: "searchScreen" }
+        { glyph: "pkg:/images/discover.png", name: Lang("home", "railDiscover"), screen: "discoverScreen" }
+        { glyph: "pkg:/images/library.png", name: Lang("home", "railLibrary"), screen: "libraryScreen" }
+        { glyph: "pkg:/images/puzzle.png", name: Lang("home", "railAddons"), screen: "addonsScreen" }
+        { glyph: "pkg:/images/settings.png", name: Lang("home", "railSettings"), screen: "settingsScreen" }
+        { glyph: "pkg:/images/support.png", name: Lang("home", "railSupport"), screen: "supportDialog", dialog: true }
     ]
     m.railEntries = entries
-    content = CreateObject("roSGNode", "ContentNode")
-    for each entry in entries
-        row = content.CreateChild("ContentNode")
-        item = row.CreateChild("ContentNode")
-        item.title = entry.glyph
+    m.railFocusIndex = -1
+    if m.railRememberedIndex >= entries.Count() then m.railRememberedIndex = 0
+    while m.rail.GetChildCount() > 0
+        m.rail.RemoveChildIndex(0)
+    end while
+    for i = 0 to entries.Count() - 1
+        entry = entries[i]
+        tile = m.rail.CreateChild("RailTile")
+        tile.focusable = true
+        tile.translation = [0, i * 120]
+        tile.callFunc("SetTile", entry.glyph, entry.name)
     end for
-    m.rail.content = content
-    m.rail.numRows = entries.Count()
     m.railBuilt = true
+end sub
+
+sub FocusRail()
+    if m.railFocusIndex < 0 then m.railFocusIndex = m.railRememberedIndex
+    if m.railFocusIndex >= m.rail.GetChildCount() then m.railFocusIndex = 0
+    m.railRememberedIndex = m.railFocusIndex
+    SetRailExpanded(true)
+    m.rail.GetChild(m.railFocusIndex).focused = true
+    m.rail.GetChild(m.railFocusIndex).SetFocus(true)
+    if m.railExpandAnim <> invalid
+        m.railCollapseAnim.control = "stop"
+        m.railExpandAnim.control = "stop"
+        m.railExpandAnim.control = "start"
+    end if
+end sub
+
+sub CollapseRail()
+    if m.railFocusIndex >= 0 and m.railFocusIndex < m.rail.GetChildCount()
+        m.railRememberedIndex = m.railFocusIndex
+        m.rail.GetChild(m.railFocusIndex).focused = false
+    end if
+    m.railFocusIndex = -1
+    SetRailExpanded(false)
+    if m.railCollapseAnim <> invalid
+        m.railExpandAnim.control = "stop"
+        m.railCollapseAnim.control = "stop"
+        m.railCollapseAnim.control = "start"
+    end if
+end sub
+
+sub SetRailExpanded(expanded as boolean)
+    for i = 0 to m.rail.GetChildCount() - 1
+        m.rail.GetChild(i).expanded = expanded
+    end for
+    if expanded
+        m.railBg.color = Theme().navBgExpanded
+        m.railBrandCollapseAnim.control = "stop"
+        m.railBrandExpandAnim.control = "stop"
+        m.railBrandExpandAnim.control = "start"
+    else
+        m.railBg.color = Theme().navBg
+        m.railBrandExpandAnim.control = "stop"
+        m.railBrandCollapseAnim.control = "stop"
+        m.railBrandCollapseAnim.control = "start"
+    end if
+end sub
+
+sub MoveRailFocus(delta as integer)
+    if m.railFocusIndex < 0 then return
+    nextIndex = m.railFocusIndex + delta
+    if nextIndex < 0 or nextIndex >= m.rail.GetChildCount() then return
+    m.rail.GetChild(m.railFocusIndex).focused = false
+    m.railFocusIndex = nextIndex
+    m.railRememberedIndex = nextIndex
+    m.rail.GetChild(nextIndex).focused = true
+    m.rail.GetChild(nextIndex).SetFocus(true)
 end sub
 
 ' OK on a rail icon: an action request the Scene routes. Stack screens publish
 ' screen + params; the support modal adds dialog = true, which must survive into
 ' the pushRequest or the Scene would push the dialog node as a bogus stack
 ' screen and hide Home instead of showing the native dialog over it.
-sub onRailItemSelected()
-    data = m.rail.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    row = data[0]
-    if row < 0 or m.railEntries = invalid or row >= m.railEntries.Count() then return
-    entry = m.railEntries[row]
+sub SelectRailEntry()
+    if m.railFocusIndex < 0 or m.railEntries = invalid or m.railFocusIndex >= m.railEntries.Count() then return
+    entry = m.railEntries[m.railFocusIndex]
     request = {
         screen: entry.screen
         params: {}
@@ -598,23 +941,36 @@ sub onRailItemSelected()
 end sub
 
 ' Cross-focus between the rail and the catalog grid. Left from the grid enters
-' the rail; Right from the rail enters the grid. Whether a RowList at its left
-' edge lets Left bubble here is device-dependent — if the grid swallows it, the
-' fallback is starting Home focus on the rail. Verify on-device.
+' the rail; Right from the rail enters the grid. The rail tiles are plain
+' focusable nodes, so Up/Down/OK are handled here and the default focus
+' navigation is suppressed while the rail owns focus.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
-    if key = "right" and m.rail.HasFocus()
-        m.catalog.SetFocus(true)
-        return true
+    if m.railFocusIndex >= 0
+        if key = "right"
+            CollapseRail()
+            m.catalog.SetFocus(true)
+            return true
+        else if key = "up"
+            MoveRailFocus(-1)
+            return true
+        else if key = "down"
+            MoveRailFocus(1)
+            return true
+        else if key = "OK"
+            SelectRailEntry()
+            return true
+        else if key = "options"
+            CollapseRail()
+            m.catalog.SetFocus(true)
+            return true
+        end if
     else if key = "left" and m.catalog.HasFocus()
-        m.rail.SetFocus(true)
+        FocusRail()
         return true
     else if key = "options"
         if m.catalog.HasFocus()
-            m.rail.SetFocus(true)
-            return true
-        else if m.rail.HasFocus()
-            m.catalog.SetFocus(true)
+            FocusRail()
             return true
         end if
     end if
@@ -663,14 +1019,23 @@ end sub
 sub OpenContinueWatching(item as object)
     address = MetaAddress()
     CancelOpen()
+    CancelHeroMetaRequest()
+    key = HomeHeroMetaKey(item)
+    if m.heroMetaCache.DoesExist(key)
+        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", item, m.heroMetaCache[key])
+        m.top.pushRequest = {
+            screen: "detailsScreen"
+            params: {
+                addonAddress: address
+                meta: meta
+                resume: { videoId: item.videoId, season: item.season, episode: item.episode, position: item.position }
+            }
+        }
+        return
+    end if
     m.pendingOpen = {
         address: address
-        meta: {
-            id: item.id
-            type: item.type
-            name: item.name
-            poster: item.poster
-        }
+        meta: item
         resume: {
             videoId: item.videoId
             season: item.season
@@ -720,7 +1085,11 @@ sub onContinueWatchingLoaded()
     if pending = invalid then return
 
     meta = pending.meta
-    if result <> invalid and result.ok and result.meta <> invalid then meta = result.meta
+    if result <> invalid and result.ok and result.meta <> invalid
+        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", pending.meta, result.meta)
+        key = HomeHeroMetaKey(meta)
+        if key <> "" then m.heroMetaCache[key] = meta
+    end if
     m.top.pushRequest = {
         screen: "detailsScreen"
         params: {
@@ -734,14 +1103,14 @@ end sub
 ' A brief "Loading…" on the hint line while the Continue-Watching meta is
 ' fetched; the original hint text comes back when the open resolves or cancels.
 sub ShowHomeBusy(show as boolean)
-    if m.homeSub = invalid then return
+    if m.heroDescription = invalid then return
     if show
-        if m.homeSub.text <> Lang("home", "loading")
-            m.homeHint = m.homeSub.text
-            m.homeSub.text = Lang("home", "loading")
+        if m.heroDescription.text <> Lang("home", "loading")
+            m.heroBeforeBusy = m.heroDescription.text
+            m.heroDescription.text = Lang("home", "loading")
         end if
     else
-        if m.homeHint <> invalid and m.homeHint <> "" then m.homeSub.text = m.homeHint
-        m.homeHint = ""
+        if m.heroBeforeBusy <> invalid then m.heroDescription.text = m.heroBeforeBusy
+        m.heroBeforeBusy = ""
     end if
 end sub

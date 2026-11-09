@@ -25,23 +25,85 @@
 
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
+        <Timer id="heroMetaDelay" duration="0.35" repeat="false" />
+        <Poster
+            id="heroPoster"
+            translation="[0, 0]"
+            width="1920"
+            height="1080"
+            loadWidth="1920"
+            loadHeight="1080"
+            loadDisplayMode="scaleToZoom"
+            opacity="1.0" />
+        <Rectangle
+            id="heroScrim"
+            translation="[0, 0]"
+            width="1920"
+            height="1080"
+            color="0x00000099" />
+        <Poster
+            id="heroMask"
+            translation="[0, 320]"
+            width="1920"
+            height="760"
+            loadDisplayMode="scaleToFill"
+            uri="pkg:/images/mask.png" />
+        <Poster
+            id="heroLogo"
+            translation="[162, 72]"
+            width="820"
+            height="460"
+            loadWidth="820"
+            loadHeight="460"
+            loadDisplayMode="scaleToFit"
+            visible="false" />
         <Label
-            id="homeTitle"
-            translation="[150, 48]"
-            width="1760"
-            height="70"
-            text="Rokumio"
+            id="heroTitle"
+            translation="[162, 112]"
+            width="680"
+            height="90"
+            wrap="true"
             font="font:LargeBoldSystemFont" />
         <Label
-            id="homeSub"
-            translation="[150, 128]"
-            width="1760"
-            height="40"
-            text="Move between rows, OK for details, Back to exit, * Focus nav-rail and back"
+            id="heroMeta"
+            translation="[166, 216]"
+            width="900"
+            height="30"
+            font="font:SmallSystemFont" />
+        <Group id="heroRating" translation="[166, 256]" visible="false">
+            <Poster
+                id="heroImdbLogo"
+                width="64"
+                height="32"
+                loadWidth="64"
+                loadHeight="32"
+                loadDisplayMode="scaleToFit"
+                uri="pkg:/images/imdb.png" />
+            <Label
+                id="heroRatingText"
+                translation="[76, 0]"
+                width="110"
+                height="36"
+                vertAlign="center"
+                font="font:LargeBoldSystemFont" />
+        </Group>
+        <Label
+            id="heroGenres"
+            translation="[166, 307]"
+            width="860"
+            height="32"
+            font="font:SmallSystemFont" />
+        <Label
+            id="heroDescription"
+            translation="[166, 357]"
+            width="860"
+            height="145"
+            wrap="true"
+            vertAlign="top"
             font="font:SmallSystemFont" />
         <Label
             id="homeEmpty"
-            translation="[200, 360]"
+            translation="[172, 570]"
             width="1500"
             height="90"
             horizAlign="center"
@@ -50,32 +112,12 @@
             visible="false"
             font="font:MediumSystemFont" />
 
-        <!-- Left rail: the vertical icon menu (Search, Discover, Library,
-             Add-ons, Settings, Support). A one-column RowList of RailTiles; OK
-             on an icon publishes a pushRequest the Scene routes. Focus reaches
-             it from the grid via Left/Right. -->
-        <Rectangle id="railBg" width="140" height="1080"/>
-        <RowList
-            id="rail"
-            translation="[0, 380]"
-            numRows="6"
-            itemSize="[140, 80]"
-            itemSpacing="[0, 40]"
-            rowItemSize="[[80, 80]]"
-            focusXOffset="[30]"
-            rowItemSpacing="[[0, 0]]"
-            showRowLabel="[false]"
-            drawFocusFeedback="false"
-            skipFocusAnimations="true"
-            itemComponentName="RailTile"
-            vertFocusAnimationStyle="floatingFocus"/>
-
         <!-- Poster rows: a single RowList owns the whole grid physics (vertical
              row scrolling/clipping, horizontal per-row tiles, row labels). Each
              item renders as a PosterTile component. Content is set in code. -->
         <RowList
             id="catalog"
-            translation="[150, 210]"
+            translation="[122, 570]"
             numRows="2"
             itemSize="[1780, 405]"
             itemSpacing="[0, 66]"
@@ -85,5 +127,68 @@
             rowLabelFont="font:MediumBoldSystemFont"
             drawFocusFeedback="true"
             itemComponentName="PosterTile" />
+        <!-- Left rail: the vertical icon menu (Search, Discover, Library,
+             Add-ons, Settings, Support). Collapsed to icons; focusing it
+             widens the backdrop over the grid and the focused tile shows
+             its name. Tiles are RailTile children of the rail group. -->
+        <Rectangle id="railBg" width="112" height="1080"/>
+        <Poster
+            id="railBrand"
+            translation="[32, 62]"
+            width="48"
+            height="32"
+            loadWidth="48"
+            loadHeight="32"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/logo.png" />
+        <Poster
+            id="railBrandExpanded"
+            translation="[83, 62]"
+            width="154"
+            height="32"
+            loadWidth="154"
+            loadHeight="32"
+            loadDisplayMode="limitSize"
+            opacity="0.0"
+            uri="pkg:/images/logo_expanded.png" />
+        <Group id="rail" translation="[0, 380]" />
+        <Animation id="railBrandExpandAnim" duration="0.28" repeat="false">
+            <FloatFieldInterpolator
+                id="railBrandMarkExpandInterp"
+                fieldToInterp="railBrand.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[1.0, 0.0]" />
+            <FloatFieldInterpolator
+                id="railBrandWordmarkExpandInterp"
+                fieldToInterp="railBrandExpanded.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]" />
+        </Animation>
+        <Animation id="railBrandCollapseAnim" duration="0.18" repeat="false">
+            <FloatFieldInterpolator
+                id="railBrandMarkCollapseInterp"
+                fieldToInterp="railBrand.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]" />
+            <FloatFieldInterpolator
+                id="railBrandWordmarkCollapseInterp"
+                fieldToInterp="railBrandExpanded.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[1.0, 0.0]" />
+        </Animation>
+        <Animation id="railExpandAnim" duration="0.28" repeat="false">
+            <FloatFieldInterpolator
+                id="railExpandInterp"
+                fieldToInterp="railBg.width"
+                key="[0.0, 0.6, 1.0]"
+                keyValue="[112.0, 286.0, 320.0]" />
+        </Animation>
+        <Animation id="railCollapseAnim" duration="0.18" repeat="false">
+            <FloatFieldInterpolator
+                id="railCollapseInterp"
+                fieldToInterp="railBg.width"
+                key="[0.0, 0.6, 1.0]"
+                keyValue="[320.0, 166.0, 112.0]" />
+        </Animation>
     </children>
 </component>

@@ -1,51 +1,71 @@
-' RailTile — square icon tile for the Home left rail. Same field plumbing as
-' every tile: RowList feeds seed the ContentNode through itemContent and drive
-' focus through itemHasFocus / rowHasFocus. The glyph is read from
-' itemContent.title.
+' RailTile — icon+name tile for the Home left rail. The rail is a Group of
+' these, focused one at a time. Collapsed, the icon sits centered; expanded,
+' it slides left and the section name fades in on every tile. Focus is icon
+' color plus the name's weight — no tile background.
 
 sub init()
-    m.border = m.top.FindNode("railBorder")
     m.glyph = m.top.FindNode("railGlyph")
-    m.zoomAnim = m.top.FindNode("zoomAnim")
-
-    m.border.color = Theme().accentClear
-
-    m.top.ObserveField("itemContent", "onItemContentChanged")
-    m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
-    m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
+    m.label = m.top.FindNode("railLabel")
+    m.stepTimer = m.top.FindNode("stepTimer")
+    m.glyphX = 32
+    m.targetX = 32
+    m.stepTimer.ObserveField("fire", "onStepFire")
+    m.top.ObserveField("focused", "onStateChanged")
+    m.top.ObserveField("expanded", "onStateChanged")
 end sub
 
-' Every inbound field change re-applies the whole look from the tile's current
-' field values (see StreamTile.UpdateLook: RowList recycles items, so the look
-' must be rebuilt on itemContent changes too, or a recycled tile carries stale
-' dimming into a fresh row).
-sub UpdateLook()
+sub SetTile(glyphUri as string, sectionName as string)
+    m.glyph.uri = glyphUri
+    m.label.text = sectionName
+    ApplyState()
+end sub
+
+sub ApplyState()
     t = Theme()
-    if m.top.itemHasFocus
-        m.zoomAnim.control = "start"
+    if m.top.focused
         m.glyph.blendColor = t.accent
-        m.top.opacity = 1.0
+        m.label.color = t.navLabelActive
     else
-        m.zoomAnim.control = "stop"
-        m.glyph.scale = [1.0,1.0]
-        m.glyph.blendColor = t.textSecondary
-        m.top.opacity = 0.30
+        m.glyph.blendColor = t.navIdle
+        m.label.color = t.navIdle
     end if
 end sub
 
-sub onItemContentChanged()
-    if m.top.itemContent = invalid then return
-    ' Unconditional for the same reason as PosterTile: re-assigning the uri is
-    ' what makes Roku re-request an evicted texture, so guarding it strands the
-    ' icon blank on a recycled tile.
-    m.glyph.uri = m.top.itemContent.title
-    UpdateLook()
+sub onStateChanged()
+    ApplyState()
+    m.targetX = 10
+    if not m.top.expanded then m.targetX = 32
+    if m.glyphX <> m.targetX
+        progress = (32 - m.glyphX) / 22
+        if progress < 0 then progress = 0
+        if progress > 1 then progress = 1
+        m.label.opacity = progress
+        labelScale = 0.7 + 0.3 * progress
+        m.label.scale = [labelScale, labelScale]
+        m.label.visible = true
+        m.stepTimer.control = "stop"
+        m.stepTimer.control = "start"
+    else
+        m.label.visible = m.top.expanded
+    end if
 end sub
 
-sub onItemHasFocusChanged()
-    UpdateLook()
-end sub
-
-sub onRowHasFocusChanged()
-    UpdateLook()
+sub onStepFire()
+    if m.glyphX < m.targetX
+        m.glyphX = m.glyphX + 2
+    else
+        m.glyphX = m.glyphX - 2
+    end if
+    if (m.targetX - m.glyphX) * (m.targetX - m.glyphX) <= 4 then m.glyphX = m.targetX
+    m.glyph.translation = [m.glyphX, 16]
+    progress = (32 - m.glyphX) / 22
+    m.label.opacity = progress
+    labelScale = 0.7 + 0.3 * progress
+    m.label.scale = [labelScale, labelScale]
+    if m.glyphX = m.targetX
+        m.stepTimer.control = "stop"
+        m.label.opacity = 1
+        m.label.scale = [1.0, 1.0]
+        m.label.visible = m.top.expanded
+    end if
 end sub

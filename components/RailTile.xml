@@ -1,40 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="RailTile" extends="Group">
-    <!-- Square icon tile for the Home left rail. RowList drives it through the
-         same read-only interface fields as every tile (itemContent /
-         itemHasFocus / rowHasFocus). The icon glyph comes from
-         itemContent.title; navigation to the target screen happens in
-         HomeScreen's rowItemSelected observer. -->
+    <!-- Wide icon tile for the Home left rail, standalone (no RowList): the
+         rail is a Group of these, focused one at a time. Collapsed, the icon
+         sits centered; expanded, it steps left and the section name shows on
+         every tile. No per-tile background: the rail is the surface. -->
     <interface>
-        <field id="itemContent" type="node" />
-        <field id="itemHasFocus" type="boolean" />
-        <field id="rowHasFocus" type="boolean" />
+        <field id="focused" type="boolean" alwaysNotify="true" />
+        <field id="expanded" type="boolean" alwaysNotify="true" />
+        <function name="SetTile" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/components/RailTile.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <!-- railBorder is the frame, railFace the inset face so focus draws a
-             border instead of painting over the tile. -->
-        <Animation id="zoomAnim" duration="0.18">
-            <Vector2DFieldInterpolator
-                id="zoomInterp"
-                fieldToInterp="railGlyph.scale"
-                key="[0.0, 1.0]"
-                keyValue="[[1.0, 1.0], [1.35, 1.35]]" />
-        </Animation>
+        <Timer id="stepTimer" duration="0.016" repeat="true" />
 
-        <Rectangle id="railBorder" width="80" height="80">
-            <Poster
-                id="railGlyph"
-                width="60"
-                height="60"
-                loadWidth="60"
-                loadHeight="60"
-                loadDisplayMode="limitSize"
-                scaleRotateCenter="[30, 30]"
-                translation="[10, 10]" />
-        </Rectangle>
+        <Poster
+            id="railGlyph"
+            width="48"
+            height="48"
+            loadWidth="48"
+            loadHeight="48"
+            loadDisplayMode="limitSize"
+            translation="[32, 16]" />
+        <Label
+            id="railLabel"
+            translation="[84, 16]"
+                width="228"
+                height="48"
+                vertAlign="center"
+                scaleRotateCenter="[0, 40]"
+                font="font:MediumSystemFont"
+                visible="false" />
     </children>
 </component>
