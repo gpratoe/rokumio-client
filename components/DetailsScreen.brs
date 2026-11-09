@@ -73,9 +73,12 @@ function OnEnter(params as object) as void
 
     ' Resume hint: the Continue-Watching row passes its own; otherwise the local
     ' library stands in (catalog-opened shows still know where you stopped).
-    m.resume = params.resume
-    if m.resume = invalid and m.stores <> invalid
+    if params.resume <> invalid
+        m.resume = params.resume
+    else if m.stores <> invalid
         m.resume = m.stores.library.callFunc("LibraryResumeFor", meta.id)
+    else
+        m.resume = invalid
     end if
 
     m.metaRefreshed = false
@@ -415,14 +418,22 @@ end sub
 
 sub OpenEpisodes()
     if m.meta = invalid then return
+    season = 0
+    episode = 0
+    position = 0
+    if m.resume <> invalid
+        season = m.resume.season
+        episode = m.resume.episode
+        position = m.resume.position
+    end if
     m.top.pushRequest = {
         screen: "episodesScreen"
         params: {
             addonAddress: m.addonAddress
             meta: m.meta
-            season: m.resume.season
-            episode: m.resume.episode
-            position: m.resume.position
+            season: season
+            episode: episode
+            position: position
         }
     }
 end sub
