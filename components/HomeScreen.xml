@@ -139,7 +139,7 @@
             height="32"
             loadWidth="48"
             loadHeight="32"
-            loadDisplayMode="scaleToFit"
+            loadDisplayMode="limitSize"
             uri="pkg:/images/logo.png" />
         <Poster
             id="railBrandExpanded"
@@ -148,7 +148,7 @@
             height="32"
             loadWidth="154"
             loadHeight="32"
-            loadDisplayMode="scaleToFit"
+            loadDisplayMode="limitSize"
             opacity="0.0"
             uri="pkg:/images/logo_expanded.png" />
         <Group id="rail" translation="[0, 380]" />

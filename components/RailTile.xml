@@ -26,9 +26,9 @@
             translation="[32, 16]" />
         <Label
             id="railLabel"
-            translation="[84, 0]"
+            translation="[84, 16]"
                 width="228"
-                height="80"
+                height="48"
                 vertAlign="center"
                 scaleRotateCenter="[0, 40]"
                 font="font:MediumSystemFont"
