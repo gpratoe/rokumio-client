@@ -442,12 +442,12 @@
     },
     "home": {
       "continueWatching": "Seguir viendo",
-      "railSearch": "Búsqueda",
+      "railSearch": "Buscar",
       "railDiscover": "Descubrir",
       "railLibrary": "Biblioteca",
       "railAddons": "Add-ons",
       "railSettings": "Ajustes",
-      "railSupport": "Soporte",
+      "railSupport": "Apoyar",
       "loading": "Cargando…",
       "emptyCatalogRows": "No se muestran filas de catálogo. Instala add-ons de catálogo o activa filas en Ajustes → Inicio."
     },
