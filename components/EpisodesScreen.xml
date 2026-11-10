@@ -60,6 +60,13 @@
              focusable — the flip is the screen swallowing LEFT/RIGHT out of
              the list. -->
         <Poster
+            id="seasonPill"
+            translation="[1332, 74]"
+            width="520"
+            height="64"
+            uri="pkg:/images/season-pill.png"
+            visible="false" />
+        <Poster
             id="seasonLeft"
             translation="[1344, 84]"
             width="44"

@@ -21,6 +21,7 @@ sub init()
     m.epName = m.top.FindNode("epName")
     m.bgPoster = m.top.FindNode("bgPoster")
     m.seasonName = m.top.FindNode("seasonName")
+    m.seasonPill = m.top.FindNode("seasonPill")
     m.seasonLeft = m.top.FindNode("seasonLeft")
     m.seasonRight = m.top.FindNode("seasonRight")
     m.epStatus = m.top.FindNode("epStatus")
@@ -470,11 +471,13 @@ sub UpdateSeasonIndicator()
         m.seasonName.text = ""
         m.seasonLeft.visible = false
         m.seasonRight.visible = false
+        if m.seasonPill <> invalid then m.seasonPill.visible = false
         return
     end if
     m.seasonName.text = SeasonLabel(m.seasons[m.activeRow])
     m.seasonLeft.visible = m.activeRow > 0
     m.seasonRight.visible = m.activeRow < m.seasons.Count() - 1
+    if m.seasonPill <> invalid then m.seasonPill.visible = true
 end sub
 
 ' Move the whole page to another season. The list keeps focus — only its
@@ -570,7 +573,7 @@ end function
 ' [seasonRow, itemIndex] for the resume hint's (season, episode), else the first
 ' cell. Rows follow the store's OrderedSeasons order, so specials live at the end.
 function ResumePosition() as object
-    if m.resume <> invalid
+    if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
         for s = 0 to m.seasons.Count() - 1
             if m.seasons[s] <> m.resume.season then continue for
             episodes = m.seasonEpisodes[s]

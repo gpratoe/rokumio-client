@@ -57,9 +57,19 @@ function OnEnter(params as object) as void
         end if
     end if
     ' Re-entry after a push (EpisodesScreen, streams, …): params is invalid and
-    ' the screen Group (not a focus target) was handed focus by the stack. A
-    ' chip must take focus back, or nothing inside is reachable.
+    ' the screen Group (not a focus target) was handed focus by the stack. The
+    ' resume hint may have moved while a child screen had focus (watching an
+    ' episode updates library state), so refresh it before handing focus back or
+    ' the Episodes chip would open on the stale spot from the first entry.
     if params = invalid
+        if m.meta <> invalid and m.stores <> invalid
+            m.resume = m.stores.library.callFunc("LibraryResumeFor", m.meta.id)
+            if m.meta.type = "series"
+                ShowSeries()
+            else
+                ShowMovie()
+            end if
+        end if
         RestoreFocus()
         return
     end if
@@ -411,13 +421,11 @@ end function
 
 sub OpenEpisodes()
     if m.meta = invalid then return
-    season = 0
-    episode = 0
-    position = 0
-    if m.resume <> invalid
-        season = m.resume.season
-        episode = m.resume.episode
-        position = m.resume.position
+    resume = invalid
+    if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
+        position = 0
+        if m.resume.position <> invalid then position = m.resume.position
+        resume = { season: m.resume.season, episode: m.resume.episode, position: position }
     end if
     ' The hint travels as a resume object, not bare ordinals: EpisodesScreen
     ' reads params.resume to land the browser on the watch-in-progress spot.
@@ -430,7 +438,7 @@ sub OpenEpisodes()
         params: {
             addonAddress: m.addonAddress
             meta: episodeMeta
-            resume: { season: season, episode: episode, position: position }
+            resume: resume
         }
     }
 end sub
