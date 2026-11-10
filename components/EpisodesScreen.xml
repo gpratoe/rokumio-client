@@ -88,6 +88,15 @@
             uri="pkg:/images/arrow_right.png"
             visible="false" />
 
+        <!-- Deferred list build: a big series' content tree is a chunky
+             synchronous chunk, and building it inside the push freezes the
+             transition. Chrome paints on frame one; this timer fires one beat
+             later and the cards build then. -->
+        <Timer
+            id="buildTimer"
+            duration="0.06"
+            repeat="false" />
+
         <!-- One wide card per episode, one item per row: Up/Down are the only
              keys the list eats, so Left/Right stay free for the season flip.
              The list starts low enough that the second visible card dips its

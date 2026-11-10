@@ -34,6 +34,11 @@ sub init()
     m.seasonRight.blendColor = t.textSecondary
     m.epStatus.color = t.textSecondary
 
+    m.buildTimer = m.top.FindNode("buildTimer")
+    m.buildTimer.ObserveField("fire", "onBuildTick")
+    m.buildTimer.control = "stop"
+    m.pendingSeriesMeta = invalid
+
     m.epList.ObserveField("rowItemSelected", "onItemSelected")
 
     m.seasons = []
@@ -85,7 +90,10 @@ function OnEnter(params as object) as void
         ' with no fetch.
         m.textsLanguage = TextsLanguage()
         if m.seriesMeta <> invalid and m.stores <> invalid then
-            BuildList(m.seriesMeta)
+            ' Same beat-splitting as a fresh push: rebuild one frame later, so
+            ' returning from Settings paints immediately too.
+            m.pendingSeriesMeta = m.seriesMeta
+            m.buildTimer.control = "start"
             return
         end if
     end if
@@ -134,10 +142,17 @@ sub LoadSeries()
     ClearList()
     UpdateSeasonIndicator()
 
-    m.hasLocalEpisodes = LocalSeriesHasEpisodes(m.meta)
+    buildMeta = m.meta
+    if m.stores <> invalid
+        cached = m.stores.episodes.callFunc("EpisodesFullMeta", m.meta.type, m.meta.id)
+        if cached <> invalid then buildMeta = cached
+    end if
+
+    m.hasLocalEpisodes = LocalSeriesHasEpisodes(buildMeta)
     if m.hasLocalEpisodes
-        m.seriesMeta = m.meta
-        BuildList(m.meta)
+        m.seriesMeta = buildMeta
+        m.pendingSeriesMeta = buildMeta
+        m.buildTimer.control = "start"
     else
         m.epStatus.text = Lang("episodes", "loading")
         m.epStatus.visible = true
@@ -158,6 +173,19 @@ function LocalSeriesHasEpisodes(meta as object) as boolean
     return meta <> invalid and meta.videos <> invalid and meta.videos.Count() > 0
 end function
 
+' The deferred half of the instant build: one beat after the push completes,
+' with the transition already painted, the heavy synchronous chunk (the full
+' series grouping, the watch-mark decode, the date batch, the card page) runs.
+' Without this beat the push itself freezes on a big series — the exact
+' transition Home→Details renders free because its work also happens after
+' the first frame.
+sub onBuildTick()
+    meta = m.pendingSeriesMeta
+    m.pendingSeriesMeta = invalid
+    if meta = invalid then return
+    BuildList(meta)
+end sub
+
 ' Reset the list state a fresh visit starts from — shared by the instant-build
 ' and the loading paths so both begin identically.
 sub ClearList()
@@ -172,6 +200,10 @@ sub ClearList()
     m.seasonContents = []
     m.activeRow = -1
     m.focusItem = invalid
+    ' An in-flight deferred build from the previous visit has nothing to say
+    ' to this one.
+    m.pendingSeriesMeta = invalid
+    m.buildTimer.control = "stop"
 end sub
 
 ' Logo artwork: a loaded logo takes the hero slot and the title steps aside;
@@ -246,8 +278,10 @@ sub onSeriesLoaded()
         return
     end if
 
-    ' The instant build from Details' meta and the fetch answered the same
-    ' series: leave the painted list alone. A rebuild here would row-jump the
+    if m.stores <> invalid then m.stores.episodes.callFunc("EpisodesCacheFullMeta", result.meta)
+
+    ' The instant build from a cached/handed-off meta and the fetch answered the
+    ' same series: leave the painted list alone. A rebuild here would row-jump the
     ' user back to the top card for nothing.
     if m.hasLocalEpisodes and m.seriesMeta <> invalid and result.meta.id = m.seriesMeta.id
         localCount = 0

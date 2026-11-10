@@ -40,6 +40,9 @@
         <function name="EpisodesOrderedVideoIds" />
         <function name="EpisodesResolveVideoId" />
         <function name="EpisodesSeasons" />
+        <function name="EpisodesCacheFullMeta" />
+        <function name="EpisodesDisplayMeta" />
+        <function name="EpisodesFullMeta" />
         <function name="LibraryAddSaved" />
         <function name="LibraryBuildLibraryChangeItem" />
         <function name="LibraryBuildWatchStateItem" />
