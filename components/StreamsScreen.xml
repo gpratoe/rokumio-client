@@ -96,6 +96,13 @@
              directions the user can actually move; the name keeps its
              centered box regardless, so the row stays stable. -->
         <Poster
+            id="providerPill"
+            translation="[752, 76]"
+            width="1096"
+            height="64"
+            uri="pkg:/images/provider-pill.png"
+            visible="false" />
+        <Poster
             id="arrowLeft"
             translation="[764, 80]"
             width="56"

@@ -39,6 +39,7 @@ sub init()
     m.arrowLeft = m.top.FindNode("arrowLeft")
     m.arrowRight = m.top.FindNode("arrowRight")
     m.providerName = m.top.FindNode("providerName")
+    m.providerPill = m.top.FindNode("providerPill")
     m.providerSegments = m.top.FindNode("providerSegments")
     m.streamsPlaceholder = m.top.FindNode("streamsPlaceholder")
     m.bg = m.top.FindNode("streamBg")
@@ -398,6 +399,7 @@ sub UpdateHeader()
         m.providerName.text = ""
         m.arrowLeft.visible = false
         m.arrowRight.visible = false
+        if m.providerPill <> invalid then m.providerPill.visible = false
         if m.providerSegments <> invalid then m.providerSegments.visible = false
         return
     end if
@@ -409,6 +411,7 @@ sub UpdateHeader()
 
     m.arrowLeft.visible = m.activeIndex > 0
     m.arrowRight.visible = m.activeIndex < m.providers.Count() - 1
+    if m.providerPill <> invalid then m.providerPill.visible = true
 
     if m.segments.Count() <> m.providers.Count() then RebuildSegments()
     m.providerSegments.visible = m.segments.Count() > 1
