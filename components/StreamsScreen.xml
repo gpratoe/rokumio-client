@@ -30,7 +30,7 @@
 
     <children>
         <Rectangle id="streamBg" width="1920" height="1080" />
-        <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToZoom" />
+        <Poster id="bgPoster" width="1920" height="1080" loadWidth="1920" loadHeight="1080" loadDisplayMode="scaleToZoom" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
 
         <!-- Left: same hero language as Details/Home — the logo (fixed box,
