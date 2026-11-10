@@ -33,26 +33,50 @@
         <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToZoom" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
 
-        <!-- Left: title + optional episode line + synopsis. No poster. -->
+        <!-- Left: same hero language as Details/Home — the logo (fixed box,
+             scaleToFit keeps one layout whatever the ratio), the fallback
+             title when a stream has no logo, the action line, the resume
+             state line, the synopsis. No poster. -->
+        <Poster
+            id="heroLogo"
+            translation="[80, 72]"
+            width="560"
+            height="360"
+            loadWidth="560"
+            loadHeight="360"
+            loadDisplayMode="scaleToFit"
+            visible="false" />
         <Label
             id="headTitle"
-            translation="[80, 150]"
-            width="620"
-            height="90"
-            horizAlign="left"
+            translation="[80, 132]"
+            width="600"
+            height="200"
             wrap="true"
+            vertAlign="top"
+            horizAlign="left"
             font="font:LargeBoldSystemFont" />
         <Label
             id="headSub"
-            translation="[80, 250]"
+            translation="[80, 452]"
             width="620"
             height="40"
-            font="font:MediumSystemFont" />
+            horizAlign="left"
+            font="font:SmallSystemFont" />
+        <Label
+            id="resumeLine"
+            translation="[80, 500]"
+            width="620"
+            height="36"
+            wrap="true"
+            horizAlign="left"
+            vertAlign="center"
+            font="font:MediumBoldSystemFont"
+            visible="false" />
         <Label
             id="synopsis"
-            translation="[80, 306]"
+            translation="[80, 552]"
             width="600"
-            height="640"
+            height="380"
             wrap="true"
             horizAlign="left"
             vertAlign="top"
@@ -67,31 +91,37 @@
             vertAlign="top"
             font="font:SmallSystemFont" />
 
-        <!-- Right: provider header (arrows + name + segment dots) above the
-             selectable stream list. The arrows appear only for directions the
-             user can actually move; the segments mark the position among the
-             providers. -->
+        <!-- Right: provider header — centered name between the arrows, the
+             segment dots centered beneath it. Arrows appear only for the
+             directions the user can actually move; the name keeps its
+             centered box regardless, so the row stays stable. -->
         <Poster
             id="arrowLeft"
-            translation="[760, 92]"
-            width="48"
-            height="48"
-            uri="pkg:/images/arrow-left.png"
+            translation="[764, 80]"
+            width="56"
+            height="56"
+            loadWidth="56"
+            loadHeight="56"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/arrow_left.png"
             visible="false" />
         <Label
             id="providerName"
-            translation="[824, 96]"
-            width="920"
+            translation="[832, 88]"
+            width="936"
             height="40"
-            horizAlign="left"
-            wrap="true"
-            font="font:MediumBoldSystemFont" />
+            horizAlign="center"
+            vertAlign="center"
+            font="font:LargeBoldSystemFont" />
         <Poster
             id="arrowRight"
-            translation="[1768, 92]"
-            width="48"
-            height="48"
-            uri="pkg:/images/arrow-right.png"
+            translation="[1780, 80]"
+            width="56"
+            height="56"
+            loadWidth="56"
+            loadHeight="56"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/arrow_right.png"
             visible="false" />
         <Group
             id="providerSegments"
@@ -100,9 +130,9 @@
             id="streamsList"
             translation="[760, 180]"
             numRows="1"
-            itemSize="[1080, 312]"
+            itemSize="[1080, 332]"
             itemSpacing="[0, 12]"
-            rowItemSize="[[1080, 300]]"
+            rowItemSize="[[1080, 320]]"
             rowItemSpacing="[[0, 0]]"
             showRowLabel="false"
             drawFocusFeedback="false"

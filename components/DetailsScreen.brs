@@ -209,26 +209,16 @@ sub onHeroLogoStatus()
 end sub
 
 sub FitHeroLogo()
-    bitmapWidth = m.heroLogo.bitmapWidth
-    bitmapHeight = m.heroLogo.bitmapHeight
-    if bitmapWidth <= 0 or bitmapHeight <= 0 then return
-    ratio = bitmapWidth / bitmapHeight
-    if ratio < 1.7
-        maxWidth = 420
-        maxHeight = 460
-    else
-        maxWidth = 820
-        maxHeight = 190
-    end if
-    logoWidth = ratio * maxHeight
-    if logoWidth > maxWidth then logoWidth = maxWidth
-    logoHeight = logoWidth / ratio
+    fit = HeroFit(m.heroLogo.bitmapWidth, m.heroLogo.bitmapHeight)
+    if fit = invalid then return
+    logoWidth = fit.width
+    logoHeight = fit.height
 
-    m.heroLogo.width = Int(logoWidth)
-    m.heroLogo.height = Int(logoHeight)
-    if ratio < 1.7
+    m.heroLogo.width = logoWidth
+    m.heroLogo.height = logoHeight
+    if fit.tall
         m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
-        contentX = 162 + Int(logoWidth) + 48
+        contentX = 162 + logoWidth + 48
         m.detailType.translation = [contentX, 110]
         m.detailRating.translation = [contentX, 154]
         m.detailGenres.translation = [contentX, 198]

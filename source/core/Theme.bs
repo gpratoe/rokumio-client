@@ -31,7 +31,7 @@ function Theme() as object
             danger: "0x9E4034FF"
             screenBg: "0x0A0F0CFF"
             tileFace: "0x0B110DFF"
-            tileFaceFocus: "0x18231CFF"
+            tileFaceFocus: "0x1D1F1DFF"
             itemFace: "0x233329FF"
             dropdownBg: "0x101813FF"
             playerBg: "0x000000FF"

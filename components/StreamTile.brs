@@ -32,7 +32,7 @@ sub init()
     m.audioCompatibilityStatusIcon = m.top.FindNode("audioCompatibilityStatusIcon")
     m.cardTitleWidth = 830
     m.lines = []
-    for i = 1 to 5
+    for i = 1 to 6
         m.lines.Push(m.top.FindNode("tileLine" + i.ToStr()))
     end for
 
@@ -109,14 +109,18 @@ end sub
 ' recycle nothing may change except itemContent, so unless the look is rebuilt
 ' there a tile carries stale dimming (opacity 0.55) into a fresh RowList on
 ' another screen/media.
+' The chip look at card size: focus does not invert the content — it lifts
+' the plate one step (neutral grey over the near-black idle face) under a
+' white hairline ring. Idle keeps the soft hairline; semantic color stays
+' with the verdict glyphs, never with the frame.
 sub UpdateLook()
     t = Theme()
     if m.top.itemHasFocus
-        m.border.color = t.accentFocus
-        m.face.color = t.itemFace
+        m.border.blendColor = t.textWhite
+        m.face.blendColor = t.tileFaceFocus
     else
-        m.border.color = t.accentClear
-        m.face.color = t.tileFace
+        m.border.blendColor = t.borderSoft
+        m.face.blendColor = t.tileFace
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 

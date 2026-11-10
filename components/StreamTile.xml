@@ -16,10 +16,27 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <!-- tileBorder is the frame, tileFace the inset face so focus draws a
-             real mint frame instead of painting over the card. -->
-        <Rectangle id="tileBorder" width="1080" height="280">
-            <Rectangle id="tileFace" width="1072" height="270" translation="[4, 4]" />
+        <!-- tileBorder is the rounded ring, tileFace the inset rounded plate
+             it frames — the nine-patch look at card scale (fixed size, so a
+             plain pre-rendered PNG does the job). Focus tints the ring
+             accent and lights the plate; idle keeps both recessive. -->
+        <Poster
+            id="tileBorder"
+            width="1080"
+            height="320"
+            loadWidth="1080"
+            loadHeight="320"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/stream-card-ring.png">
+            <Poster
+                id="tileFace"
+                width="1064"
+                height="304"
+                loadWidth="1064"
+                loadHeight="304"
+                loadDisplayMode="limitSize"
+                translation="[8, 8]"
+                uri="pkg:/images/stream-card.png" />
             <!-- The title never scrolls, so it sits outside the clip and simply
                  truncates with an ellipsis when it is too long (width lets
                  EmojiLabel do the truncating). -->
@@ -82,32 +99,37 @@
                  brings the tail of an overflowing line into view. Clipping the
                  payload itself would drag the window along with the text and
                  show the same slice forever. -->
-            <Group id="cardClip" clippingRect="[0, 90, 1022, 190]">
+            <Group id="cardClip" clippingRect="[14, 86, 1052, 222]">
                 <Group id="cardContent">
                     <EmojiLabel
                         id="tileLine1"
                         height="34"
-                        translation="[18, 92]"
+                        translation="[18, 88]"
                         vertAlign="center" />
                     <EmojiLabel
                         id="tileLine2"
                         height="34"
-                        translation="[18, 130]"
+                        translation="[18, 124]"
                         vertAlign="center" />
                     <EmojiLabel
                         id="tileLine3"
                         height="34"
-                        translation="[18, 168]"
+                        translation="[18, 160]"
                         vertAlign="center" />
                     <EmojiLabel
                         id="tileLine4"
                         height="34"
-                        translation="[18, 206]"
+                        translation="[18, 196]"
                         vertAlign="center" />
                     <EmojiLabel
                         id="tileLine5"
                         height="34"
-                        translation="[18, 244]"
+                        translation="[18, 232]"
+                        vertAlign="center" />
+                    <EmojiLabel
+                        id="tileLine6"
+                        height="34"
+                        translation="[18, 268]"
                         vertAlign="center" />
                 </Group>
             </Group>
@@ -123,6 +145,6 @@
                 duration="0.03"
                 repeat="true"
                 control="stop" />
-        </Rectangle>
+        </Poster>
     </children>
 </component>

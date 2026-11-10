@@ -30,6 +30,10 @@ sub init()
     m.headSub = m.top.FindNode("headSub")
     m.synopsis = m.top.FindNode("synopsis")
     m.status = m.top.FindNode("status")
+    m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
+    m.heroLogoUri = ""
+    m.resumeLine = m.top.FindNode("resumeLine")
     m.bgPoster = m.top.FindNode("bgPoster")
     m.streamsList = m.top.FindNode("streamsList")
     m.arrowLeft = m.top.FindNode("arrowLeft")
@@ -43,10 +47,14 @@ sub init()
     m.bg.color = t.screenBg
     m.scrim.color = t.scrim
     m.headTitle.color = t.textPrimary
-    m.headSub.color = t.accent
-    m.synopsis.color = t.textSecondary
-    m.status.color = t.accent
+    m.headSub.color = t.textSecondary
+    m.resumeLine.color = t.accentWarm
+    m.synopsis.color = t.textPrimary
+    m.status.color = t.textSecondary
     m.providerName.color = t.textPrimary
+    m.streamsPlaceholder.color = t.textSecondary
+    m.arrowLeft.blendColor = t.textSecondary
+    m.arrowRight.blendColor = t.textSecondary
     m.streamsPlaceholder.color = t.textSecondary
 
     m.streamsList.ObserveField("rowItemSelected", "onStreamSelected")
@@ -126,6 +134,22 @@ sub ApplyParamsChrome(params as object)
     if bg = invalid then bg = ""
     m.bgPoster.uri = bg
 
+    ' Logo artwork: a loaded logo takes the hero slot and the title steps
+    ' aside (slid back on load status, see onHeroLogoStatus); artwork that
+    ' never loaded, or none offered at all, leaves the title up.
+    logo = StringOf(params.logo)
+    if logo <> m.heroLogoUri
+        m.heroLogoUri = logo
+        m.heroLogo.uri = logo
+    end if
+    if logo = ""
+        m.heroLogo.visible = false
+        m.headTitle.visible = true
+    else
+        m.heroLogo.visible = m.heroLogo.loadStatus = "ready"
+        m.headTitle.visible = not m.heroLogo.visible
+    end if
+
     action = ""
     synopsis = ""
     if params.metaType = "series"
@@ -152,9 +176,47 @@ sub ApplyParamsChrome(params as object)
     end if
     m.headSub.text = action
 
+    ' A saved position is the one thing this panel adds of its own: the push
+    ' came in as Play or Resume, and a nonzero position is a Resume.
+    seconds = Val(StringOf(params.position))
+    if seconds > 3
+        m.resumeLine.text = Fill(Lang("streams", "resumeFrom"), { time: FormatPosition(seconds) })
+        m.resumeLine.visible = true
+    else
+        m.resumeLine.visible = false
+    end if
+
     if synopsis = "" then synopsis = Lang("common", "noSynopsis")
     m.synopsis.text = synopsis
 end sub
+
+' Left pane, logo path: a ready logo has already been given the hero slot
+' and the fallback title steps aside; a failed load hands the title back.
+sub onHeroLogoStatus()
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    if m.heroLogo.loadStatus = "ready"
+        m.heroLogo.visible = true
+        m.headTitle.visible = false
+    else if m.heroLogo.loadStatus = "failed"
+        m.heroLogo.visible = false
+        m.headTitle.visible = true
+    end if
+end sub
+
+' Seconds → "1:23:05" or "23:05" for the resume state line.
+function FormatPosition(seconds as integer) as string
+    if seconds < 0 then seconds = 0
+    hours = Int(seconds / 3600)
+    minutes = Int((seconds Mod 3600) / 60)
+    secs = seconds Mod 60
+    if hours > 0 then return hours.ToStr() + ":" + Pad2(minutes) + ":" + Pad2(secs)
+    return minutes.ToStr() + ":" + Pad2(secs)
+end function
+
+function Pad2(value as integer) as string
+    if value < 10 then return "0" + value.ToStr()
+    return value.ToStr()
+end function
 
 ' Deterministically blank the stream list: a fresh empty content node, so no
 ' previously rendered cards can linger while the new load is in flight.
@@ -370,11 +432,16 @@ sub RebuildSegments()
         segment = CreateObject("roSGNode", "Rectangle")
         segment.width = 28
         segment.height = 6
+        segment.cornerRadius = 3
         segment.translation = [i * 36, 0]
         segment.color = Theme().segmentIdle
         m.providerSegments.AppendChild(segment)
         m.segments.Push(segment)
     end for
+    ' The dot row centers itself over the stream column, under the centered
+    ' name, and moves when the provider count does.
+    width = m.providers.Count() * 36 - 8
+    m.providerSegments.translation = [760 + Int((1080 - width) / 2), 156]
 end sub
 
 ' The status line: while any provider is still resolving, show how many remain
