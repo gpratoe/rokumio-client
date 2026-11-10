@@ -26,7 +26,7 @@
 
     <children>
         <Rectangle id="epBg" width="1920" height="1080" color="0x0" />
-        <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToZoom" />
+        <Poster id="bgPoster" width="1920" height="1080" loadWidth="1920" loadHeight="1080" loadDisplayMode="scaleToZoom" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
         <!-- The bottom ramp: below the hero band the mask ramps the artwork
              out to black, so the cards read over the art without dying the

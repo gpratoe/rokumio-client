@@ -408,14 +408,14 @@ sub OpenEpisodes()
         episode = m.resume.episode
         position = m.resume.position
     end if
+    ' The hint travels as a resume object, not bare ordinals: EpisodesScreen
+    ' reads params.resume to land the browser on the watch-in-progress spot.
     m.top.pushRequest = {
         screen: "episodesScreen"
         params: {
             addonAddress: m.addonAddress
             meta: m.meta
-            season: season
-            episode: episode
-            position: position
+            resume: { season: season, episode: episode, position: position }
         }
     }
 end sub

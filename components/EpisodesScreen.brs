@@ -45,6 +45,7 @@ sub init()
     m.seasonContents = []
     m.activeRow = -1
     m.focusItem = invalid
+    m.hasLocalEpisodes = false
     ' The language the content tree was built in — a language change rebuilds it.
     m.textsLanguage = ""
 end sub
@@ -123,6 +124,56 @@ function OnEnter(params as object) as void
     LoadSeries()
 end function
 
+' Begin a fresh season build. Chrome must not wait on the network: Details
+' hands over the very series meta it is displaying, so when that meta already
+' carries the episode list the cards render from it on frame one and the
+' loader below only refines in place — the same hand-off Home gives Details.
+' Only an entry with no local episode data drops to the status line.
+sub LoadSeries()
+    if m.meta = invalid then return
+    ClearList()
+    UpdateSeasonIndicator()
+
+    m.hasLocalEpisodes = LocalSeriesHasEpisodes(m.meta)
+    if m.hasLocalEpisodes
+        m.seriesMeta = m.meta
+        BuildList(m.meta)
+    else
+        m.epStatus.text = Lang("episodes", "loading")
+        m.epStatus.visible = true
+    end if
+
+    CancelLoad()
+    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onSeriesLoaded", {
+        addonAddress: m.addonAddress
+        metaType: "series"
+        metaId: m.meta.id
+    }, "episodesLoader")
+    m.loadTask = task
+end sub
+
+' Whether the meta in hand can grave the cards immediately: a season-bearing
+' episode list is already known, no fetch needed to paint.
+function LocalSeriesHasEpisodes(meta as object) as boolean
+    return meta <> invalid and meta.videos <> invalid and meta.videos.Count() > 0
+end function
+
+' Reset the list state a fresh visit starts from — shared by the instant-build
+' and the loading paths so both begin identically.
+sub ClearList()
+    m.epList.content = CreateObject("roSGNode", "ContentNode")
+    m.epList.numRows = 0
+    m.seasons = []
+    m.seasonEpisodes = []
+    m.seasonRuns = []
+    m.seriesMarks = []
+    m.dateParts = []
+    m.dateOffsets = []
+    m.seasonContents = []
+    m.activeRow = -1
+    m.focusItem = invalid
+end sub
+
 ' Logo artwork: a loaded logo takes the hero slot and the title steps aside;
 ' artwork that never loaded, or none offered at all, leaves the title up.
 sub ApplyHeroLogo()
@@ -164,35 +215,6 @@ sub ResetHeroLogoLayout()
     m.heroLogo.height = 460
 end sub
 
-' Begin a fresh season load: clear the old list, swap the status line to a
-' loading hint, and fetch the series meta off the UI thread. Re-entry with a new
-' series supersedes whatever is still in flight (CancelLoad drops it first).
-sub LoadSeries()
-    if m.meta = invalid then return
-    m.epList.content = CreateObject("roSGNode", "ContentNode")
-    m.epList.numRows = 0
-    m.seasons = []
-    m.seasonEpisodes = []
-    m.seasonRuns = []
-    m.seriesMarks = []
-    m.dateParts = []
-    m.dateOffsets = []
-    m.seasonContents = []
-    m.activeRow = -1
-    UpdateSeasonIndicator()
-    m.epStatus.text = Lang("episodes", "loading")
-    m.epStatus.text = Lang("episodes", "loading")
-    m.epStatus.visible = true
-
-    CancelLoad()
-    task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onSeriesLoaded", {
-        addonAddress: m.addonAddress
-        metaType: "series"
-        metaId: m.meta.id
-    }, "episodesLoader")
-    m.loadTask = task
-end sub
-
 ' Tear down an in-flight season load (a newer entry supersedes it). STOP is the
 ' real cancel — merely removing a running Task node does not kill its worker
 ' thread — and dropping the observer means its result can never land; re-entering
@@ -215,9 +237,26 @@ sub onSeriesLoaded()
     AsyncTask_Reap(task, m.top, false)
 
     if result = invalid or not result.ok or result.meta = invalid
-        m.epStatus.text = Lang("episodes", "loadFailed")
+        ' No local cards on screen means the fetch IS the payload — the failure
+        ' is the user-visible result. With local cards already painted, the
+        ' status line stays quiet: the screen is showing real content.
+        if not m.hasLocalEpisodes
+            m.epStatus.text = Lang("episodes", "loadFailed")
+        end if
         return
     end if
+
+    ' The instant build from Details' meta and the fetch answered the same
+    ' series: leave the painted list alone. A rebuild here would row-jump the
+    ' user back to the top card for nothing.
+    if m.hasLocalEpisodes and m.seriesMeta <> invalid and result.meta.id = m.seriesMeta.id
+        localCount = 0
+        if m.seriesMeta.videos <> invalid then localCount = m.seriesMeta.videos.Count()
+        remoteCount = 0
+        if result.meta.videos <> invalid then remoteCount = result.meta.videos.Count()
+        if localCount = remoteCount then return
+    end if
+
     m.seriesMeta = result.meta
     BuildList(result.meta)
 end sub
