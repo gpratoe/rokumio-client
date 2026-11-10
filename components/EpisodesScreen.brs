@@ -1,50 +1,78 @@
 ' EpisodesScreen — the season/episode browser behind Details' "Episodes".
 '
-' Same pattern as HomeScreen: a single RowList where each row is a season and
-' each tile an episode (landscape EpisodeTile). Roku owns the whole grid physics
-' — vertical row scrolling/clipping, horizontal per-row tile scrolling, row
-' labels, focus reporting and non-focused-row dimming. The top header tracks the
-' focused episode's label and synopsis; OK on a tile pushes stream selection.
+' The hero carries the series identity only (logo or fallback title over the
+' artwork); the episode words live on the cards themselves. Below it, one wide
+' EpisodeTile per RowList row — the StreamsScreen list architecture: each row
+' holds exactly one item, so the list only travels Up/Down and LEFT/RIGHT
+' bubble out to the screen, which swallows them to flip the active season (the
+' indicator in the top-right corner names it and shows a chevron for each
+' direction a season still exists).
 '
 ' Season 0 is Stremio's "specials" bucket (behind-the-scenes extras, not a real
 ' season), so it is relabelled "Special" and pushed to the end of the list.
 '
-' Params: { addonAddress, meta, resume } — resume { season, episode } lands the
-' list back on the watch-in-progress spot when given.
+' Params: { addonAddress, meta, resume } — resume { season, episode } opens the
+' list on the watch-in-progress spot when given.
 
 sub init()
+    m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
+    m.heroLogoUri = ""
     m.epName = m.top.FindNode("epName")
     m.bgPoster = m.top.FindNode("bgPoster")
-    m.epHeaderLine = m.top.FindNode("epHeaderLine")
-    m.epDesc = m.top.FindNode("epDesc")
+    m.seasonName = m.top.FindNode("seasonName")
+    m.seasonPill = m.top.FindNode("seasonPill")
+    m.seasonLeft = m.top.FindNode("seasonLeft")
+    m.seasonRight = m.top.FindNode("seasonRight")
+    m.epStatus = m.top.FindNode("epStatus")
     m.epList = m.top.FindNode("epList")
 
     t = Theme()
     m.top.FindNode("bgScrim").color = t.scrim
-    m.epName.color = t.accent
-    m.epDesc.color = t.textSecondary
-    ' The header line is one MultiStyleLabel: the untagged episode label uses
-    ' "default", the air date wraps in <aired> / <upcoming> for its own color.
-    ' System fonts carry their own size, so styles differ by face and color.
-    m.epHeaderLine.drawingStyles = {
-        default: { fontUri: "font:MediumBoldSystemFont", color: t.accent }
-        aired: { fontUri: "font:SmallSystemFont", color: t.accentWarm }
-        upcoming: { fontUri: "font:SmallSystemFont", color: t.accentInfo }
-    }
-    m.epList.focusBitmapBlendColor = t.accentFocus
-    m.epList.rowLabelOffset = [0,10]
+    m.epName.color = t.textPrimary
+    m.seasonName.color = t.textPrimary
+    m.seasonLeft.blendColor = t.textSecondary
+    m.seasonRight.blendColor = t.textSecondary
+    m.epStatus.color = t.textSecondary
 
-    m.epList.ObserveField("rowItemFocused", "onItemFocused")
+    m.buildTimer = m.top.FindNode("buildTimer")
+    m.buildTimer.ObserveField("fire", "onBuildTick")
+    m.buildTimer.control = "stop"
+    m.pendingSeriesMeta = invalid
+
     m.epList.ObserveField("rowItemSelected", "onItemSelected")
 
     m.seasons = []
     m.seasonEpisodes = []
-    ' The language the list was built in — a language change rebuilds it.
+    m.seasonRuns = []
+    m.seriesMarks = []
+    m.dateParts = []
+    m.dateOffsets = []
+    m.seasonContents = []
+    m.activeRow = -1
+    m.focusItem = invalid
+    m.hasLocalEpisodes = false
+    ' The language the content tree was built in — a language change rebuilds it.
     m.textsLanguage = ""
 end sub
 
+' LEFT/RIGHT never belong to the list (each row holds one item, so there is
+' nothing horizontal to move to) — they flip the season here. At the ends there
+' is nothing to move to, so the key is left for the stack/Scene. OPTIONS keeps
+' the watched-status dialog.
 function onKeyEvent(key as string, press as boolean) as boolean
-    if key = "options" and press
+    if not press then return false
+    if key = "left"
+        if m.activeRow > 0
+            SelectSeason(m.activeRow - 1)
+            return true
+        end if
+    else if key = "right"
+        if m.seasons.Count() > 0 and m.activeRow < m.seasons.Count() - 1
+            SelectSeason(m.activeRow + 1)
+            return true
+        end if
+    else if key = "options"
         if m.epList <> invalid and m.epList.HasFocus()
             if ShowWatchDialog() then return true
         end if
@@ -53,28 +81,32 @@ function onKeyEvent(key as string, press as boolean) as boolean
 end function
 
 function OnEnter(params as object) as void
-    ' The language first: the season rows and the episode labels are words, and
+    ' The language first: the season label and the episode labels are words, and
     ' a language changed since the last visit makes them wrong.
     RefreshTexts()
     if m.textsLanguage <> TextsLanguage()
-        ' The list survives a visit (that is the point of the re-entry path
+        ' The visited season survives (that is the point of the re-entry path
         ' below), but the words on it do not survive a language change — so the
-        ' rows are rebuilt from the series already loaded, with no fetch.
+        ' cached pages are dropped and rebuilt from the series already loaded,
+        ' with no fetch.
         m.textsLanguage = TextsLanguage()
         if m.seriesMeta <> invalid and m.stores <> invalid then
-            BuildList(m.seriesMeta)
+            ' Same beat-splitting as a fresh push: rebuild one frame later, so
+            ' returning from Settings paints immediately too.
+            m.pendingSeriesMeta = m.seriesMeta
+            m.buildTimer.control = "start"
             return
         end if
     end if
     ' Re-entry after a push (streams, player, …): params is invalid and the
-    ' screen Group was handed focus by the stack. The episode RowList must take
-    ' it back, or nothing inside is reachable — the list and its seasons survive,
-    ' so no rebuild is needed.
+    ' screen Group was handed focus by the stack. The episode list must take
+    ' it back, or nothing inside is reachable — the season and its cards
+    ' survive, so no rebuild is needed.
     if params = invalid
-        if m.epList <> invalid then m.epList.SetFocus(true)
+        RestoreFocus()
         ' A pushed screen (streams, player) just popped back: the store's watched
         ' map may have moved while it had focus, so repaint the badge marks in
-        ' place — the list nodes themselves survive the trip, no rebuild needed.
+        ' place — the row and its cards survive the trip, no rebuild needed.
         RefreshWatchedMarks()
         return
     end if
@@ -91,21 +123,41 @@ function OnEnter(params as object) as void
     if bg = invalid then bg = ""
     m.bgPoster.uri = bg
 
+    logo = StringOf(m.meta.logo)
+    if logo <> m.heroLogoUri
+        m.heroLogoUri = logo
+        m.heroLogo.uri = logo
+    end if
+    ApplyHeroLogo()
+
     LoadSeries()
 end function
 
-' Begin a fresh season-list build: clear the old list, swap the header to a
-' loading hint, and fetch the series meta off the UI thread. Re-entry with a new
-' series supersedes whatever is still in flight (CancelLoad drops it first).
+' Begin a fresh season build. Chrome must not wait on the network: Details
+' hands over the very series meta it is displaying, so when that meta already
+' carries the episode list the cards render from it on frame one and the
+' loader below only refines in place — the same hand-off Home gives Details.
+' Only an entry with no local episode data drops to the status line.
 sub LoadSeries()
     if m.meta = invalid then return
-    m.epList.content = CreateObject("roSGNode", "ContentNode")
-    m.epList.numRows = 0
-    m.seasons = []
-    m.seasonEpisodes = []
-    m.orderedVideoIds = []
-    m.epHeaderLine.text = ""
-    m.epDesc.text = Lang("episodes", "loading")
+    ClearList()
+    UpdateSeasonIndicator()
+
+    buildMeta = m.meta
+    if m.stores <> invalid
+        cached = m.stores.episodes.callFunc("EpisodesFullMeta", m.meta.type, m.meta.id)
+        if cached <> invalid then buildMeta = cached
+    end if
+
+    m.hasLocalEpisodes = LocalSeriesHasEpisodes(buildMeta)
+    if m.hasLocalEpisodes
+        m.seriesMeta = buildMeta
+        m.pendingSeriesMeta = buildMeta
+        m.buildTimer.control = "start"
+    else
+        m.epStatus.text = Lang("episodes", "loading")
+        m.epStatus.visible = true
+    end if
 
     CancelLoad()
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onSeriesLoaded", {
@@ -114,6 +166,86 @@ sub LoadSeries()
         metaId: m.meta.id
     }, "episodesLoader")
     m.loadTask = task
+end sub
+
+' Whether the meta in hand can grave the cards immediately: a season-bearing
+' episode list is already known, no fetch needed to paint.
+function LocalSeriesHasEpisodes(meta as object) as boolean
+    return meta <> invalid and meta.videos <> invalid and meta.videos.Count() > 0
+end function
+
+' The deferred half of the instant build: one beat after the push completes,
+' with the transition already painted, the heavy synchronous chunk (the full
+' series grouping, the watch-mark decode, the date batch, the card page) runs.
+' Without this beat the push itself freezes on a big series — the exact
+' transition Home→Details renders free because its work also happens after
+' the first frame.
+sub onBuildTick()
+    meta = m.pendingSeriesMeta
+    m.pendingSeriesMeta = invalid
+    if meta = invalid then return
+    BuildList(meta)
+end sub
+
+' Reset the list state a fresh visit starts from — shared by the instant-build
+' and the loading paths so both begin identically.
+sub ClearList()
+    m.epList.content = CreateObject("roSGNode", "ContentNode")
+    m.epList.numRows = 0
+    m.seasons = []
+    m.seasonEpisodes = []
+    m.seasonRuns = []
+    m.seriesMarks = []
+    m.dateParts = []
+    m.dateOffsets = []
+    m.seasonContents = []
+    m.activeRow = -1
+    m.focusItem = invalid
+    ' An in-flight deferred build from the previous visit has nothing to say
+    ' to this one.
+    m.pendingSeriesMeta = invalid
+    m.buildTimer.control = "stop"
+end sub
+
+' Logo artwork: a loaded logo takes the hero slot and the title steps aside;
+' artwork that never loaded, or none offered at all, leaves the title up.
+sub ApplyHeroLogo()
+    if m.heroLogoUri = ""
+        m.heroLogo.visible = false
+        m.epName.visible = true
+        ResetHeroLogoLayout()
+    else
+        ready = m.heroLogo.loadStatus = "ready"
+        m.heroLogo.visible = ready
+        m.epName.visible = not ready
+        if ready then FitHeroLogo() else ResetHeroLogoLayout()
+    end if
+end sub
+
+sub onHeroLogoStatus()
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    ApplyHeroLogo()
+end sub
+
+' The hero box: a tall narrow logo centers in the portrait envelope, a wide one
+' rises to the band like Details'. The fallback title sits beneath the same
+' top-left anchor.
+sub FitHeroLogo()
+    fit = HeroFit(m.heroLogo.bitmapWidth, m.heroLogo.bitmapHeight)
+    if fit = invalid then return
+    m.heroLogo.width = fit.width
+    m.heroLogo.height = fit.height
+    if fit.tall
+        m.heroLogo.translation = [162, 72 + Int((460 - fit.height) / 2)]
+    else
+        m.heroLogo.translation = [162, 72 + Int((190 - fit.height) / 2)]
+    end if
+end sub
+
+sub ResetHeroLogoLayout()
+    m.heroLogo.translation = [162, 72]
+    m.heroLogo.width = 820
+    m.heroLogo.height = 460
 end sub
 
 ' Tear down an in-flight season load (a newer entry supersedes it). STOP is the
@@ -128,8 +260,8 @@ sub CancelLoad()
     end if
 end sub
 
-' The series meta came back. Failure leaves the header with a message and the
-' list empty (Back pops); success lays out a row per season.
+' The series meta came back. Failure leaves the status line with a message and
+' the list empty (Back pops); success lays out the active season.
 sub onSeriesLoaded()
     if m.loadTask = invalid then return
     task = m.loadTask
@@ -138,28 +270,48 @@ sub onSeriesLoaded()
     AsyncTask_Reap(task, m.top, false)
 
     if result = invalid or not result.ok or result.meta = invalid
-        m.epHeaderLine.text = ""
-        m.epDesc.text = Lang("episodes", "loadFailed")
+        ' No local cards on screen means the fetch IS the payload — the failure
+        ' is the user-visible result. With local cards already painted, the
+        ' status line stays quiet: the screen is showing real content.
+        if not m.hasLocalEpisodes
+            m.epStatus.text = Lang("episodes", "loadFailed")
+        end if
         return
     end if
+
+    if m.stores <> invalid then m.stores.episodes.callFunc("EpisodesCacheFullMeta", result.meta)
+
+    ' The instant build from a cached/handed-off meta and the fetch answered the
+    ' same series: leave the painted list alone. A rebuild here would row-jump the
+    ' user back to the top card for nothing.
+    if m.hasLocalEpisodes and m.seriesMeta <> invalid and result.meta.id = m.seriesMeta.id
+        localCount = 0
+        if m.seriesMeta.videos <> invalid then localCount = m.seriesMeta.videos.Count()
+        remoteCount = 0
+        if result.meta.videos <> invalid then remoteCount = result.meta.videos.Count()
+        if localCount = remoteCount then return
+    end if
+
     m.seriesMeta = result.meta
     BuildList(result.meta)
 end sub
 
-' Lay out one RowList row per season from an already-fetched series meta. Each
-' episode tile carries a checked badge when LibraryStore says it is watched; the
-' full ordered episode-id list is resolved first so the account bitfield decodes
-' against the complete list (bit indexes are positions in that ordering).
+' Lay the series data out from an already-fetched series meta. Each episode card
+' carries a checked badge when LibraryStore says it is watched, and its air-date
+' line + synopsis from the meta; the full ordered episode-id list is resolved
+' first so the account bitfield decodes against the complete list (bit indexes
+' are positions in that ordering).
 sub BuildList(meta as object)
     seriesData = m.stores.episodes.callFunc("EpisodesSeriesData", m.meta.id, meta)
     if seriesData = invalid or seriesData.seasons = invalid or seriesData.seasons.Count() = 0
-        m.epHeaderLine.text = ""
-        m.epDesc.text = Lang("episodes", "noneFound")
+        UpdateSeasonIndicator()
+        m.epStatus.text = Lang("episodes", "noneFound")
+        m.epStatus.visible = true
         return
     end if
 
     m.seasons = seriesData.seasons
-    seasonRuns = seriesData.runs
+    m.seasonRuns = seriesData.runs
     orderedEpisodes = seriesData.orderedVideoIds
     m.orderedVideoIds = orderedEpisodes
     nowIso = m.stores.time.callFunc("TimeNowIso")
@@ -168,87 +320,210 @@ sub BuildList(meta as object)
     ' marks call. The old path sent the whole meta to EpisodesForSeason once
     ' per season, and the whole ordered-id list to LibraryEpisodeMarks once
     ' per season; both copies and the account-bitfield decode repeated 39
-    ' times for The Simpsons. These two queries do that work once per series.
+    ' times for The Simpsons. These two queries do that work once per series —
+    ' and the air dates join them as one batch (the cards each carry a date
+    ' line, so per-episode store calls would reintroduce exactly the N-crossings
+    ' this phase exists to avoid).
     m.seasonEpisodes = []
-    for each seasonRun in seasonRuns
+    allEps = []
+    m.dateOffsets = []
+    for each seasonRun in m.seasonRuns
         m.seasonEpisodes.Push(seasonRun.episodes)
+        m.dateOffsets.Push(allEps.Count())
+        for each ep in seasonRun.episodes
+            allEps.Push(ep)
+        end for
     end for
-    seasonMarks = m.stores.library.callFunc("LibraryEpisodeMarksForSeries", m.meta.id, seasonRuns, orderedEpisodes, nowIso)
+    m.seriesMarks = m.stores.library.callFunc("LibraryEpisodeMarksForSeries", m.meta.id, m.seasonRuns, orderedEpisodes, nowIso)
+    m.dateParts = m.stores.time.callFunc("TimeAirDatePartsBatch", allEps)
 
-    ' Paint the rows, tiles and visible labels from the gathered data.
-    content = CreateObject("roSGNode", "ContentNode")
+    ' Series-complete check once per build, as before.
+    WatchedSummary()
+
+    ' A language change jumps here with the cursor already inside the series;
+    ' a fresh entry starts from the resume hint (or the first season).
+    m.seasonContents = []
+    position = ResumePosition()
+    m.focusItem = position[1]
+    cursor = m.activeRow
+    if cursor < 0 or cursor >= m.seasons.Count() then cursor = position[0]
+    m.activeRow = cursor
+    RenderSeason(cursor)
+end sub
+
+' The watched/count summary the store needs to stamp a series complete. One
+' scan over all seasons' marks: specials (season 0) are outside the ordered
+' bitfield, so they contribute nothing.
+sub WatchedSummary()
     anyRegular = false
     allDone = true
     for s = 0 to m.seasons.Count() - 1
-        season = m.seasons[s]
-        episodes = m.seasonEpisodes[s]
-        marks = seasonMarks[s].marks
-        row = content.CreateChild("ContentNode")
-        row.title = SeasonLabel(season)
-        for e = 0 to episodes.Count() - 1
-            ep = episodes[e]
-            item = row.CreateChild("TileContent")
-            item.title = EpisodeLabel(season, ep)
-            ' StringOf: thumbnails are add-on JSON too, and hdPosterUrl is a typed
-            ' string field — a numeric thumbnail would throw on the compare first
-            ' and on the assignment next.
-            thumbnail = StringOf(ep.thumbnail)
-            if thumbnail <> "" then item.hdPosterUrl = thumbnail
-            if season <> 0
-                mark = MarkAt(marks, e)
-                item.watched = mark.watched
-                item.aired = mark.aired
-                if mark.aired
-                    anyRegular = true
-                    if not item.watched then allDone = false
-                end if
+        if m.seasons[s] = 0 then continue for
+        marks = m.seriesMarks[s].marks
+        for e = 0 to m.seasonEpisodes[s].Count() - 1
+            mark = MarkAt(marks, e)
+            if mark.aired
+                anyRegular = true
+                if not mark.watched then allDone = false
             end if
         end for
     end for
-
-    m.epList.content = content
-    m.epList.numRows = m.seasons.Count()
-    m.epList.jumpToRowItem = ResumePosition()
-    if m.top.screenActive then m.epList.SetFocus(true)
-    UpdateHeader(m.epList.jumpToRowItem)
     m.stores.library.callFunc("LibraryMarkAllIfDone", m.meta.id, anyRegular, allDone)
 end sub
 
+' Build (or reuse) the active season's card page and hand the list to it. Pages
+' are cached per season so a LEFT/RIGHT flip that comes back costs no rebuild;
+' watched edits invalidate the other seasons' pages (see RefreshWatchedMarks).
+sub RenderSeason(rowIndex as integer)
+    if rowIndex < 0 or rowIndex >= m.seasons.Count() then return
+    m.activeRow = rowIndex
+
+    if m.seasonContents[rowIndex] = invalid then BuildSeasonPage(rowIndex)
+
+    m.epStatus.visible = false
+    m.epList.content = m.seasonContents[rowIndex]
+    m.epList.numRows = m.seasonEpisodes[rowIndex].Count()
+    ' A fresh build lands focus on the resume spot; a season flip starts at the
+    ' first card. The hint is spent on its first use so a flip back and forth
+    ' does not keep re-jumping.
+    index = 0
+    if m.focusItem <> invalid and m.focusItem > 0
+        index = m.focusItem
+        if index >= m.epList.numRows then index = m.epList.numRows - 1
+        m.focusItem = invalid
+    end if
+    if m.epList.numRows > 0 then m.epList.jumpToRowItem = [index, 0]
+    UpdateSeasonIndicator()
+    if m.top.screenActive then m.epList.SetFocus(true)
+end sub
+
+' One season's full ContentNode page: a card per episode with its label
+' (S#E# name), thumbnail, watched/aired verdicts, air-date line and synopsis.
+sub BuildSeasonPage(rowIndex as integer)
+    season = m.seasons[rowIndex]
+    episodes = m.seasonEpisodes[rowIndex]
+    marks = []
+    if season <> 0 and m.seriesMarks <> invalid and rowIndex < m.seriesMarks.Count()
+        marks = m.seriesMarks[rowIndex].marks
+    end if
+    dateBase = m.dateOffsets[rowIndex]
+
+    content = CreateObject("roSGNode", "ContentNode")
+    for e = 0 to episodes.Count() - 1
+        ep = episodes[e]
+        ' Two levels, like every RowList page: the row node is the row the
+        ' list walks, the item under it is what the tile component receives.
+        row = content.CreateChild("ContentNode")
+        item = row.CreateChild("TileContent")
+        item.title = EpisodeLabel(season, ep)
+        ' StringOf: thumbnails are add-on JSON too, and hdPosterUrl is a typed
+        ' string field — a numeric thumbnail would throw on the compare first
+        ' and on the assignment next.
+        thumbnail = StringOf(ep.thumbnail)
+        if thumbnail <> "" then item.hdPosterUrl = thumbnail
+        if season <> 0
+            mark = MarkAt(marks, e)
+            item.watched = mark.watched
+            item.aired = mark.aired
+        end if
+        ' The date line: parts came back in the series-wide batch, marked
+        ' invalid when an episode had no usable date.
+        dateText = ""
+        upcoming = false
+        if m.dateParts <> invalid and dateBase + e < m.dateParts.Count()
+            dateText = AirDateLabel(m.dateParts[dateBase + e])
+            if m.dateParts[dateBase + e] <> invalid then upcoming = m.dateParts[dateBase + e].upcoming
+        end if
+        item.dateLabel = dateText
+        item.dateUpcoming = upcoming
+        ' StringOf, not a raw field: an add-on overview can arrive as a number,
+        ' and description is a typed string field.
+        item.description = StringOf(ep.overview)
+    end for
+    while m.seasonContents.Count() <= rowIndex
+        m.seasonContents.Push(invalid)
+    end while
+    m.seasonContents[rowIndex] = content
+end sub
+
+' Fill the date-line template for one episode's parts. The store answers WHEN,
+' the screen says it: month names and the words are ours (the table), the
+' verdict aired/upcoming comes back as a fact. No parts at all → no line.
+function AirDateLabel(parts as object) as string
+    if parts = invalid then return ""
+    dateText = Fill(Lang("common", "dateFormat"), {
+        month: MonthName(parts.month)
+        day: parts.day
+        year: parts.year
+    })
+    if not parts.known
+        return dateText
+    else if parts.upcoming
+        return Fill(Lang("common", "airDatePremieres"), { date: dateText })
+    end if
+    return Fill(Lang("common", "airDateAired"), { date: dateText })
+end function
+
+' Season indicator chrome: the active season's name, and a chevron for each
+' direction a season still exists. Hidden entirely while no season is active.
+sub UpdateSeasonIndicator()
+    if m.activeRow < 0 or m.activeRow >= m.seasons.Count()
+        m.seasonName.text = ""
+        m.seasonLeft.visible = false
+        m.seasonRight.visible = false
+        if m.seasonPill <> invalid then m.seasonPill.visible = false
+        return
+    end if
+    m.seasonName.text = SeasonLabel(m.seasons[m.activeRow])
+    m.seasonLeft.visible = m.activeRow > 0
+    m.seasonRight.visible = m.activeRow < m.seasons.Count() - 1
+    if m.seasonPill <> invalid then m.seasonPill.visible = true
+end sub
+
+' Move the whole page to another season. The list keeps focus — only its
+' content and the indicator change.
+sub SelectSeason(rowIndex as integer)
+    if rowIndex < 0 or rowIndex >= m.seasons.Count() then return
+    if rowIndex = m.activeRow then return
+    RenderSeason(rowIndex)
+end sub
+
 ' Re-paint the episode watched badges in place after a return from a push
-' (streams, player): the existing row/tile nodes are kept, so focus and scroll
-' survive, and each tile's watched flag is recomputed against the current store
-' state. A no-op when nothing flipped; the series-complete check runs anew in
-' case the last episode was just finished.
+' (streams, player): the visible page's tiles are patched live, the other
+' seasons' cached pages are dropped so their next render recomputes, and the
+' series-complete check runs anew in case the last episode was just finished.
 sub RefreshWatchedMarks() as void
     if m.epList = invalid or m.epList.content = invalid then return
     if m.seasons.Count() = 0 or m.seasonEpisodes.Count() = 0 then return
     if m.stores = invalid or m.seriesMeta = invalid then return
+    if m.activeRow < 0 or m.activeRow >= m.seasons.Count() then return
     orderedEpisodes = m.stores.episodes.callFunc("EpisodesOrderedVideoIds", m.meta.id, m.seriesMeta)
-    anyRegular = false
-    allDone = true
     nowIso = m.stores.time.callFunc("TimeNowIso")
-    for s = 0 to m.seasons.Count() - 1
-        season = m.seasons[s]
-        row = m.epList.content.GetChild(s)
-        episodes = m.seasonEpisodes[s]
-        ' One call for the season, for the same reason as the build above.
-        marks = []
-        if season <> 0 then marks = m.stores.library.callFunc("LibraryEpisodeMarks", m.meta.id, season, episodes, orderedEpisodes, nowIso)
-        for e = 0 to episodes.Count() - 1
-            ep = episodes[e]
-            item = row.GetChild(e)
-            if season <> 0
-                mark = MarkAt(marks, e)
-                item.watched = mark.watched
-                item.aired = mark.aired
-                if mark.aired
-                    anyRegular = true
-                    if not item.watched then allDone = false
-                end if
-            end if
-        end for
+    ' One series-wide refreshed marks call, then three uses of it: this season's
+    ' live repaint, the summary, and the cache.
+    m.seriesMarks = m.stores.library.callFunc("LibraryEpisodeMarksForSeries", m.meta.id, m.seasonRuns, orderedEpisodes, nowIso)
+    for i = 0 to m.seasons.Count() - 1
+        if i <> m.activeRow then m.seasonContents[i] = invalid
     end for
-    m.stores.library.callFunc("LibraryMarkAllIfDone", m.meta.id, anyRegular, allDone)
+
+    marks = []
+    if m.seasons[m.activeRow] <> 0 and m.activeRow < m.seriesMarks.Count()
+        marks = m.seriesMarks[m.activeRow].marks
+    end if
+    episodes = m.seasonEpisodes[m.activeRow]
+    page = m.epList.content
+    for e = 0 to episodes.Count() - 1
+        rowNode = page.GetChild(e)
+        if rowNode = invalid then exit for
+        item = rowNode.GetChild(0)
+        if item = invalid then exit for
+        if m.seasons[m.activeRow] <> 0
+            mark = MarkAt(marks, e)
+            item.watched = mark.watched
+            item.aired = mark.aired
+        end if
+    end for
+    WatchedSummary()
 end sub
 
 ' The mark for one episode of a run, or an empty one when the run did not
@@ -278,7 +553,7 @@ function SeasonLabel(season as integer) as string
     return Fill(Lang("episodes", "season"), { number: season.ToStr() })
 end function
 
-' "S#E#  name" for a tile — "Special E#  name" for season 0.
+' "S#E#  name" for a card — "Special E#  name" for season 0.
 '
 ' ep.name is add-on data: an add-on that answers the episode name with a number
 ' makes the raw concatenation throw (the same Type Mismatch the detail header
@@ -298,7 +573,7 @@ end function
 ' [seasonRow, itemIndex] for the resume hint's (season, episode), else the first
 ' cell. Rows follow the store's OrderedSeasons order, so specials live at the end.
 function ResumePosition() as object
-    if m.resume <> invalid
+    if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
         for s = 0 to m.seasons.Count() - 1
             if m.seasons[s] <> m.resume.season then continue for
             episodes = m.seasonEpisodes[s]
@@ -311,18 +586,12 @@ function ResumePosition() as object
     return [0, 0]
 end function
 
-' rowItemFocused is a [row, itemIndex] pair; drive the header off the focused
-' episode.
-sub onItemFocused()
-    data = m.epList.rowItemFocused
-    if data = invalid or data.Count() < 2 then return
-    UpdateHeader(data)
-end sub
-
+' A card's OK lands on its episode: rowItemSelected's row IS the episode index
+' of the active season's page.
 sub onItemSelected()
     data = m.epList.rowItemSelected
     if data = invalid or data.Count() < 2 then return
-    entry = EntryAt(data[0], data[1])
+    entry = EntryAt(data[0])
     if entry = invalid then return
     PushEpisode(entry.season, entry.ep)
 end sub
@@ -330,7 +599,7 @@ end sub
 ' The OPTIONS key on a focused regular (non-season-0) episode opens the
 ' watched-status dialog — season 0 specials are not part of the ordered/
 ' bitfield list, so they never offer it. Returns true when a dialog was shown.
-' The "rest of season" actions are scoped to the focused season's row: they
+' The "rest of season" actions are scoped to the focused season's page: they
 ' cover that season's episodes from its first up to (and including) the focused
 ' one, so a season can be caught up or reverted without touching any other
 ' season's marks.
@@ -339,12 +608,12 @@ function ShowWatchDialog() as boolean
     if m.stores = invalid then return false
     data = m.epList.rowItemFocused
     if data = invalid or data.Count() < 2 then return false
-    row = data[0]
-    entry = EntryAt(data[0], data[1])
+    entry = EntryAt(data[0])
     if entry = invalid or entry.season = 0 or entry.ep = invalid or entry.ep.episode = invalid then return false
+    if m.activeRow < 0 or m.activeRow >= m.seasons.Count() then return false
 
     videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, entry.season, entry.ep.episode)
-    seasonIds = SeasonVideoIds(row)
+    seasonIds = SeasonVideoIds(m.activeRow)
     seasonIndex = IndexInIds(seasonIds, videoId)
     if seasonIndex < 0 then return false
     mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, entry.season, entry.ep, m.orderedVideoIds, m.stores.time.callFunc("TimeNowIso"))
@@ -361,11 +630,9 @@ function ShowWatchDialog() as boolean
     syncNote = Lang("episodes", "syncedToAccount")
     if not stremio then syncNote = Lang("episodes", "savedOnDevice")
     ' Both dialogs read alike: a QUESTION on top, and the episode it is about
-    ' on the line below it, with the sync note under that. The episode used to
-    ' ride in the watched title only — the unwatched one left it out, and the
-    ' two titles then described the same action in two different shapes. The
-    ' title is a question now (so it can be asked, and so a language can open
-    ' it with its own question mark), and the episode is a line.
+    ' on the line below it, with the sync note under that. The title is a
+    ' question (so a language can open it with its own question mark), and the
+    ' episode is a line.
     episode = EpisodeLabel(entry.season, entry.ep)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     if mark.watched
@@ -442,17 +709,17 @@ sub ApplyWatchChange(kind as string, action as object)
     RefreshWatchedMarks()
 end sub
 
-' The watchable video ids of one season row, in display order — the slice of the
-' series' ordered list that row owns, so a season-scoped mark lands exactly on
-' that season's non-special episodes.
-function SeasonVideoIds(row as integer) as object
+' The watchable video ids of the current season page, in display order — the
+' slice of the series' ordered list the page owns, so a season-scoped mark
+' lands exactly on that season's non-special episodes.
+function SeasonVideoIds(rowIndex as integer) as object
     ids = []
-    if row < 0 or row >= m.seasons.Count() then return ids
+    if rowIndex < 0 or rowIndex >= m.seasons.Count() then return ids
     if m.stores = invalid then return ids
-    episodes = m.seasonEpisodes[row]
+    episodes = m.seasonEpisodes[rowIndex]
     for each ep in episodes
         if ep <> invalid and ep.episode <> invalid
-            ids.Push(m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, m.seasons[row], ep.episode))
+            ids.Push(m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, m.seasons[rowIndex], ep.episode))
         end if
     end for
     return ids
@@ -467,67 +734,13 @@ function IndexInIds(ids as object, videoId as string) as integer
     return -1
 end function
 
-function EntryAt(row as integer, index as integer) as object
+function EntryAt(episodeIndex as integer) as object
     if m.seasons.Count() = 0 then return invalid
-    if row < 0 or row >= m.seasons.Count() then return invalid
-    episodes = m.seasonEpisodes[row]
-    if episodes = invalid or index < 0 or index >= episodes.Count() then return invalid
-    return { season: m.seasons[row], ep: episodes[index] }
+    if m.activeRow < 0 or m.activeRow >= m.seasons.Count() then return invalid
+    episodes = m.seasonEpisodes[m.activeRow]
+    if episodes = invalid or episodeIndex < 0 or episodeIndex >= episodes.Count() then return invalid
+    return { season: m.seasons[m.activeRow], ep: episodes[episodeIndex] }
 end function
-
-sub UpdateHeader(position as object)
-    if position = invalid or position.Count() < 2 then return
-    entry = EntryAt(position[0], position[1])
-    if entry = invalid
-        m.epHeaderLine.text = ""
-        m.epDesc.text = ""
-        return
-    end if
-
-    text = EpisodeLabel(entry.season, entry.ep)
-    airDate = ""
-    style = "aired"
-    if m.stores <> invalid and entry.ep <> invalid then
-        parts = m.stores.time.callFunc("TimeAirDateParts", entry.ep)
-        if parts <> invalid then
-            ' The store answers WHEN, the screen says it: the words are ours
-            ' and the numbers are the store's, and the verdict (upcoming or
-            ' aired) comes back as a fact — it used to be read back out of the
-            ' English label, which no longer exists.
-            dateText = Fill(Lang("common", "dateFormat"), {
-                month: MonthName(parts.month)
-                day: parts.day
-                year: parts.year
-            })
-            if not parts.known
-                airDate = dateText
-            else if parts.upcoming
-                airDate = Fill(Lang("common", "airDatePremieres"), { date: dateText })
-                style = "upcoming"
-            else
-                airDate = Fill(Lang("common", "airDateAired"), { date: dateText })
-            end if
-        end if
-    end if
-    if airDate <> ""
-        ' Not-yet-aired episodes flag their upcoming date via <upcoming> (sky
-        ' blue); aired ones keep <aired> (warm gold). Tags are our own two style
-        ' keys, never episode data.
-        text = text + "<" + style + "> - " + airDate + "</" + style + ">"
-    end if
-    m.epHeaderLine.text = text
-
-    overview = Lang("common", "noSynopsis")
-    ep = entry.ep
-    ' StringOf for the same reason as the header line above: an add-on overview
-    ' can arrive as a number, and it is compared here and then put in a typed
-    ' field.
-    if ep <> invalid then
-        epOverview = StringOf(ep.overview)
-        if epOverview <> "" then overview = epOverview
-    end if
-    m.epDesc.text = overview
-end sub
 
 ' Episodes push stream selection for "{metaId}:{season}:{episode}" — the same
 ' play path Details' resume chip uses.
@@ -557,6 +770,14 @@ sub PushEpisode(season as integer, ep as object)
             episodeOverview: ep.overview
         }
     }
+end sub
+
+' Re-entry: the visible season survives a push, so focus goes straight back to
+' the list; nothing renders because nothing was cleared.
+sub RestoreFocus()
+    if m.activeRow < 0 or m.activeRow >= m.seasons.Count() then return
+    if m.seasonEpisodes[m.activeRow].Count() = 0 then return
+    if m.top.screenActive then m.epList.SetFocus(true)
 end sub
 
 function OnExit() as void

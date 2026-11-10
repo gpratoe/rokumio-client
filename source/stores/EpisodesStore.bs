@@ -12,6 +12,11 @@ class EpisodesStore
     sub new(http as object)
         m.transport = http
         m.videoId = VideoIdCodec()
+        ' Full series/movie metas fetched from add-ons, keyed by "type|id".
+        ' Screens read them on demand so heavy payloads (a series' videos list)
+        ' do not have to be copied through focus handlers and push params on every
+        ' transition; Home and Details keep slim display metas for rendering.
+        m.fullMetaCache = {}
     end sub
 
     ' Fetch {address}/meta/{type}/{id}.json. A series must carry a non-empty
@@ -265,5 +270,54 @@ class EpisodesStore
             end for
         end if
         return merged
+    end function
+
+    ' Cache key for a full meta record. A blank id cannot identify a record, so
+    ' it answers "" and nothing is stored or looked up under it.
+    function MetaKey(metaType as dynamic, metaId as dynamic) as string
+        id = ""
+        if GetInterface(metaId, "ifString") <> invalid
+            id = metaId
+        else if metaId <> invalid
+            id = metaId.ToStr()
+        end if
+        if id = "" then return ""
+        kind = ""
+        if GetInterface(metaType, "ifString") <> invalid
+            kind = metaType
+        else if metaType <> invalid
+            kind = metaType.ToStr()
+        end if
+        return kind + "|" + id
+    end function
+
+    ' Remember a full meta (with its episode list) so a later screen can read it
+    ' on demand instead of receiving it copied through focus and push params.
+    sub CacheFullMeta(meta as object)
+        if meta = invalid then return
+        key = m.MetaKey(meta.type, meta.id)
+        if key = "" then return
+        m.fullMetaCache[key] = meta
+    end sub
+
+    ' The cached full meta for a title, or invalid when none has been fetched.
+    function FullMeta(metaType as dynamic, metaId as dynamic) as object
+        key = m.MetaKey(metaType, metaId)
+        if key = "" then return invalid
+        if not m.fullMetaCache.DoesExist(key) then return invalid
+        return m.fullMetaCache[key]
+    end function
+
+    ' A display copy of a meta: everything except the episode list. Home and
+    ' Details render from this so the heavy videos array does not ride through
+    ' focus updates and push params; Episodes reads the full cached meta when it
+    ' needs the episode list.
+    function DisplayMeta(meta as object) as object
+        if meta = invalid then return invalid
+        out = {}
+        for each key in meta
+            if key <> "videos" then out[key] = meta[key]
+        end for
+            return out
     end function
 end class

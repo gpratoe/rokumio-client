@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="EpisodeTile" extends="Group">
-    <!-- Landscape episode cell for EpisodesScreen's season rows. RowList and
-         MarkupGrid only update item components through the read-only interface
-         fields itemContent / itemHasFocus / rowHasFocus (they never touch
-         `content` or `focused`). Artwork comes from the episode thumbnail; with
-         no art the S#E#/name text shows through so the cell is never blank. -->
+    <!-- Wide episode card for EpisodesScreen's list — one row, one card, the
+         same card language as StreamTile: a pre-rendered rounded ring (tileBorder)
+         framing an inset face plate (tileFace), tinted by blendColor for focus.
+         The episode thumbnail fills the left of the card (an artless face+title
+         unit stands in until it paints); the right column carries the episode's
+         title, its air date, and its synopsis. -->
     <interface>
         <field id="itemContent" type="node" />
         <field id="itemHasFocus" type="boolean" />
@@ -15,45 +16,75 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <!-- The artless unit: the face plus the title. Shown while there is no
-             artwork, and HIDDEN the moment the thumbnail reports it has
-             painted, so the face genuinely stops rendering rather than sitting
-             behind the artwork.
-
-             No width/height on this Group: Group is a RenderableNode and has
-             neither field, so Roku warns and discards them. The children carry
-             the cell's size.
-
-             There is no border rect: a full-tile tileBorder was completely
-             covered by the same-size tileBg and so had been invisible, while
-             costing a rect per cell. -->
-        <Group id="artless">
-            <Rectangle id="tileBg" width="320" height="180"/>
-            <Label id="titleText" width="296" height="164" translation="[12, 8]" horizAlign="center" vertAlign="middle" wrap="true" font="font:MediumSystemFont" />
-        </Group>
-        <!-- Never hide this poster: it paints nothing until it has a bitmap.
-             Declaring it visible="false" deadlocked the load — see
-             PosterTile.xml.
-
-             Capped to the cell like PosterTile. EpisodesScreen realizes a whole
-             row per season, so a 20-episode season is ~25-30 live cells; at an
-             uncapped source that is 1.5MB each for a 500x750 still and 8.3MB for a
-             full 1920x1080 one, against a 64MB texture budget shared with Home.
-
-             The cost is that limitSize fits the source inside the bounds
-             preserving aspect, so an off-ratio thumbnail decodes narrower than
-             the cell and leaves an uncovered strip. Acceptable here because
-             episode stills are overwhelmingly 16:9 and the cells sit over a
-             60%-opaque scrim (Theme.scrim = 0x00000099) rather than bare art, so
-             a gap reads as dark fill instead of a hole. Note that artless is
-             hidden once the poster paints, so tileBg is NOT behind the strip. -->
-        <Poster id="poster" width="320" height="180" loadWidth="320" loadHeight="180" loadDisplayMode="scaleToFit"/>
-        <!-- Optional watched badge (40px check on a translucent plate,
-             top-right) so the white glyph reads against any thumbnail.
-             Hidden until a screen passes itemContent.watched. -->
-        <Group id="watchedBadgeGroup" translation="[266, 4]" visible="false">
-            <Rectangle id="watchedPlate" width="52" height="52" />
-            <Poster id="watchedBadge" width="40" height="40" loadWidth="40" loadHeight="40" loadDisplayMode="limitSize" translation="[6, 6]" />
-        </Group>
+        <Poster
+            id="tileBorder"
+            width="1760"
+            height="300"
+            loadWidth="1760"
+            loadHeight="300"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/episode-card-ring.png">
+            <Poster
+                id="tileFace"
+                width="1744"
+                height="284"
+                loadWidth="1744"
+                loadHeight="284"
+                loadDisplayMode="limitSize"
+                translation="[8, 8]"
+                uri="pkg:/images/episode-card.png" />
+            <!-- The artless unit: the thumbnail-sized face plus the S#E#/name
+                 text, shown until the thumbnail has painted. HIDDEN as a unit
+                 the moment the poster reports ready, so the face genuinely
+                 stops rendering rather than sitting behind the artwork. -->
+            <Group id="artless" translation="[24, 24]">
+                <Rectangle id="tileBg" width="448" height="252" />
+                <Label id="titleText" width="424" height="228" translation="[12, 12]" horizAlign="center" vertAlign="center" wrap="true" font="font:MediumSystemFont" />
+            </Group>
+            <!-- Never hidden from code: a Poster with no bitmap paints nothing,
+                 and declaring it visible="false" deadlocks the load. Capped
+                 (limitSize-style scaleToFit capped at load) because the screen
+                 realizes a whole season at once. -->
+            <Poster id="poster" width="448" height="252" loadWidth="448" loadHeight="252" loadDisplayMode="scaleToFit" translation="[24, 24]" />
+            <!-- Watched badge, top-right of the thumbnail so the white glyph
+                 reads against any art. Hidden until itemContent.watched. -->
+            <Group id="watchedBadgeGroup" translation="[414, 30]" visible="false">
+                <Rectangle id="watchedPlate" width="52" height="52" />
+                <Poster id="watchedBadge" width="40" height="40" loadWidth="40" loadHeight="40" loadDisplayMode="limitSize" translation="[6, 6]" />
+            </Group>
+            <!-- Text column: title (truncates — never scrolls), the small air
+                 date on its own line beneath it, then the synopsis. Date and
+                 title never share a row: a long title truncates into the full
+                 line while the date keeps a stable, uncut slot below — the
+                 stacked arrangement the 10-foot guidelines hand for list
+                 metadata. Episode names are plain text, so a Label is enough;
+                 only the stream cards need emoji support. -->
+            <Label
+                id="epTitle"
+                width="1232"
+                height="48"
+                translation="[496, 40]"
+                horizAlign="left"
+                vertAlign="center"
+                font="font:LargeBoldSystemFont" />
+            <Label
+                id="epDate"
+                width="1232"
+                height="30"
+                translation="[496, 100]"
+                horizAlign="left"
+                vertAlign="center"
+                font="font:SmallerSystemFont"
+                visible="false" />
+            <Label
+                id="epSynopsis"
+                width="1232"
+                height="128"
+                translation="[496, 140]"
+                wrap="true"
+                horizAlign="left"
+                vertAlign="top"
+                font="font:SmallSystemFont" />
+        </Poster>
     </children>
 </component>

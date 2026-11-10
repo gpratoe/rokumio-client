@@ -298,18 +298,38 @@ sub UpdateHomeHero(position as dynamic)
         m.heroFocusKey = key
     end if
 
+    displayMeta = meta
     if m.heroMetaCache.DoesExist(key)
-        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", meta, m.heroMetaCache[key])
-        metas[itemIndex] = meta
-        UpdateHomeTileMeta(rowIndex, itemIndex, meta)
+        displayMeta = m.stores.episodes.callFunc("EpisodesMergeMeta", meta, m.heroMetaCache[key])
+        metas[itemIndex] = displayMeta
+        UpdateHomeTileMeta(rowIndex, itemIndex, displayMeta)
     end if
-    RenderHomeHero(meta)
+    RenderHomeHero(displayMeta)
+    meta = displayMeta
 
     needsHeroMeta = false
     if m.stores <> invalid and m.gridRows[rowIndex].source = "library"
         needsHeroMeta = m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta)
         if StringOf(meta.background).Trim() = "" or StringOf(meta.description).Trim() = "" then needsHeroMeta = true
         if StringOf(meta.logo).Trim() = "" or Type(meta.genres) <> "roArray" then needsHeroMeta = true
+        ' A full meta cached centrally (e.g. fetched by Details/Episodes) can fill
+        ' the hero without another request, but we must not pull its episode list
+        ' into the grid row or the focus path.
+        if needsHeroMeta and not m.heroMetaCache.DoesExist(key)
+            cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", meta.type, meta.id)
+            if cachedFull <> invalid
+                full = m.stores.episodes.callFunc("EpisodesMergeMeta", meta, cachedFull)
+                display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+                m.heroMetaCache[key] = display
+                metas[itemIndex] = display
+                UpdateHomeTileMeta(rowIndex, itemIndex, display)
+                RenderHomeHero(display)
+                meta = display
+                needsHeroMeta = m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta)
+                if StringOf(meta.background).Trim() = "" or StringOf(meta.description).Trim() = "" then needsHeroMeta = true
+                if StringOf(meta.logo).Trim() = "" or Type(meta.genres) <> "roArray" then needsHeroMeta = true
+            end if
+        end if
     end if
     if m.gridRows[rowIndex].source = "library" and not m.heroMetaCache.DoesExist(key)
         if needsHeroMeta and m.stores <> invalid
@@ -406,15 +426,17 @@ sub onHomeHeroMetaLoaded()
     m.heroMetaRequest = invalid
     if request = invalid or request.key <> m.heroFocusKey then return
     if result.ok <> true or result.meta = invalid then return
-    merged = m.stores.episodes.callFunc("EpisodesMergeMeta", request.meta, result.meta)
-    m.heroMetaCache[request.key] = merged
+    full = m.stores.episodes.callFunc("EpisodesMergeMeta", request.meta, result.meta)
+    m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
+    display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+    m.heroMetaCache[request.key] = display
     if request.row < 0 or request.row >= m.gridRows.Count() then return
     row = m.gridRows[request.row]
     if request.item < 0 or request.item >= row.metas.Count() then return
     if HomeHeroMetaKey(row.metas[request.item]) <> request.key then return
-    row.metas[request.item] = merged
-    UpdateHomeTileMeta(request.row, request.item, merged)
-    RenderHomeHero(merged)
+    row.metas[request.item] = display
+    UpdateHomeTileMeta(request.row, request.item, display)
+    RenderHomeHero(display)
 end sub
 
 sub CancelHeroMetaRequest()
@@ -994,13 +1016,23 @@ sub OpenContinueWatching(item as object)
     CancelOpen()
     CancelHeroMetaRequest()
     key = HomeHeroMetaKey(item)
+    display = invalid
     if m.heroMetaCache.DoesExist(key)
-        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", item, m.heroMetaCache[key])
+        display = m.stores.episodes.callFunc("EpisodesMergeMeta", item, m.heroMetaCache[key])
+    else
+        cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", item.type, item.id)
+        if cachedFull <> invalid
+            full = m.stores.episodes.callFunc("EpisodesMergeMeta", item, cachedFull)
+            display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+            m.heroMetaCache[key] = display
+        end if
+    end if
+    if display <> invalid
         m.top.pushRequest = {
             screen: "detailsScreen"
             params: {
                 addonAddress: address
-                meta: meta
+                meta: display
                 resume: { videoId: item.videoId, season: item.season, episode: item.episode, position: item.position }
             }
         }
@@ -1059,9 +1091,12 @@ sub onContinueWatchingLoaded()
 
     meta = pending.meta
     if result <> invalid and result.ok and result.meta <> invalid
-        meta = m.stores.episodes.callFunc("EpisodesMergeMeta", pending.meta, result.meta)
+        full = m.stores.episodes.callFunc("EpisodesMergeMeta", pending.meta, result.meta)
+        m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
+        display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
         key = HomeHeroMetaKey(meta)
-        if key <> "" then m.heroMetaCache[key] = meta
+        if key <> "" then m.heroMetaCache[key] = display
+        meta = display
     end if
     m.top.pushRequest = {
         screen: "detailsScreen"

@@ -254,6 +254,21 @@ function EpisodesSeasons(meta as object) as object
     return m.stores.episodes.Seasons(meta)
 end function
 
+' episodes.CacheFullMeta
+sub EpisodesCacheFullMeta(meta as object)
+    m.stores.episodes.CacheFullMeta(meta)
+end sub
+
+' episodes.DisplayMeta
+function EpisodesDisplayMeta(meta as object) as object
+    return m.stores.episodes.DisplayMeta(meta)
+end function
+
+' episodes.FullMeta
+function EpisodesFullMeta(metaType as dynamic, metaId as dynamic) as object
+    return m.stores.episodes.FullMeta(metaType, metaId)
+end function
+
 ' library.AddSaved
 function LibraryAddSaved(metaId as string, metaType as string, name as string, poster = "" as string, posterShape = "" as string) as boolean
     return m.stores.library.AddSaved(metaId, metaType, name, poster, posterShape)
@@ -465,6 +480,12 @@ end function
 ' the UI's, and the UI paints them from the table.
 function TimeAirDateParts(ep as object) as object
     return m.stores.time.AirDateParts(ep)
+end function
+
+' time.AirDatePartsBatch — the parts for a whole series run in one call, so the
+' Episodes cards' date lines cost one boundary crossing instead of one per episode.
+function TimeAirDatePartsBatch(eps as object) as object
+    return m.stores.time.AirDatePartsBatch(eps)
 end function
 
 ' watch.Latest

@@ -57,9 +57,19 @@ function OnEnter(params as object) as void
         end if
     end if
     ' Re-entry after a push (EpisodesScreen, streams, …): params is invalid and
-    ' the screen Group (not a focus target) was handed focus by the stack. A
-    ' chip must take focus back, or nothing inside is reachable.
+    ' the screen Group (not a focus target) was handed focus by the stack. The
+    ' resume hint may have moved while a child screen had focus (watching an
+    ' episode updates library state), so refresh it before handing focus back or
+    ' the Episodes chip would open on the stale spot from the first entry.
     if params = invalid
+        if m.meta <> invalid and m.stores <> invalid
+            m.resume = m.stores.library.callFunc("LibraryResumeFor", m.meta.id)
+            if m.meta.type = "series"
+                ShowSeries()
+            else
+                ShowMovie()
+            end if
+        end if
         RestoreFocus()
         return
     end if
@@ -185,7 +195,9 @@ sub onMetaLoaded()
     if result = invalid or not result.ok or result.meta = invalid then return
     if result.meta.id <> invalid and m.meta <> invalid and result.meta.id <> m.meta.id then return
 
-    m.meta = m.stores.episodes.callFunc("EpisodesMergeMeta", m.meta, result.meta)
+    full = m.stores.episodes.callFunc("EpisodesMergeMeta", m.meta, result.meta)
+    m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
+    m.meta = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.metaRefreshed = true
     RenderHero(m.meta)
 end sub
@@ -365,11 +377,20 @@ sub PlayMedia()
     episode = 1
     if m.meta.type = "movie"
         videoId = m.meta.id
-    else if m.meta.videos <> invalid and m.meta.videos.Count() > 0
-        video = m.meta.videos[0]
-        season = video.season
-        episode = video.episode
-        videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, season, episode)
+    else
+        videos = invalid
+        if m.meta.videos <> invalid
+            videos = m.meta.videos
+        else
+            full = m.stores.episodes.callFunc("EpisodesFullMeta", m.meta.type, m.meta.id)
+            if full <> invalid then videos = full.videos
+        end if
+        if videos <> invalid and videos.Count() > 0
+            video = videos[0]
+            season = video.season
+            episode = video.episode
+            videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, season, episode)
+        end if
     end if
     m.top.pushRequest = {
         screen: "streamsScreen"
@@ -400,22 +421,24 @@ end function
 
 sub OpenEpisodes()
     if m.meta = invalid then return
-    season = 0
-    episode = 0
-    position = 0
-    if m.resume <> invalid
-        season = m.resume.season
-        episode = m.resume.episode
-        position = m.resume.position
+    resume = invalid
+    if m.resume <> invalid and m.resume.season <> invalid and m.resume.episode <> invalid
+        position = 0
+        if m.resume.position <> invalid then position = m.resume.position
+        resume = { season: m.resume.season, episode: m.resume.episode, position: position }
     end if
+    ' The hint travels as a resume object, not bare ordinals: EpisodesScreen
+    ' reads params.resume to land the browser on the watch-in-progress spot.
+    ' The heavy episode list stays in the shared meta cache; Episodes resolves it
+    ' on demand so this push does not copy a full series payload.
+    episodeMeta = m.meta
+    if m.stores <> invalid and m.meta <> invalid then episodeMeta = m.stores.episodes.callFunc("EpisodesDisplayMeta", m.meta)
     m.top.pushRequest = {
         screen: "episodesScreen"
         params: {
             addonAddress: m.addonAddress
-            meta: m.meta
-            season: season
-            episode: episode
-            position: position
+            meta: episodeMeta
+            resume: resume
         }
     }
 end sub

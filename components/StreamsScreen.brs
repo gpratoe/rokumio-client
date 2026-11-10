@@ -432,7 +432,6 @@ sub RebuildSegments()
         segment = CreateObject("roSGNode", "Rectangle")
         segment.width = 28
         segment.height = 6
-        segment.cornerRadius = 3
         segment.translation = [i * 36, 0]
         segment.color = Theme().segmentIdle
         m.providerSegments.AppendChild(segment)
