@@ -19,6 +19,10 @@
         <field id="watched" type="boolean" />
         <!-- EpisodeTile: per-episode air state; false dims the tile. -->
         <field id="aired" type="boolean" />
+        <!-- EpisodeTile: formatted air-date line ("Aired Sep 30, 2026") and
+             whether that date is still to come (info blue vs warm gold). -->
+        <field id="dateLabel" type="string" />
+        <field id="dateUpcoming" type="boolean" />
         <!-- SearchScreen loading state consumed by PosterTile's spinner. -->
         <field id="loadState" type="string" />
         <!-- StreamTile: separate direct-play codec verdicts per media type. -->

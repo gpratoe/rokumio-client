@@ -84,6 +84,7 @@
         <function name="TextsFor" />
         <function name="TimeNowIso" />
         <function name="TimeAirDateParts" />
+        <function name="TimeAirDatePartsBatch" />
         <function name="WatchLatest" />
         <function name="WatchRecord" />
     </interface>

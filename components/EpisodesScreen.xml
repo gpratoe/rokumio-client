@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="EpisodesScreen" extends="Screen">
     <!-- The dedicated episode browser for a series. Pushed from DetailsScreen
-         ("Episodes") with { addonAddress, meta, resume }. A Home-style RowList
-         shows one row per season (tiles are episodes); the top header tracks the
-         focused episode's "S#E# name" and synopsis. OK on an episode reports a
-         stream-push request upward. -->
+         ("Episodes") with { addonAddress, meta, resume }. Home-style hero on
+         top — artwork, logo, no description — over one wide episode card per
+         RowList row (StreamTile's list architecture: one item per row, so the
+         rows only travel Up/Down). LEFT/RIGHT bubble out of the single-column
+         list and the screen swallows them to flip the season: the indicator in
+         the top-right corner shows the active season with chevrons only for
+         the seasons that exist that way. OK on a card reports a stream-push
+         request upward. -->
     <interface>
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
         <field id="watchedChange" type="assocarray" alwaysNotify="true" />
@@ -17,68 +21,100 @@
     <script type="text/brightscript" uri="pkg:/components/EpisodesScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
 
     <children>
         <Rectangle id="epBg" width="1920" height="1080" color="0x0" />
         <Poster id="bgPoster" width="1920" height="1080" loadDisplayMode="scaleToZoom" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
-        <!-- scaleToFill, not scaleToZoom. images/mask.png is a vertical alpha ramp
-             that is uniform along x, so preserving its aspect ratio buys nothing —
-             it only decides which slice of the gradient survives the crop. At
-             8x256 against a 1920x1080 node, scaleToZoom scales 240x and crops to
-             a 4-row window at the middle of the ramp, which is alpha ~247 and
-             renders as a flat opaque black background. scaleToFill stretches the
-             ramp across the node, which is what the 1918x1079 original was already
-             getting by accident (its aspect matched the node to within 0.1%). -->
-        <Poster id="bgMask" width="1920" height="1080" loadDisplayMode="scaleToFill" uri="pkg:/images/mask.png" />
-        <!-- Header: series name, then the focused episode's label and synopsis. -->
+        <!-- The bottom ramp: below the hero band the mask ramps the artwork
+             out to black, so the cards read over the art without dying the
+             logo zone with it (Home's heroMask does the same job). -->
+        <Poster id="bgMask" translation="[0, 320]" width="1920" height="760" loadDisplayMode="scaleToFill" uri="pkg:/images/mask.png" />
+
+        <!-- Hero: series name and logo only (no meta, no synopsis — the cards
+             carry the episode words). Same logo choreography as Details: the
+             logo takes the slot when it loads, the fallback title steps back
+             in when it doesn't. -->
+        <Poster
+            id="heroLogo"
+            translation="[162, 72]"
+            width="820"
+            height="460"
+            loadWidth="820"
+            loadHeight="460"
+            loadDisplayMode="scaleToFit"
+            visible="false" />
         <Label
             id="epName"
-            translation="[80, 48]"
-            width="1760"
-            height="70"
-            horizAlign="left"
-            font="font:LargeBoldSystemFont" />
-        <!-- The focused episode's "S#E#  name" (green) with the air date hung
-             right off it. One MultiStyleLabel renders both as a single line:
-             the date span switches font + color via drawingStyles markup (aired
-             warm gold, not-yet-aired sky blue), so no part can desync from the
-             title's width. -->
-        <MultiStyleLabel
-            id="epHeaderLine"
-            translation="[80, 128]"
-            width="1760"
-            height="40"
-            horizAlign="left"
-            vertAlign="center"
-            maxLines="1" />
-        <Label
-            id="epDesc"
-            translation="[80, 172]"
-            width="1760"
-            height="118"
+            translation="[166, 112]"
+            width="680"
+            height="90"
             wrap="true"
             horizAlign="left"
-            vertAlign="top"
-            font="font:SmallSystemFont" />
+            font="font:LargeBoldSystemFont" />
 
-        <!-- Episode rows: one row per season, tiles are landscape EpisodeTiles.
-             Content is built in code from the series meta. -->
+        <!-- Season indicator, top-right: the active season's name between
+             chevrons, each shown only while a season exists that way. Not
+             focusable — the flip is the screen swallowing LEFT/RIGHT out of
+             the list. -->
+        <Poster
+            id="seasonLeft"
+            translation="[1344, 84]"
+            width="44"
+            height="44"
+            loadWidth="44"
+            loadHeight="44"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/arrow_left.png"
+            visible="false" />
+        <Label
+            id="seasonName"
+            translation="[1388, 88]"
+            width="396"
+            height="48"
+            horizAlign="center"
+            vertAlign="center"
+            font="font:LargeBoldSystemFont" />
+        <Poster
+            id="seasonRight"
+            translation="[1796, 84]"
+            width="44"
+            height="44"
+            loadWidth="44"
+            loadHeight="44"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/arrow_right.png"
+            visible="false" />
+
+        <!-- One wide card per episode, one item per row: Up/Down are the only
+             keys the list eats, so Left/Right stay free for the season flip.
+             The list starts low enough that the second visible card dips its
+             feet past the screen edge — a cut card is its own hint that the
+             season continues below. -->
         <RowList
             id="epList"
-            translation="[80, 406]"
-            numRows="2"
-            itemSize="[1760, 230]"
-            itemSpacing="[0, 8]"
-            rowItemSize="[[320, 180]]"
-            rowItemSpacing="[[12, 0]]"
-            showRowLabel="[true]"
-            rowLabelOffset="[0, 0]"
-            rowLabelFont="font:MediumBoldSystemFont"
-            drawFocusFeedback="true"
+            translation="[80, 560]"
+            numRows="0"
+            itemSize="[1760, 312]"
+            itemSpacing="[0, 12]"
+            rowItemSize="[[1760, 300]]"
+            rowItemSpacing="[[0, 0]]"
+            showRowLabel="false"
+            drawFocusFeedback="false"
             itemComponentName="EpisodeTile"
-            vertFocusAnimationStyle="fixedFocusWrap"
-          wrapDividerBitmapUri="pkg:/images/divider.9.png"/>
+            vertFocusAnimationStyle="fixedFocusWrap" />
+
+        <!-- Loading / failure / empty state for the list area. -->
+        <Label
+            id="epStatus"
+            translation="[80, 470]"
+            width="1400"
+            height="60"
+            horizAlign="left"
+            vertAlign="center"
+            font="font:MediumSystemFont"
+            visible="false" />
     </children>
 </component>

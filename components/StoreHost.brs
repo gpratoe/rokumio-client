@@ -467,6 +467,12 @@ function TimeAirDateParts(ep as object) as object
     return m.stores.time.AirDateParts(ep)
 end function
 
+' time.AirDatePartsBatch — the parts for a whole series run in one call, so the
+' Episodes cards' date lines cost one boundary crossing instead of one per episode.
+function TimeAirDatePartsBatch(eps as object) as object
+    return m.stores.time.AirDatePartsBatch(eps)
+end function
+
 ' watch.Latest
 function WatchLatest() as dynamic
     return m.stores.watch.Latest()

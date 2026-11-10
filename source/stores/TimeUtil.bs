@@ -114,6 +114,22 @@ class TimeUtil
         return { day: dayVal.ToStr(), month: monthVal, year: year, upcoming: upcoming, known: known }
     end function
 
+    ' AirDateParts for a whole run of episodes in one store call. The episode
+    ' cards each carry a date line, so the screen asks once for the series
+    ' instead of once per episode — the same arithmetic that moved the watched
+    ' marks behind LibraryEpisodeMarksForSeries. Answers arrive in order; an
+    ' episode with no usable date slots an invalid in its place, so the caller
+    ' keeps the series' positional indexing intact.
+    function AirDatePartsBatch(eps as object) as object
+        parts = []
+        if eps <> invalid
+            for each ep in eps
+                parts.Push(m.AirDateParts(ep))
+            end for
+        end if
+        return parts
+    end function
+
     ' Whether an add-on-supplied date field is text with something in it.
     '
     ' Its own instance method rather than a shared global because of how Roku

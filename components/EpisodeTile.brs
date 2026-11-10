@@ -1,16 +1,21 @@
-' EpisodeTile — landscape episode cell for EpisodesScreen's season rows.
+' EpisodeTile — wide episode card for EpisodesScreen's list.
 '
-' RowList feeds each item its ContentNode through the interface field
-' `itemContent` and drives focus through `rowHasFocus`. The artwork comes from
-' the episode's thumbnail (hdPosterUrl). A cell is either artwork or the artless
-' unit (a flat face plus the S#E#/name text), never a blend of the two:
-' ShowArtless/ShowPoster swap them as a unit on the thumbnail's own loadStatus,
-' so the face stops rendering entirely once artwork paints instead of lingering
-' behind it. No URL, a URL still downloading, and a URL that failed all show the
-' text. Poster.loadStatus is none / loading / ready / failed — "ready" is the
-' success value, and there is no "loaded"; see the Poster field reference.
+' RowList feeds each item its ContentNode through `itemContent` and drives
+' focus through `itemHasFocus`/`rowHasFocus`. The artwork comes from the
+' episode's thumbnail (hdPosterUrl); a cell is either artwork or the artless
+' unit (a thumbnail-sized face plus the S#E#/name text), never a blend:
+' ShowArtless/ShowPoster swap them as a unit on the thumbnail's own
+' loadStatus. Poster.loadStatus is none / loading / ready / failed — "ready"
+' is the success value, and there is no "loaded"; see the Poster field
+' reference.
+'
+' The card look at focus time is the chip look: focus does not invert the
+' content — it lifts the plate one step under a white hairline ring. Idle
+' keeps the soft hairline.
 
 sub init()
+    m.border = m.top.FindNode("tileBorder")
+    m.face = m.top.FindNode("tileFace")
     m.artless = m.top.FindNode("artless")
     m.poster = m.top.FindNode("poster")
     m.tileBg = m.top.FindNode("tileBg")
@@ -18,13 +23,19 @@ sub init()
     m.watchedBadgeGroup = m.top.FindNode("watchedBadgeGroup")
     m.watchedPlate = m.top.FindNode("watchedPlate")
     m.watchedBadge = m.top.FindNode("watchedBadge")
+    m.epTitle = m.top.FindNode("epTitle")
+    m.epDate = m.top.FindNode("epDate")
+    m.epSynopsis = m.top.FindNode("epSynopsis")
 
     t = Theme()
     m.tileBg.color = t.tileFace
     m.titleText.color = t.textPrimary
+    m.epTitle.color = t.textPrimary
+    m.epSynopsis.color = t.textSecondary
     m.watchedPlate.color = t.glyphPlate
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
+    m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
     m.poster.ObserveField("loadStatus", "onPosterLoadStatus")
 end sub
@@ -33,8 +44,16 @@ end sub
 ' values. RowList recycles item components for new cells and content swaps, and
 ' those observers only fire on value *changes* — on a recycle nothing may change
 ' except itemContent, so unless the look is rebuilt there a tile carries stale
-' dimming (opacity 0.55) into a fresh row on another screen/media.
+' dimming (opacity 0.55) into a fresh RowList on another screen/media.
 sub UpdateLook()
+    t = Theme()
+    if m.top.itemHasFocus
+        m.border.blendColor = t.textWhite
+        m.face.blendColor = t.tileFaceFocus
+    else
+        m.border.blendColor = t.borderSoft
+        m.face.blendColor = t.tileFace
+    end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
     ' Episodes that haven't aired yet are dimmed further (still visible, but
     ' clearly not watchable). Missing aired is treated as aired so non-episode
@@ -42,18 +61,27 @@ sub UpdateLook()
     if m.top.itemContent <> invalid and m.top.itemContent.aired = false then m.top.opacity = 0.5 * m.top.opacity
 end sub
 
-' A whole row dims when its list row loses focus (user moved to another season),
-' reinforcing which season's tile is selected.
-sub onRowHasFocusChanged()
-    UpdateLook()
-end sub
-
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
     m.poster.uri = poster
-    m.titleText.text = m.top.itemContent.title
+    label = m.top.itemContent.title
+    if label = invalid then label = ""
+    m.epTitle.text = label
+    m.titleText.text = label
+    overview = m.top.itemContent.description
+    if overview = invalid then overview = ""
+    m.epSynopsis.text = overview
+    dateLabel = m.top.itemContent.dateLabel
+    if dateLabel = invalid or dateLabel = ""
+        m.epDate.visible = false
+    else
+        t = Theme()
+        if m.top.itemContent.dateUpcoming then m.epDate.color = t.accentInfo else m.epDate.color = t.accentWarm
+        m.epDate.text = dateLabel
+        m.epDate.visible = true
+    end if
     if m.top.itemContent.watched = true
         m.watchedBadge.uri = "pkg:/images/eye.png"
         m.watchedBadgeGroup.visible = true
@@ -67,6 +95,17 @@ sub onItemContentChanged()
     ' A uri set to something already cached can settle before the observer ever
     ' fires, so re-read the status now instead of trusting the callback alone.
     if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed" then onPosterLoadStatus()
+    UpdateLook()
+end sub
+
+' The mark for focus walks: no extra work beyond the shared look, but listed
+' explicitly because the RowList drives both fields and either may arrive alone
+' on a recycle.
+sub onItemHasFocusChanged()
+    UpdateLook()
+end sub
+
+sub onRowHasFocusChanged()
     UpdateLook()
 end sub
 
