@@ -27,6 +27,8 @@
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
         <Timer id="heroMetaDelay" duration="0.35" repeat="false" />
+        <Timer id="heroPrefetchDelay" duration="1.0" repeat="false" />
+        <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
         <Poster
             id="heroPoster"
             translation="[0, 0]"
@@ -58,6 +60,9 @@
             loadHeight="460"
             loadDisplayMode="scaleToFit"
             visible="false" />
+        <!-- Offscreen logo warmers: pre-decode neighbor logos after a stable dwell. -->
+        <Poster id="heroLogoWarm1" translation="[-2000, -2000]" width="820" height="460" loadWidth="820" loadHeight="460" loadDisplayMode="scaleToFit" visible="false" />
+        <Poster id="heroLogoWarm2" translation="[-2000, -2000]" width="820" height="460" loadWidth="820" loadHeight="460" loadDisplayMode="scaleToFit" visible="false" />
         <Label
             id="heroTitle"
             translation="[162, 112]"
@@ -190,6 +195,13 @@
                 fieldToInterp="railBg.width"
                 key="[0.0, 0.6, 1.0]"
                 keyValue="[320.0, 166.0, 112.0]" />
+        </Animation>
+        <Animation id="heroPosterFadeAnim" duration="0.2" repeat="false" easeFunction="linear">
+            <FloatFieldInterpolator
+                id="heroPosterFadeInterp"
+                fieldToInterp="heroPoster.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]" />
         </Animation>
     </children>
 </component>

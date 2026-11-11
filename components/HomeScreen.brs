@@ -35,10 +35,15 @@ sub init()
     m.railBrandCollapseAnim = m.top.FindNode("railBrandCollapseAnim")
     m.railBg = m.top.FindNode("railBg")
     m.heroPoster = m.top.FindNode("heroPoster")
+    m.heroPoster.ObserveField("loadStatus", "onHeroPosterStatus")
+    m.heroPosterFadeAnim = m.top.FindNode("heroPosterFadeAnim")
+    m.heroPosterPendingUri = ""
     m.heroScrim = m.top.FindNode("heroScrim")
     m.heroLogo = m.top.FindNode("heroLogo")
     m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
     m.heroLogoUri = ""
+    m.heroLogoGraceUri = ""
+    m.heroLogoFallbackUri = ""
     m.heroLayoutMode = "title"
     m.heroTitle = m.top.FindNode("heroTitle")
     m.heroMeta = m.top.FindNode("heroMeta")
@@ -48,12 +53,18 @@ sub init()
     m.heroDescription = m.top.FindNode("heroDescription")
     m.heroMetaDelay = m.top.FindNode("heroMetaDelay")
     m.heroMetaDelay.ObserveField("fire", "onHeroMetaDelayFire")
+    m.heroPrefetchDelay = m.top.FindNode("heroPrefetchDelay")
+    m.heroPrefetchDelay.ObserveField("fire", "onHeroPrefetchDelayFire")
+    m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
+    m.heroTitleGrace.ObserveField("fire", "onHeroTitleGraceFire")
+    m.heroLogoWarmers = [m.top.FindNode("heroLogoWarm1"), m.top.FindNode("heroLogoWarm2")]
+    m.heroPrefetchTasks = []
+    m.heroPrefetchKeys = {}
     m.heroMetaCache = {}
     m.heroMetaRequest = invalid
     m.heroMetaTask = invalid
     m.heroMetaTaskKey = ""
     m.heroFocusKey = ""
-    m.heroMetaCache = {}
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
 
@@ -296,7 +307,12 @@ sub UpdateHomeHero(position as dynamic)
     key = HomeHeroMetaKey(meta)
     if key <> m.heroFocusKey
         CancelHeroMetaRequest()
+        CancelHeroPrefetch()
         m.heroFocusKey = key
+    end if
+    if m.heroPrefetchDelay <> invalid
+        m.heroPrefetchDelay.control = "stop"
+        m.heroPrefetchDelay.control = "start"
     end if
 
     displayMeta = meta
@@ -389,44 +405,78 @@ sub RenderHomeHero(meta as object)
     descVisible = description.Trim() <> ""
     if m.heroDescription.visible <> descVisible then m.heroDescription.visible = descVisible
 
-    if m.heroPoster.uri <> background then m.heroPoster.uri = background
-    m.heroPoster.visible = background <> ""
+    if background = ""
+        m.heroPosterPendingUri = ""
+        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+        m.heroPoster.opacity = 1
+        if m.heroPoster.uri <> "" then m.heroPoster.uri = ""
+        m.heroPoster.visible = false
+    else if m.heroPoster.uri <> background
+        m.heroPosterPendingUri = background
+        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+        m.heroPoster.opacity = 0
+        m.heroPoster.uri = background
+        m.heroPoster.visible = true
+    else
+        m.heroPosterPendingUri = background
+        m.heroPoster.visible = true
+        if m.heroPoster.loadStatus = "ready" or m.heroPoster.loadStatus = "failed"
+            if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+            m.heroPoster.opacity = 1
+        end if
+    end if
 
     if logo = ""
         m.heroLogoUri = ""
-        m.heroLogo.uri = ""
-        ApplyHeroLayout("title")
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        if m.heroLogo.uri <> "" then m.heroLogo.uri = ""
+        ApplyHeroLayout("title", true)
         return
     end if
 
     if sameLogoReady
         ' Keep the fitted logo and current layout in place; only the changeable
         ' fields above update, so common chrome (rating/positions) does not flash.
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         m.heroLogo.visible = true
         m.heroTitle.visible = false
         return
     end if
 
-    if logo <> m.heroLogoUri
+    logoChanged = logo <> m.heroLogoUri
+    if logoChanged
         m.heroLogoUri = logo
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         m.heroLogo.uri = logo
-        if m.heroLayoutMode = "wide"
-            ' Keep common chrome positions stable while the next logo loads; only
-            ' the logo/title swap happens up top. A tall logo will reflow on load.
-            m.heroLogo.visible = false
-            m.heroTitle.visible = true
-        else
-            ApplyHeroLayout("title")
-        end if
+    end if
+
+    ' Logo present but not ready: hold the fallback briefly so a fast logo can
+    ' appear without flashing the title, then reveal the title if it takes long.
+    if m.heroLogoFallbackUri = logo
+        ShowHeroTitleFallback()
         return
     end if
 
-    ' Same logo URI, still loading: keep layout stable.
+    if logoChanged or m.heroLogoGraceUri <> logo
+        m.heroLogoGraceUri = logo
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid
+            m.heroTitleGrace.control = "stop"
+            m.heroTitleGrace.control = "start"
+        end if
+    end if
+
     if m.heroLayoutMode = "wide"
         m.heroLogo.visible = false
-        m.heroTitle.visible = true
-    else if m.heroLayoutMode <> "tall"
-        ApplyHeroLayout("title")
+        m.heroTitle.visible = false
+    else
+        ApplyHeroLayout("title", false)
     end if
 end sub
 
@@ -480,6 +530,24 @@ sub onHomeHeroMetaLoaded()
     RenderHomeHero(display)
 end sub
 
+sub onHeroPosterStatus()
+    if m.heroPoster = invalid then return
+    if m.heroPoster.uri <> m.heroPosterPendingUri then return
+    status = m.heroPoster.loadStatus
+    if status = "ready"
+        if m.heroPosterFadeAnim <> invalid
+            m.heroPosterFadeAnim.control = "stop"
+            m.heroPoster.opacity = 0
+            m.heroPosterFadeAnim.control = "start"
+        else
+            m.heroPoster.opacity = 1
+        end if
+    else if status = "failed"
+        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+        m.heroPoster.opacity = 1
+    end if
+end sub
+
 sub CancelHeroMetaRequest()
     if m.heroMetaDelay <> invalid then m.heroMetaDelay.control = "stop"
     m.heroMetaRequest = invalid
@@ -491,6 +559,210 @@ sub CancelHeroMetaRequest()
     end if
 end sub
 
+sub CancelHeroPrefetch()
+    if m.heroPrefetchDelay <> invalid then m.heroPrefetchDelay.control = "stop"
+    if m.heroPrefetchTasks <> invalid
+        for each entry in m.heroPrefetchTasks
+            if entry <> invalid and entry.task <> invalid then AsyncTask_Reap(entry.task, m.top, true)
+        end for
+    end if
+    m.heroPrefetchTasks = []
+    m.heroPrefetchKeys = {}
+    ClearHeroLogoWarmers()
+end sub
+
+sub ClearHeroLogoWarmers()
+    if m.heroLogoWarmers = invalid then return
+    for each warmer in m.heroLogoWarmers
+        if warmer <> invalid then warmer.uri = ""
+    end for
+end sub
+
+sub onHeroPrefetchDelayFire()
+    if m.heroFocusKey = "" or m.stores = invalid then return
+    position = m.catalog.rowItemFocused
+    if position = invalid or position.Count() < 2 then return
+    rowIndex = position[0]
+    itemIndex = position[1]
+    if HomeHeroMetaKeyAt(rowIndex, itemIndex) <> m.heroFocusKey then return
+
+    candidates = HeroPrefetchCandidates(rowIndex, itemIndex)
+    WarmNeighborLogos(candidates)
+    PrefetchNeighborHeroMeta(candidates)
+    WarmNeighborLogos(HeroPrefetchCandidates(rowIndex, itemIndex))
+end sub
+
+function HomeHeroMetaKeyAt(rowIndex as integer, itemIndex as integer) as string
+    if m.gridRows = invalid or rowIndex < 0 or rowIndex >= m.gridRows.Count() then return ""
+    metas = m.gridRows[rowIndex].metas
+    if metas = invalid or itemIndex < 0 or itemIndex >= metas.Count() then return ""
+    return HomeHeroMetaKey(metas[itemIndex])
+end function
+
+function HeroPrefetchCandidates(rowIndex as integer, itemIndex as integer) as object
+    candidates = []
+    if m.gridRows = invalid or rowIndex < 0 or rowIndex >= m.gridRows.Count() then return candidates
+    row = m.gridRows[rowIndex]
+    metas = row.metas
+    if metas = invalid then return candidates
+
+    offsets = [-1, 1]
+    for each offset in offsets
+        idx = itemIndex + offset
+        if idx >= 0 and idx < metas.Count()
+            meta = metas[idx]
+            key = HomeHeroMetaKey(meta)
+            if key <> ""
+                candidates.Push({
+                    row: rowIndex
+                    item: idx
+                    meta: meta
+                    key: key
+                    source: row.source
+                })
+            end if
+        end if
+    end for
+    return candidates
+end function
+
+sub WarmNeighborLogos(candidates as object)
+    ClearHeroLogoWarmers()
+    if m.heroLogoWarmers = invalid or candidates = invalid then return
+    slot = 0
+    for each candidate in candidates
+        if slot >= m.heroLogoWarmers.Count() then exit for
+        logo = HeroCandidateLogo(candidate)
+        if logo <> ""
+            warmer = m.heroLogoWarmers[slot]
+            if warmer <> invalid then warmer.uri = logo
+            slot = slot + 1
+        end if
+    end for
+end sub
+
+function HeroCandidateLogo(candidate as object) as string
+    if candidate = invalid then return ""
+    key = candidate.key
+    if key <> "" and m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(key)
+        cached = m.heroMetaCache[key]
+        if cached <> invalid then return StringOf(cached.logo)
+    end if
+    if candidate.meta <> invalid then return StringOf(candidate.meta.logo)
+    return ""
+end function
+
+sub PrefetchNeighborHeroMeta(candidates as object)
+    if candidates = invalid or m.stores = invalid then return
+    for each candidate in candidates
+        if m.heroPrefetchTasks.Count() >= 2 then exit for
+        if candidate.source <> "library" then continue for
+        if candidate.key = "" or candidate.key = m.heroFocusKey then continue for
+        if m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(candidate.key) then continue for
+        if m.heroPrefetchKeys <> invalid and m.heroPrefetchKeys.DoesExist(candidate.key) then continue for
+        if m.heroMetaTaskKey <> invalid and m.heroMetaTaskKey = candidate.key then continue for
+
+        if HeroTryFillFromSharedCache(candidate) then continue for
+        if not HeroCandidateNeedsEnrichment(candidate.meta) then continue for
+
+        address = MetaAddress()
+        if address = "" then continue for
+        task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onHeroPrefetchLoaded", {
+            addonAddress: address
+            metaType: candidate.meta.type
+            metaId: candidate.meta.id
+        }, "homeHeroPrefetch")
+        if task = invalid then continue for
+        m.heroPrefetchTasks.Push({ task: task, key: candidate.key, row: candidate.row, item: candidate.item })
+        m.heroPrefetchKeys[candidate.key] = true
+    end for
+end sub
+
+function HeroCandidateNeedsEnrichment(meta as object) as boolean
+    if meta = invalid or m.stores = invalid then return false
+    if m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta) then return true
+    if StringOf(meta.background).Trim() = "" then return true
+    if StringOf(meta.description).Trim() = "" then return true
+    if StringOf(meta.logo).Trim() = "" then return true
+    if Type(meta.genres) <> "roArray" then return true
+    return false
+end function
+
+function HeroTryFillFromSharedCache(candidate as object) as boolean
+    if candidate = invalid or m.stores = invalid then return false
+    cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", candidate.meta.type, candidate.meta.id)
+    if cachedFull = invalid then return false
+    full = m.stores.episodes.callFunc("EpisodesMergeMeta", candidate.meta, cachedFull)
+    display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+    m.heroMetaCache[candidate.key] = display
+    StoreHeroDisplayMeta(candidate.row, candidate.item, candidate.key, display)
+    return true
+end function
+
+sub StoreHeroDisplayMeta(rowIndex as integer, itemIndex as integer, key as string, display as object)
+    if m.gridRows = invalid or rowIndex < 0 or rowIndex >= m.gridRows.Count() then return
+    row = m.gridRows[rowIndex]
+    metas = row.metas
+    if metas = invalid or itemIndex < 0 or itemIndex >= metas.Count() then return
+    if HomeHeroMetaKey(metas[itemIndex]) <> key then return
+    metas[itemIndex] = display
+    UpdateHomeTileMeta(rowIndex, itemIndex, display)
+end sub
+
+sub onHeroPrefetchLoaded(event as object)
+    if event = invalid then return
+    task = event.getRoSGNode()
+    if task = invalid then return
+
+    completed = invalid
+    remaining = []
+    for each entry in m.heroPrefetchTasks
+        isMatch = false
+        if completed = invalid and entry <> invalid and entry.task <> invalid
+            isMatch = entry.task.isSameNode(task)
+        end if
+        if isMatch
+            completed = entry
+        else
+            if entry <> invalid then remaining.Push(entry)
+        end if
+    end for
+    m.heroPrefetchTasks = remaining
+    if completed = invalid then return
+    if m.heroPrefetchKeys <> invalid then m.heroPrefetchKeys.Delete(completed.key)
+
+    result = task.result
+    AsyncTask_Reap(task, m.top, false)
+
+    if result = invalid or result.ok <> true or result.meta = invalid then return
+    if m.stores = invalid then return
+
+    baseMeta = invalid
+    if m.gridRows <> invalid and completed.row >= 0 and completed.row < m.gridRows.Count()
+        metas = m.gridRows[completed.row].metas
+        if metas <> invalid and completed.item >= 0 and completed.item < metas.Count()
+            if HomeHeroMetaKey(metas[completed.item]) = completed.key then baseMeta = metas[completed.item]
+        end if
+    end if
+    if baseMeta = invalid then baseMeta = { id: result.meta.id, type: result.meta.type }
+
+    full = m.stores.episodes.callFunc("EpisodesMergeMeta", baseMeta, result.meta)
+    m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
+    display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+    m.heroMetaCache[completed.key] = display
+    StoreHeroDisplayMeta(completed.row, completed.item, completed.key, display)
+
+    if completed.key = m.heroFocusKey
+        RenderHomeHero(display)
+    end if
+
+    position = m.catalog.rowItemFocused
+    if position <> invalid and position.Count() >= 2 and HomeHeroMetaKeyAt(position[0], position[1]) = m.heroFocusKey
+        WarmNeighborLogos(HeroPrefetchCandidates(position[0], position[1]))
+    end if
+end sub
+
+
 function HeroTypeLabel(metaType as string) as string
     if metaType = "movie" then return Lang("common", "kindMovie")
     if metaType = "series" then return Lang("common", "kindSeries")
@@ -500,13 +772,38 @@ end function
 sub onHeroLogoStatus()
     if m.heroLogo.uri <> m.heroLogoUri then return
     if m.heroLogo.loadStatus = "ready"
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
         FitHeroLogo()
     else if m.heroLogo.loadStatus = "failed"
-        ApplyHeroLayout("title")
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = m.heroLogoUri
+        ShowHeroTitleFallback()
     end if
 end sub
 
-sub ApplyHeroLayout(mode as string)
+sub ShowHeroTitleFallback()
+    m.heroLogo.visible = false
+    m.heroTitle.visible = true
+    if m.heroLayoutMode = "tall"
+        ApplyHeroLayout("title", true)
+    else if m.heroLayoutMode <> "wide"
+        ApplyHeroLayout("title", true)
+    end if
+end sub
+
+sub onHeroTitleGraceFire()
+    if m.heroLogoUri = "" then return
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    if m.heroLogo.loadStatus = "ready" then return
+    m.heroLogoGraceUri = ""
+    m.heroLogoFallbackUri = m.heroLogoUri
+    ShowHeroTitleFallback()
+end sub
+
+sub ApplyHeroLayout(mode as string, showTitle = true as boolean)
     if mode = "tall"
         ' Tall-logo layout is applied by FitHeroLogo with measured dimensions.
         return
@@ -516,7 +813,7 @@ sub ApplyHeroLayout(mode as string)
     end if
     m.heroLayoutMode = "title"
     m.heroLogo.visible = false
-    m.heroTitle.visible = true
+    m.heroTitle.visible = showTitle
     m.heroLogo.translation = [162, 72]
     m.heroLogo.width = 820
     m.heroLogo.height = 460
@@ -564,7 +861,7 @@ sub FitHeroLogo()
 end sub
 
 sub ResetHeroLogoLayout()
-    ApplyHeroLayout("title")
+    ApplyHeroLayout("title", true)
 end sub
 
 ' If Continue Watching and every catalog row are absent, explain where catalog
@@ -885,6 +1182,9 @@ sub BlurFocus()
     m.railWasFocus = m.railFocusIndex >= 0
     CollapseRail()
     CancelHeroMetaRequest()
+    CancelHeroPrefetch()
+    if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
     CancelOpen()
 end sub
 
