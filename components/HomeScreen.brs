@@ -39,6 +39,7 @@ sub init()
     m.heroLogo = m.top.FindNode("heroLogo")
     m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
     m.heroLogoUri = ""
+    m.heroLayoutMode = "title"
     m.heroTitle = m.top.FindNode("heroTitle")
     m.heroMeta = m.top.FindNode("heroMeta")
     m.heroRating = m.top.FindNode("heroRating")
@@ -369,24 +370,64 @@ sub RenderHomeHero(meta as object)
     genres = HeroGenresText(meta.genres)
     if title.Len() > 44 then title = Left(title, 41) + "..."
     if description.Len() > 150 then description = Left(description, 147) + "..."
+
     logo = StringOf(meta.logo)
-    previousLogoUri = m.heroLogo.uri
-    m.heroLogoUri = logo
-    ResetHeroLogoLayout()
-    m.heroLogo.visible = false
-    m.heroTitle.visible = true
-    m.heroTitle.text = title
-    m.heroMeta.text = kind
-    m.heroRatingText.text = rating
-    m.heroRating.visible = rating.Trim() <> ""
-    m.heroGenres.text = genres
-    m.heroGenres.visible = genres <> ""
-    m.heroDescription.text = description
-    m.heroDescription.visible = description.Trim() <> ""
-    m.heroPoster.uri = StringOf(meta.background)
-    m.heroPoster.visible = m.heroPoster.uri <> ""
-    m.heroLogo.uri = logo
-    if logo <> "" and logo = previousLogoUri and m.heroLogo.loadStatus = "ready" then FitHeroLogo()
+    background = StringOf(meta.background)
+    currentLogoUri = m.heroLogo.uri
+    currentLogoReady = currentLogoUri <> "" and currentLogoUri = m.heroLogoUri and m.heroLogo.loadStatus = "ready"
+    sameLogoReady = logo <> "" and logo = currentLogoUri and currentLogoReady and logo = m.heroLogoUri
+
+    if m.heroTitle.text <> title then m.heroTitle.text = title
+    if m.heroMeta.text <> kind then m.heroMeta.text = kind
+    if m.heroRatingText.text <> rating then m.heroRatingText.text = rating
+    ratingVisible = rating.Trim() <> ""
+    if m.heroRating.visible <> ratingVisible then m.heroRating.visible = ratingVisible
+    if m.heroGenres.text <> genres then m.heroGenres.text = genres
+    genresVisible = genres <> ""
+    if m.heroGenres.visible <> genresVisible then m.heroGenres.visible = genresVisible
+    if m.heroDescription.text <> description then m.heroDescription.text = description
+    descVisible = description.Trim() <> ""
+    if m.heroDescription.visible <> descVisible then m.heroDescription.visible = descVisible
+
+    if m.heroPoster.uri <> background then m.heroPoster.uri = background
+    m.heroPoster.visible = background <> ""
+
+    if logo = ""
+        m.heroLogoUri = ""
+        m.heroLogo.uri = ""
+        ApplyHeroLayout("title")
+        return
+    end if
+
+    if sameLogoReady
+        ' Keep the fitted logo and current layout in place; only the changeable
+        ' fields above update, so common chrome (rating/positions) does not flash.
+        m.heroLogo.visible = true
+        m.heroTitle.visible = false
+        return
+    end if
+
+    if logo <> m.heroLogoUri
+        m.heroLogoUri = logo
+        m.heroLogo.uri = logo
+        if m.heroLayoutMode = "wide"
+            ' Keep common chrome positions stable while the next logo loads; only
+            ' the logo/title swap happens up top. A tall logo will reflow on load.
+            m.heroLogo.visible = false
+            m.heroTitle.visible = true
+        else
+            ApplyHeroLayout("title")
+        end if
+        return
+    end if
+
+    ' Same logo URI, still loading: keep layout stable.
+    if m.heroLayoutMode = "wide"
+        m.heroLogo.visible = false
+        m.heroTitle.visible = true
+    else if m.heroLayoutMode <> "tall"
+        ApplyHeroLayout("title")
+    end if
 end sub
 
 sub UpdateHomeTileMeta(rowIndex as integer, itemIndex as integer, meta as object)
@@ -461,10 +502,30 @@ sub onHeroLogoStatus()
     if m.heroLogo.loadStatus = "ready"
         FitHeroLogo()
     else if m.heroLogo.loadStatus = "failed"
-        m.heroLogo.visible = false
-        m.heroTitle.visible = true
-        ResetHeroLogoLayout()
+        ApplyHeroLayout("title")
     end if
+end sub
+
+sub ApplyHeroLayout(mode as string)
+    if mode = "tall"
+        ' Tall-logo layout is applied by FitHeroLogo with measured dimensions.
+        return
+    else if mode = "wide"
+        ' Wide-logo layout is applied by FitHeroLogo with measured dimensions.
+        return
+    end if
+    m.heroLayoutMode = "title"
+    m.heroLogo.visible = false
+    m.heroTitle.visible = true
+    m.heroLogo.translation = [162, 72]
+    m.heroLogo.width = 820
+    m.heroLogo.height = 460
+    m.heroMeta.translation = [166, 216]
+    m.heroRating.translation = [166, 256]
+    m.heroGenres.translation = [166, 307]
+    m.heroDescription.translation = [166, 357]
+    m.heroDescription.width = 860
+    m.heroDescription.height = 150
 end sub
 
 ' Fit each loaded logo into the shared ratio-aware envelope (see HeroFit).
@@ -479,6 +540,7 @@ sub FitHeroLogo()
     m.heroLogo.width = logoWidth
     m.heroLogo.height = logoHeight
     if fit.tall
+        m.heroLayoutMode = "tall"
         m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
         contentX = 162 + logoWidth + 48
         m.heroMeta.translation = [contentX, 110]
@@ -488,6 +550,7 @@ sub FitHeroLogo()
         m.heroDescription.width = 1920 - contentX - 160
         m.heroDescription.height = 260
     else
+        m.heroLayoutMode = "wide"
         m.heroLogo.translation = [162, 70 + Int((190 - logoHeight) / 2)]
         m.heroMeta.translation = [166, 274]
         m.heroRating.translation = [166, 316]
@@ -501,15 +564,7 @@ sub FitHeroLogo()
 end sub
 
 sub ResetHeroLogoLayout()
-    m.heroLogo.translation = [162, 72]
-    m.heroLogo.width = 820
-    m.heroLogo.height = 460
-    m.heroMeta.translation = [166, 216]
-    m.heroRating.translation = [166, 256]
-    m.heroGenres.translation = [166, 307]
-    m.heroDescription.translation = [166, 357]
-    m.heroDescription.width = 860
-    m.heroDescription.height = 150
+    ApplyHeroLayout("title")
 end sub
 
 ' If Continue Watching and every catalog row are absent, explain where catalog
