@@ -1,4 +1,4 @@
-<component name="FilterBar" extends="Group">
+<component name="FilterBar" extends="Group" focusable="true">
 
     <!-- FilterBar — a filter-chip row with a pull-down option menu, shared by
          DiscoverScreen and LibraryScreen. The chips are one ChipsRow; OK on a
@@ -47,24 +47,20 @@
     <children>
         <ChipsRow id="chips" />
 
-        <!-- The dropdown: a panel below the chips listing one chip's options in
-             a single-column RowList (vertical clipping free). Opens on chip OK;
-             the group is positioned under the activating chip and paints over
-             whatever sits under it (the screen declares FilterBar after its own
-             grid for that reason). -->
+        <!-- The dropdown: a panel below the chips listing one chip's options.
+             Built as a manual list (nav-rail pattern) for snappy focus/scroll. -->
         <Group id="menuGroup" visible="false">
             <Rectangle id="menuBackdrop" width="260" height="56" />
-            <RowList
-                id="menu"
-                numRows="1"
-                itemSize="[260, 56]"
-                itemSpacing="[0, 6]"
-                rowItemSize="[[260, 56]]"
-                rowItemSpacing="[[4, 0]]"
-                showRowLabel="false"
-                drawFocusFeedback="true"
-                itemComponentName="ChipTile"
-                vertFocusAnimationStyle="floatingFocus"/>
+            <Group id="menuList" />
+            <Poster
+                id="menuMore"
+                width="24"
+                height="24"
+                loadWidth="24"
+                loadHeight="24"
+                loadDisplayMode="scaleToFit"
+                uri="pkg:/images/chevron-down.png"
+                visible="false" />
         </Group>
     </children>
 </component>

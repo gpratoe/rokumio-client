@@ -91,6 +91,7 @@ end sub
 
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    if m.top.keysEnabled = false then return false
     if m.top.GetChildCount() = 0 then return false
     if key = "left"
         return Move(-1)

@@ -8,6 +8,7 @@
          the row lets go (Blur) before handing focus elsewhere. -->
     <interface>
         <field id="selection" type="int" value="-1" alwaysNotify="true" />
+        <field id="keysEnabled" type="boolean" value="true" />
         <function name="SetChips" />
         <function name="FocusChip" />
         <function name="Selected" />

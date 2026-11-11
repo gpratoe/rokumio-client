@@ -82,7 +82,11 @@ sub ApplyState()
         m.icon.blendColor = t.textPrimary
         m.text.color = t.accent
     else
-        m.iconBg.blendColor = t.tileFace
+        if m.top.flat = true
+            m.iconBg.blendColor = "0x00000000"
+        else
+            m.iconBg.blendColor = t.tileFace
+        end if
         m.icon.blendColor = t.textSecondary
         m.text.color = t.textPrimary
     end if
