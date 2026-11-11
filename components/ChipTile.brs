@@ -45,14 +45,31 @@ sub ApplyLayout(hasIcon as boolean, hasText as boolean)
     if bgH < 24 then bgH = 24
     m.iconBg.height = bgH
     m.iconBg.loadHeight = bgH
+
+    ' The icon scales with the tile (two-thirds of its height) and centers
+    ' on the tile's Y axis — the old fixed 48px box at [16,16] was built for
+    ' the 72px tile and rode 4px low there, and spilled clean off the 48px
+    ' slim chips. The label follows the icon's right edge, keeping the same
+    ' 24px gap the 72px tile always had.
+    iconSize = Int(m.tileHeight * 2 / 3)
+    if iconSize < 16 then iconSize = 16
+    iconY = Int((m.tileHeight - iconSize) / 2)
+    m.icon.width = iconSize
+    m.icon.height = iconSize
+    m.icon.loadWidth = iconSize
+    m.icon.loadHeight = iconSize
+
     textY = Int((m.tileHeight - 40) / 2)
     if textY < 0 then textY = 0
     if hasIcon and hasText
+        m.icon.translation = [16, iconY]
         m.iconBg.width = m.tileWidth - 8
-        m.text.translation = [88, textY]
-        m.text.width = m.tileWidth - 96
+        textX = 16 + iconSize + 24
+        m.text.translation = [textX, textY]
+        m.text.width = m.tileWidth - textX - 8
         m.text.visible = true
     else if hasIcon
+        m.icon.translation = [4 + Int((m.tileHeight - 8 - iconSize) / 2), iconY]
         m.iconBg.width = m.tileHeight - 8
         m.text.width = 0
         m.text.visible = false
