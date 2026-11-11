@@ -27,7 +27,7 @@
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
         <Timer id="heroMetaDelay" duration="0.35" repeat="false" />
-        <Timer id="heroPrefetchDelay" duration="1.0" repeat="false" />
+        <Timer id="heroPrefetchDelay" duration="0.45" repeat="false" />
         <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
         <Poster
             id="heroPoster"
