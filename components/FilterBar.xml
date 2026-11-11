@@ -36,6 +36,7 @@
         <function name="ShowMenu" />
         <function name="HideMenu" />
         <function name="FocusChips" />
+        <function name="BlurChips" />
         <function name="FocusIsOnChips" />
         <function name="IsMenuOpen" />
     </interface>

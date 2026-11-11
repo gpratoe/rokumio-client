@@ -304,6 +304,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
         m.filterBar.callFunc("FocusChips")
         return true
     else if key = "down" and m.filterBar.callFunc("FocusIsOnChips")
+        m.filterBar.callFunc("BlurChips")
         m.grid.SetFocus(true)
         return true
     else if key = "up" and m.grid.HasFocus()

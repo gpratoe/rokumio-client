@@ -127,6 +127,10 @@ sub FocusChips()
     m.chips.callFunc("FocusChip", m.activeChip)
 end sub
 
+sub BlurChips()
+    m.chips.callFunc("Blur")
+end sub
+
 function FocusIsOnChips() as boolean
     return m.chips.callFunc("HoldingFocus")
 end function

@@ -622,9 +622,16 @@ end sub
 sub RefreshDiscoverHeroFromFocus()
     data = m.grid.rowItemFocused
     if data <> invalid and data.Count() >= 2
-        UpdateDiscoverHero(data)
-    else if m.metas.Count() > 0
-        UpdateDiscoverHero([0, 0])
+        row = data[0]
+        col = data[1]
+        flat = row * m.chunk + col
+        if flat >= 0 and flat < m.metas.Count()
+            RenderDiscoverHero(m.metas[flat])
+            return
+        end if
+    end if
+    if m.metas.Count() > 0
+        RenderDiscoverHero(m.metas[0])
     else
         ClearDiscoverHero()
     end if
@@ -635,7 +642,10 @@ sub UpdateDiscoverHero(position as object)
     row = position[0]
     col = position[1]
     flat = row * m.chunk + col
-    if flat < 0 or flat >= m.metas.Count() then return
+    if flat < 0 or flat >= m.metas.Count()
+        if m.metas.Count() > 0 then RenderDiscoverHero(m.metas[0])
+        return
+    end if
     RenderDiscoverHero(m.metas[flat])
 end sub
 
@@ -929,6 +939,7 @@ sub onDiscoverLoaded()
             return
         end if
         UpdateGrid()
+        m.grid.jumpToRowItem = [0, 0]
         m.status.text = ""
         RefreshDiscoverHeroFromFocus()
         LandingChipsFocus()
@@ -1068,6 +1079,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
         m.filterBar.callFunc("FocusChips")
         return true
     else if key = "down" and m.filterBar.callFunc("FocusIsOnChips")
+        m.filterBar.callFunc("BlurChips")
         m.grid.SetFocus(true)
         return true
     else if key = "up" and m.grid.HasFocus()
