@@ -29,6 +29,9 @@
     <interface>
         <field id="chipActivated" type="int" value="-1" alwaysNotify="true" />
         <field id="optionPicked" type="assocarray" alwaysNotify="true" />
+        <field id="chipItemWidth" type="int" value="260" />
+        <field id="chipItemHeight" type="int" value="72" />
+        <field id="menuItemHeight" type="int" value="56" />
         <function name="SetChips" />
         <function name="ShowMenu" />
         <function name="HideMenu" />

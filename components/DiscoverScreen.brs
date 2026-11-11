@@ -18,28 +18,51 @@
 
 sub init()
     m.status = m.top.FindNode("discoverStatus")
-    m.header = m.top.FindNode("discoverHeader")
     m.filterBar = m.top.FindNode("filterBar")
     m.grid = m.top.FindNode("discoverGrid")
 
+    m.heroPoster = m.top.FindNode("heroPoster")
+    m.heroPoster.ObserveField("loadStatus", "onHeroPosterStatus")
+    m.heroPosterFadeAnim = m.top.FindNode("heroPosterFadeAnim")
+    m.heroPosterPendingUri = ""
+    m.heroScrim = m.top.FindNode("heroScrim")
+    m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
+    m.heroLogoUri = ""
+    m.heroLogoGraceUri = ""
+    m.heroLogoFallbackUri = ""
+    m.heroLayoutMode = "title"
+    m.heroTitle = m.top.FindNode("heroTitle")
+    m.heroMeta = m.top.FindNode("heroMeta")
+    m.heroRating = m.top.FindNode("heroRating")
+    m.heroRatingText = m.top.FindNode("heroRatingText")
+    m.heroGenres = m.top.FindNode("heroGenres")
+    m.heroDescription = m.top.FindNode("heroDescription")
+    m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
+    m.heroTitleGrace.ObserveField("fire", "onHeroTitleGraceFire")
+    m.heroFocusKey = ""
+
     t = Theme()
-    m.top.FindNode("discoverTitle").color = t.accent
-    m.top.FindNode("discoverSub").color = t.textSecondary
+    m.heroScrim.color = t.scrim
+    m.heroTitle.color = t.textPrimary
+    m.heroMeta.color = t.textSecondary
+    m.heroRatingText.color = t.accentWarm
+    m.heroGenres.color = t.textSecondary
+    m.heroDescription.color = t.textPrimary
     m.status.color = t.accent
-    m.header.color = t.textSecondary
     m.grid.focusBitmapBlendColor = t.accentFocus
 
     m.filterBar.ObserveField("chipActivated", "onChipActivated")
     m.filterBar.ObserveField("optionPicked", "onOptionPicked")
     m.grid.ObserveField("rowItemSelected", "onResultSelected")
-    m.grid.ObserveField("itemFocused", "onGridFocused")
+    m.grid.ObserveField("rowItemFocused", "onGridItemFocused")
 
     m.chunk = 6
-    ' The grid's row budget: the RowList spans x 150..1930 (translation 150 + the
-    ' itemSize width 1780 in DiscoverScreen.xml), with an 18px gap between tiles
+    ' The grid's row budget: the RowList spans x 90..1890 (translation 90 + the
+    ' itemSize width 1800 in DiscoverScreen.xml), with an 18px gap between tiles
     ' (rowItemSpacing). A row of cells must fit this or the RowList scrolls that
     ' row horizontally — see UpdateGrid.
-    m.rowWidth = 1780
+    m.rowWidth = 1800
     m.rowGap = 18
     m.sources = []
     m.sourcesSignature = ""
@@ -54,12 +77,7 @@ sub init()
 end sub
 
 function OnEnter(params as object) as void
-    ' The language first, then the two words this screen owns: the title and
-    ' the subtitle live in the markup as the English default, and the table
-    ' decides what is shown.
     RefreshTexts()
-    m.top.FindNode("discoverTitle").text = Lang("discover", "title")
-    m.top.FindNode("discoverSub").text = Lang("discover", "subtitle")
     if m.filterBar.callFunc("IsMenuOpen") then m.filterBar.callFunc("HideMenu")
 
     ' The add-on set can move while Discover is off-screen (install/uninstall,
@@ -70,9 +88,11 @@ function OnEnter(params as object) as void
     ' Re-entry after Details: results are still here, just take focus back.
     if m.metas.Count() > 0
         m.grid.SetFocus(true)
+        RefreshDiscoverHeroFromFocus()
         return
     end if
 
+    ClearDiscoverHero()
     EnsureSources()
 end function
 
@@ -86,6 +106,8 @@ function OnBackPressed() as boolean
 end function
 
 sub BlurFocus()
+    if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
 end sub
 
 ' --- sources (which add-ons serve which catalogs) ---------------------------
@@ -378,6 +400,7 @@ end function
 sub ShowEmpty()
     m.status.text = Lang("discover", "noCatalogAddons")
     m.filterBar.callFunc("SetChips", [])
+    ClearDiscoverHero()
 end sub
 
 ' --- genre (the chosen catalog's filter) ------------------------------------
@@ -444,21 +467,19 @@ end function
 ' --- filter chips (data) ----------------------------------------------------
 
 ' The chip row itself lives in FilterBar; the screen owns the values and their
-' labels. "Type · ..."-style labels make each chip's role readable; the genre
-' chip is omitted when the chosen catalog has no genre filter. Rebuilt on every
-' pick so the label always reflects the active value.
+' labels. The genre chip is omitted when the chosen catalog has no genre filter.
 sub SetChips()
     entries = []
     if TypeGroups().Count() > 0
-        entries.Push({ raw: m.typeKey, label: Lang("discover", "typePrefix") + TypeLabel(m.typeKey) })
+        entries.Push({ raw: m.typeKey, label: TypeLabel(m.typeKey) })
     end if
     if m.selectedCatalog <> invalid
-        entries.Push({ raw: m.selectedCatalog.catalogId, label: Lang("discover", "catalogPrefix") + CatalogChipLabel() })
+        entries.Push({ raw: m.selectedCatalog.catalogId, label: CatalogChipLabel() })
     end if
     if GenreOptions().Count() > 0
         label = m.genre
-        if label = "" then label = Lang("common", "all")
-        entries.Push({ raw: m.genre, label: Lang("discover", "genrePrefix") + label })
+        if label = "" or label = "all" then label = Lang("common", "all")
+        entries.Push({ raw: m.genre, label: label })
     end if
     m.filterBar.callFunc("SetChips", entries)
 end sub
@@ -542,6 +563,7 @@ sub ResetDiscover()
         m.grid.content = CreateObject("roSGNode", "ContentNode")
         m.grid.numRows = 0
     end if
+    ClearDiscoverHero()
 end sub
 
 ' Kick the chosen catalog off the render thread. A filter change supersedes
@@ -585,16 +607,282 @@ sub LoadMore()
     m.loadTask = task
 end sub
 
-' Near the bottom of the fetched results, pull the next page. The 3-row horizon
-' means a smooth pre-load; because an append keeps the focused row anchored, one
-' page lands per scroll instead of cascading to the end. itemFocused is the
-' integer index of the focused row; the total row count is derived from what we
-' have loaded (numRows is the visible count).
-sub onGridFocused()
-    row = m.grid.itemFocused
-    rows = (m.metas.Count() + m.chunk - 1) / m.chunk
+' Near the bottom of the fetched results, pull the next page and update the
+' hero to reflect the focused item.
+sub onGridItemFocused()
+    data = m.grid.rowItemFocused
+    if data = invalid or data.Count() < 2 then return
+    row = data[0]
+    UpdateDiscoverHero(data)
+    rows = 0
+    if m.chunk > 0 then rows = (m.metas.Count() + m.chunk - 1) / m.chunk
     if rows >= 4 and row >= rows - 3 then LoadMore()
 end sub
+
+sub RefreshDiscoverHeroFromFocus()
+    data = m.grid.rowItemFocused
+    if data <> invalid and data.Count() >= 2
+        UpdateDiscoverHero(data)
+    else if m.metas.Count() > 0
+        UpdateDiscoverHero([0, 0])
+    else
+        ClearDiscoverHero()
+    end if
+end sub
+
+sub UpdateDiscoverHero(position as object)
+    if position = invalid or position.Count() < 2 then return
+    row = position[0]
+    col = position[1]
+    flat = row * m.chunk + col
+    if flat < 0 or flat >= m.metas.Count() then return
+    RenderDiscoverHero(m.metas[flat])
+end sub
+
+sub ClearDiscoverHero()
+    m.heroFocusKey = ""
+    m.heroLogoUri = ""
+    m.heroLogoGraceUri = ""
+    m.heroLogoFallbackUri = ""
+    if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+    m.heroPosterPendingUri = ""
+    m.heroPoster.uri = ""
+    m.heroPoster.opacity = 1
+    m.heroPoster.visible = false
+    if m.heroLogo.uri <> "" then m.heroLogo.uri = ""
+    m.heroTitle.text = ""
+    m.heroMeta.text = ""
+    m.heroRatingText.text = ""
+    m.heroRating.visible = false
+    m.heroGenres.text = ""
+    m.heroGenres.visible = false
+    m.heroDescription.text = ""
+    m.heroDescription.visible = false
+    ApplyHeroLayout("title", false)
+end sub
+
+sub RenderDiscoverHero(meta as object)
+    if meta = invalid then return
+    title = StringOf(meta.name)
+    if title.Trim() = "" then title = StringOf(meta.title)
+    if title.Trim() = "" then title = ""
+    description = StringOf(meta.description)
+    if description.Trim() = "" then description = StringOf(meta.overview)
+    metaType = StringOf(meta.type)
+    if metaType = "" and m.selectedCatalog <> invalid then metaType = StringOf(m.selectedCatalog.rawType)
+    kind = HeroTypeLabel(metaType)
+    releaseInfo = StringOf(meta.releaseInfo)
+    if releaseInfo <> "" and kind <> "" then kind = kind + " · " + releaseInfo
+    if releaseInfo <> "" and kind = "" then kind = releaseInfo
+    ratingKey = "imdb" + "Rating"
+    rating = StringOf(meta[ratingKey])
+    runtime = FormatRuntime(meta.runtime)
+    if runtime <> "" and metaType <> "series"
+        if kind <> "" then kind = kind + " · " + runtime else kind = runtime
+    end if
+    genres = HeroGenresText(meta.genres)
+    if title.Len() > 44 then title = Left(title, 41) + "..."
+    if description.Len() > 150 then description = Left(description, 147) + "..."
+
+    logo = StringOf(meta.logo)
+    background = StringOf(meta.background)
+    currentLogoUri = m.heroLogo.uri
+    currentLogoReady = currentLogoUri <> "" and currentLogoUri = m.heroLogoUri and m.heroLogo.loadStatus = "ready"
+    sameLogoReady = logo <> "" and logo = currentLogoUri and currentLogoReady and logo = m.heroLogoUri
+
+    if m.heroTitle.text <> title then m.heroTitle.text = title
+    if m.heroMeta.text <> kind then m.heroMeta.text = kind
+    if m.heroRatingText.text <> rating then m.heroRatingText.text = rating
+    ratingVisible = rating.Trim() <> ""
+    if m.heroRating.visible <> ratingVisible then m.heroRating.visible = ratingVisible
+    if m.heroGenres.text <> genres then m.heroGenres.text = genres
+    genresVisible = genres <> ""
+    if m.heroGenres.visible <> genresVisible then m.heroGenres.visible = genresVisible
+    if m.heroDescription.text <> description then m.heroDescription.text = description
+    descVisible = description.Trim() <> ""
+    if m.heroDescription.visible <> descVisible then m.heroDescription.visible = descVisible
+
+    if background = ""
+        m.heroPosterPendingUri = ""
+        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+        m.heroPoster.opacity = 1
+        if m.heroPoster.uri <> "" then m.heroPoster.uri = ""
+        m.heroPoster.visible = false
+    else if m.heroPoster.uri <> background
+        m.heroPosterPendingUri = background
+        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+        m.heroPoster.opacity = 0
+        m.heroPoster.uri = background
+        m.heroPoster.visible = true
+    else
+        m.heroPosterPendingUri = background
+        m.heroPoster.visible = true
+        if m.heroPoster.loadStatus = "ready" or m.heroPoster.loadStatus = "failed"
+            if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+            m.heroPoster.opacity = 1
+        end if
+    end if
+
+    if logo = ""
+        m.heroLogoUri = ""
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        if m.heroLogo.uri <> "" then m.heroLogo.uri = ""
+        ApplyHeroLayout("title", true)
+        return
+    end if
+
+    if sameLogoReady
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        m.heroLogo.visible = true
+        m.heroTitle.visible = false
+        return
+    end if
+
+    logoChanged = logo <> m.heroLogoUri
+    if logoChanged
+        m.heroLogoUri = logo
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        m.heroLogo.uri = logo
+    end if
+
+    if m.heroLogoFallbackUri = logo
+        ShowHeroTitleFallback()
+        return
+    end if
+
+    if logoChanged or m.heroLogoGraceUri <> logo
+        m.heroLogoGraceUri = logo
+        m.heroLogoFallbackUri = ""
+        if m.heroTitleGrace <> invalid
+            m.heroTitleGrace.control = "stop"
+            m.heroTitleGrace.control = "start"
+        end if
+    end if
+
+    if m.heroLayoutMode = "wide"
+        m.heroLogo.visible = false
+        m.heroTitle.visible = false
+    else
+        ApplyHeroLayout("title", false)
+    end if
+end sub
+
+sub onHeroPosterStatus()
+    if m.heroPoster = invalid then return
+    if m.heroPoster.uri <> m.heroPosterPendingUri then return
+    status = m.heroPoster.loadStatus
+    if status = "ready"
+        if m.heroPosterFadeAnim <> invalid
+            m.heroPosterFadeAnim.control = "stop"
+            m.heroPoster.opacity = 0
+            m.heroPosterFadeAnim.control = "start"
+        else
+            m.heroPoster.opacity = 1
+        end if
+    else if status = "failed"
+        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+        m.heroPoster.opacity = 1
+    end if
+end sub
+
+sub onHeroLogoStatus()
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    if m.heroLogo.loadStatus = "ready"
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = ""
+        FitHeroLogo()
+    else if m.heroLogo.loadStatus = "failed"
+        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+        m.heroLogoGraceUri = ""
+        m.heroLogoFallbackUri = m.heroLogoUri
+        ShowHeroTitleFallback()
+    end if
+end sub
+
+sub ShowHeroTitleFallback()
+    m.heroLogo.visible = false
+    m.heroTitle.visible = true
+    if m.heroLayoutMode = "tall"
+        ApplyHeroLayout("title", true)
+    else if m.heroLayoutMode <> "wide"
+        ApplyHeroLayout("title", true)
+    end if
+end sub
+
+sub onHeroTitleGraceFire()
+    if m.heroLogoUri = "" then return
+    if m.heroLogo.uri <> m.heroLogoUri then return
+    if m.heroLogo.loadStatus = "ready" then return
+    m.heroLogoGraceUri = ""
+    m.heroLogoFallbackUri = m.heroLogoUri
+    ShowHeroTitleFallback()
+end sub
+
+sub ApplyHeroLayout(mode as string, showTitle = true as boolean)
+    if mode = "tall" or mode = "wide" then return
+    m.heroLayoutMode = "title"
+    m.heroLogo.visible = false
+    m.heroTitle.visible = showTitle
+    m.heroLogo.translation = [162, 72]
+    m.heroLogo.width = 820
+    m.heroLogo.height = 460
+    m.heroMeta.translation = [166, 216]
+    m.heroRating.translation = [166, 256]
+    m.heroGenres.translation = [166, 307]
+    m.heroDescription.translation = [166, 357]
+    m.heroDescription.width = 860
+    m.heroDescription.height = 150
+end sub
+
+sub FitHeroLogo()
+    fit = HeroFit(m.heroLogo.bitmapWidth, m.heroLogo.bitmapHeight)
+    if fit = invalid then return
+    logoWidth = fit.width
+    logoHeight = fit.height
+
+    m.heroLogo.width = logoWidth
+    m.heroLogo.height = logoHeight
+    if fit.tall
+        m.heroLayoutMode = "tall"
+        m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
+        contentX = 162 + logoWidth + 48
+        m.heroMeta.translation = [contentX, 110]
+        m.heroRating.translation = [contentX, 158]
+        m.heroGenres.translation = [contentX, 206]
+        m.heroDescription.translation = [contentX, 256]
+        m.heroDescription.width = 1920 - contentX - 160
+        m.heroDescription.height = 260
+    else
+        m.heroLayoutMode = "wide"
+        m.heroLogo.translation = [162, 70 + Int((190 - logoHeight) / 2)]
+        m.heroMeta.translation = [166, 274]
+        m.heroRating.translation = [166, 316]
+        m.heroGenres.translation = [166, 360]
+        m.heroDescription.translation = [166, 402]
+        m.heroDescription.width = 1000
+        m.heroDescription.height = 138
+    end if
+    m.heroLogo.visible = true
+    m.heroTitle.visible = false
+end sub
+
+sub ResetHeroLogoLayout()
+    ApplyHeroLayout("title", true)
+end sub
+
+function HeroTypeLabel(metaType as string) as string
+    if metaType = "movie" then return Lang("common", "kindMovie")
+    if metaType = "series" then return Lang("common", "kindSeries")
+    return metaType
+end function
 
 ' A landing may grab chips focus only when the dropdown is closed — an open
 ' menu keeps its focus through the landing so a load finishing can't yank the
@@ -631,17 +919,18 @@ sub onDiscoverLoaded()
     if wantedOffset = 0
         m.metas = result.metas
         m.loaded = true
-        m.header.text = label
         m.allLoaded = not result.hasMore or result.metas.Count() = 0
         if m.metas.Count() = 0
             m.grid.content = CreateObject("roSGNode", "ContentNode")
             m.grid.numRows = 0
             m.status.text = Fill(Lang("discover", "noResults"), { label: label })
+            ClearDiscoverHero()
             LandingChipsFocus()
             return
         end if
         UpdateGrid()
         m.status.text = ""
+        RefreshDiscoverHeroFromFocus()
         LandingChipsFocus()
     else
         ' Append only metas not already shown. Cinemeta's skip=49 page

@@ -16,11 +16,35 @@ sub init()
     m.chips.ObserveField("selection", "onChipPressed")
     m.menu.ObserveField("rowItemSelected", "onMenuPressed")
 
-    m.chipPitch = 276
-    m.menuY = 68
     m.entries = []
     m.activeChip = 0
 end sub
+
+function ChipItemWidth() as integer
+    w = m.top.chipItemWidth
+    if w = invalid or w <= 0 then w = 260
+    return w
+end function
+
+function ChipItemHeight() as integer
+    h = m.top.chipItemHeight
+    if h = invalid or h <= 0 then h = 72
+    return h
+end function
+
+function MenuItemHeight() as integer
+    h = m.top.menuItemHeight
+    if h = invalid or h <= 0 then h = 56
+    return h
+end function
+
+function ChipPitch() as integer
+    return ChipItemWidth() + 16
+end function
+
+function MenuY() as integer
+    return ChipItemHeight() + 8
+end function
 
 ' Rebuild the chip row from {raw,label} entries. Chips keep a fixed width so
 ' the dropdown keeps hanging exactly under the chip that opened it. Focus is
@@ -29,9 +53,11 @@ sub SetChips(entries as object)
     m.entries = entries
     if m.activeChip >= entries.Count() then m.activeChip = entries.Count() - 1
 
+    w = ChipItemWidth()
+    h = ChipItemHeight()
     chips = []
     for each entry in entries
-        chips.Push({ title: entry.label, width: 260 })
+        chips.Push({ title: entry.label, width: w, height: h })
     end for
     m.chips.callFunc("SetChips", chips)
 end sub
@@ -48,23 +74,29 @@ end sub
 ' dropdown opens under the activating chip and pre-scrolls so whatever is
 ' focused is the value OK will commit.
 sub ShowMenu(options as object, currentIndex as integer)
+    w = ChipItemWidth()
+    h = MenuItemHeight()
+    m.menu.itemSize = [w, h]
+    m.menu.rowItemSize = [[w, h]]
+
     content = CreateObject("roSGNode", "ContentNode")
     for each option in options
         row = content.CreateChild("ContentNode")
         item = row.CreateChild("ChipContent")
         item.title = option.label
-        item.width = m.menu.rowItemSize[0][0]
-        item.height = m.menu.rowItemSize[0][1]
+        item.width = w
+        item.height = h
     end for
     m.menu.content = content
 
     shown = options.Count()
     if shown > 9 then shown = 9
     m.menu.numRows = shown
-    m.menuBackdrop.height = shown * 56 + (shown - 1) * 6 + 4
+    m.menuBackdrop.width = w
+    m.menuBackdrop.height = shown * h + (shown - 1) * 6 + 4
 
     ' Hang the menu under the activating chip, not always the first one.
-    m.menuGroup.translation = [m.activeChip * m.chipPitch, m.menuY]
+    m.menuGroup.translation = [m.activeChip * ChipPitch(), MenuY()]
 
     m.menuGroup.visible = true
     m.menu.jumpToRowItem = [currentIndex, 0]

@@ -11,6 +11,7 @@ sub init()
     m.text = m.top.FindNode("chipText")
     m.active = false
     m.tileWidth = 0
+    m.tileHeight = 72
     t = Theme()
     m.text.color = t.textPrimary
     m.top.ObserveField("itemContent", "onItemContentChanged")
@@ -22,16 +23,17 @@ sub init()
 end sub
 
 ' Standalone entry point (ChipsRow).
-sub SetChip(title as string, iconUri as string, chipWidth as integer, isActive = false as boolean)
-    ApplyContent(title, iconUri, isActive, chipWidth)
+sub SetChip(title as string, iconUri as string, chipWidth as integer, isActive = false as boolean, chipHeight = 72 as integer)
+    ApplyContent(title, iconUri, isActive, chipWidth, chipHeight)
 end sub
 
-sub ApplyContent(title as string, iconUri as string, isActive as boolean, tileWidth as integer)
+sub ApplyContent(title as string, iconUri as string, isActive as boolean, tileWidth as integer, chipHeight = 72 as integer)
     hasIcon = iconUri <> ""
     if hasIcon then m.icon.uri = iconUri
     m.text.text = title
     m.active = isActive
     m.tileWidth = tileWidth
+    m.tileHeight = chipHeight
     ApplyLayout(hasIcon, title <> "")
     ApplyState()
 end sub
@@ -39,13 +41,19 @@ end sub
 sub ApplyLayout(hasIcon as boolean, hasText as boolean)
     m.icon.visible = hasIcon
     m.iconBg.visible = true
+    bgH = m.tileHeight - 8
+    if bgH < 24 then bgH = 24
+    m.iconBg.height = bgH
+    m.iconBg.loadHeight = bgH
+    textY = Int((m.tileHeight - 40) / 2)
+    if textY < 0 then textY = 0
     if hasIcon and hasText
         m.iconBg.width = m.tileWidth - 8
-        m.text.translation = [88, 20]
+        m.text.translation = [88, textY]
         m.text.width = m.tileWidth - 96
         m.text.visible = true
     else if hasIcon
-        m.iconBg.width = 72
+        m.iconBg.width = m.tileHeight - 8
         m.text.width = 0
         m.text.visible = false
     else
@@ -53,7 +61,7 @@ sub ApplyLayout(hasIcon as boolean, hasText as boolean)
         ' the label on the face; the label is the whole chip there, unlike the
         ' icon+label action chips where the label starts after the icon.
         m.iconBg.width = m.tileWidth - 8
-        m.text.translation = [8, 20]
+        m.text.translation = [8, textY]
         m.text.width = m.tileWidth - 16
         m.text.horizAlign = "center"
         m.text.visible = true
@@ -103,9 +111,9 @@ sub onItemContentChanged()
     title = ""
     if content.title <> invalid then title = content.title
     active = content.HasField("active") and content.active = true
-    if content.width <> invalid
-        ApplyContent(title, iconUri, active, content.width)
-    else
-        ApplyContent(title, iconUri, active, m.tileWidth)
-    end if
+    w = m.tileWidth
+    if content.width <> invalid then w = content.width
+    h = m.tileHeight
+    if content.height <> invalid and content.height > 0 then h = content.height
+    ApplyContent(title, iconUri, active, w, h)
 end sub

@@ -31,7 +31,8 @@ sub SetChips(entries as object)
         tile.focusable = true
         tile.translation = [x, 0]
         width = ChipWidth(entry)
-        tile.callFunc("SetChip", ChipTitle(entry), ChipIcon(entry), width, ChipActive(entry))
+        height = ChipHeight(entry)
+        tile.callFunc("SetChip", ChipTitle(entry), ChipIcon(entry), width, ChipActive(entry), height)
         x = x + width + 16
     end for
 
@@ -132,6 +133,11 @@ end function
 
 ' A chip's width: the icon area plus the measured label. Icon-only chips
 ' stay square; an entry the screen sized itself with wins.
+function ChipHeight(entry as object) as integer
+    if entry.height <> invalid and entry.height > 0 then return entry.height
+    return 72
+end function
+
 function ChipWidth(entry as object) as integer
     if entry.width <> invalid and entry.width > 0 then return entry.width
     title = ChipTitle(entry)

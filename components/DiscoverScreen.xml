@@ -1,19 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="DiscoverScreen" extends="Screen">
-    <!-- Discover: browse every installed add-on's catalogs by filter. Three
-         chips (Type · Catalog · Genre) sit above a poster grid. OK on a chip
-         opens a dropdown menu of the chip's options — Up/Down to move, OK to
-         pick, Back to dismiss — so a wrong pick is an instant Back, never a
-         full cycle. OK on a result publishes a pushRequest the Scene routes to
-         Details. The type chip lists every declared catalog type that has a
-         feed-capable catalog; the catalog chip lists every such catalog of the
-         chosen type; the genre chip takes its options from the chosen catalog's
-         manifest (and is omitted when that catalog declares no genre). -->
+    <!-- Discover: browse every installed add-on's catalogs by filter with a
+         Home-style hero that reflects the focused result. Filter chips select
+         type/catalog/genre above the results grid; OK on a chip opens its
+         dropdown, OK on a result pushes Details. -->
     <interface>
-        <!-- The one action Discover reports upward: a push request. -->
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
 
-        <!-- Screen contract: called by ScreenStack for show/hide/focus/back. -->
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
@@ -21,52 +14,104 @@
 
     <script type="text/brightscript" uri="pkg:/components/DiscoverScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/TileSize.bs" />
 
     <children>
         <Rectangle id="discoverBg" width="1920" height="1080" color="0x0" />
-        <Label
-            id="discoverTitle"
-            translation="[150, 48]"
-            width="1760"
-            height="70"
-            text="Discover"
-            font="font:LargeBoldSystemFont" />
-        <Label
-            id="discoverSub"
-            translation="[150, 128]"
-            width="1760"
-            height="40"
-            text="OK on a chip to open its menu · Up/Down to reach the results · Back to exit · * Focus filters"
-            font="font:SmallSystemFont" />
+        <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
+
+        <Poster
+            id="heroPoster"
+            translation="[0, 0]"
+            width="1920"
+            height="1080"
+            loadWidth="1920"
+            loadHeight="1080"
+            loadDisplayMode="scaleToZoom"
+            opacity="1.0" />
+        <Rectangle
+            id="heroScrim"
+            translation="[0, 0]"
+            width="1920"
+            height="1080"
+            color="0x00000099" />
+        <Poster
+            id="heroMask"
+            translation="[0, 320]"
+            width="1920"
+            height="760"
+            loadDisplayMode="scaleToFill"
+            uri="pkg:/images/mask.png" />
 
         <Label
             id="discoverStatus"
-            translation="[150, 176]"
-            width="1760"
-            height="40"
+            translation="[150, 20]"
+            width="1620"
+            height="34"
             font="font:SmallSystemFont" />
 
-        <!-- Current filter summary, e.g. "Featured · Movies · Sci-Fi". -->
+        <Poster
+            id="heroLogo"
+            translation="[162, 72]"
+            width="820"
+            height="460"
+            loadWidth="820"
+            loadHeight="460"
+            loadDisplayMode="scaleToFit"
+            visible="false" />
         <Label
-            id="discoverHeader"
-            translation="[150, 300]"
-            width="1760"
-            height="40"
-            font="font:MediumSystemFont" />
+            id="heroTitle"
+            translation="[162, 112]"
+            width="680"
+            height="90"
+            wrap="true"
+            font="font:LargeBoldSystemFont" />
+        <Label
+            id="heroMeta"
+            translation="[166, 216]"
+            width="900"
+            height="30"
+            font="font:SmallSystemFont" />
+        <Group id="heroRating" translation="[166, 256]" visible="false">
+            <Poster
+                id="heroImdbLogo"
+                width="64"
+                height="32"
+                loadWidth="64"
+                loadHeight="32"
+                loadDisplayMode="scaleToFit"
+                uri="pkg:/images/imdb.png" />
+            <Label
+                id="heroRatingText"
+                translation="[76, 0]"
+                width="110"
+                height="36"
+                vertAlign="center"
+                font="font:LargeBoldSystemFont" />
+        </Group>
+        <Label
+            id="heroGenres"
+            translation="[166, 307]"
+            width="860"
+            height="32"
+            font="font:SmallSystemFont" />
+        <Label
+            id="heroDescription"
+            translation="[166, 357]"
+            width="860"
+            height="145"
+            wrap="true"
+            vertAlign="top"
+            font="font:SmallSystemFont" />
 
-        <!-- Results grid: one fetch's metas chunked into poster rows so the
-             RowList clips/scrolls vertically. UpdateGrid computes the column
-             count to fit the 1780px row budget for the active tile size (6 for
-             2:3, 3 for 16:9), so a landscape row never overflows into per-row
-             horizontal scrolling. Same PosterTile contract as Home's grid. -->
         <RowList
             id="discoverGrid"
-            translation="[150, 362]"
+            translation="[90, 632]"
             numRows="2"
-            itemSize="[1780, 405]"
+            itemSize="[1800, 405]"
             itemSpacing="[0, 18]"
             rowItemSize="[[270, 405]]"
             rowItemSpacing="[[18, 0]]"
@@ -74,12 +119,14 @@
             drawFocusFeedback="true"
             itemComponentName="PosterTile" />
 
-        <!-- The filter chips + dropdown (FilterBar). The component owns the
-             chip row, the option menu and their geometry; the screen supplies
-             the chip options and the commit effect. Declared last (a custom
-             component renders in its own pass, in declaration order) so the
-             dropdown paints over the results grid; the chip row at y 232 does
-             not overlap the grid at y 342, so ordering it after is harmless. -->
-        <FilterBar id="filterBar" translation="[150, 232]" />
+        <FilterBar id="filterBar" translation="[90, 552]" chipItemWidth="320" chipItemHeight="48" menuItemHeight="48" />
+
+        <Animation id="heroPosterFadeAnim" duration="0.2" repeat="false" easeFunction="linear">
+            <FloatFieldInterpolator
+                id="heroPosterFadeInterp"
+                fieldToInterp="heroPoster.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]" />
+        </Animation>
     </children>
 </component>
