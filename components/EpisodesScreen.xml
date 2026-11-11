@@ -64,6 +64,7 @@
             translation="[1332, 74]"
             width="520"
             height="64"
+            opacity="0.8"
             uri="pkg:/images/season-pill.png"
             visible="false" />
         <Poster
