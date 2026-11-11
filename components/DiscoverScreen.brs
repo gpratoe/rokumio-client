@@ -41,6 +41,8 @@ sub init()
     m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
     m.heroTitleGrace.ObserveField("fire", "onHeroTitleGraceFire")
     m.heroFocusKey = ""
+    m.filtersHint = m.top.FindNode("filtersHint")
+    m.filtersHintFade = m.top.FindNode("filtersHintFade")
 
     t = Theme()
     m.heroScrim.color = t.scrim
@@ -108,6 +110,7 @@ end function
 sub BlurFocus()
     if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
     if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+    if m.filtersHint <> invalid then m.filtersHint.visible = false
 end sub
 
 ' --- sources (which add-ons serve which catalogs) ---------------------------
@@ -482,6 +485,17 @@ sub SetChips()
         entries.Push({ raw: m.genre, label: label })
     end if
     m.filterBar.callFunc("SetChips", entries)
+    UpdateFiltersHintAnchor()
+end sub
+
+' The hint circle hugs the front of the chip row: its x sits one gap left of
+' the first chip, vertically centered on the chip height, so it reads as part
+' of the filter row — a keycap for the asterisk button.
+sub UpdateFiltersHintAnchor()
+    if m.filtersHint = invalid then return
+    x = m.filterBar.translation[0] - 44 - 16
+    y = m.filterBar.translation[1] + (m.filterBar.chipItemHeight - 44) / 2
+    m.filtersHint.translation = [x, y]
 end sub
 
 ' The chip OK'd in the FilterBar: hand it that chip's options and the index of
@@ -614,9 +628,36 @@ sub onGridItemFocused()
     if data = invalid or data.Count() < 2 then return
     row = data[0]
     UpdateDiscoverHero(data)
+    UpdateFiltersHint()
     rows = 0
     if m.chunk > 0 then rows = (m.metas.Count() + m.chunk - 1) / m.chunk
     if rows >= 4 and row >= rows - 3 then LoadMore()
+end sub
+
+' The asterisk-key hint lives only where it is needed: the grid focus is past
+' the first row (Up is consumed there by the RowList) and the grid holds focus.
+' It fades in beside the chip row and vanishes the moment it is irrelevant.
+sub UpdateFiltersHint()
+    if m.filtersHint = invalid then return
+    visible = false
+    if m.grid.HasFocus()
+        data = m.grid.rowItemFocused
+        if data <> invalid and data.Count() >= 2 and data[0] >= 1 then visible = true
+    end if
+    if m.filtersHint.visible = visible then return
+    m.filtersHint.visible = visible
+    if m.filtersHintFade = invalid then
+        m.filtersHint.opacity = 1
+        return
+    end if
+    if visible
+        m.filtersHintFade.control = "stop"
+        m.filtersHint.opacity = 0
+        m.filtersHintFade.control = "start"
+    else
+        m.filtersHintFade.control = "stop"
+        m.filtersHint.opacity = 0
+    end if
 end sub
 
 sub RefreshDiscoverHeroFromFocus()
@@ -1077,13 +1118,16 @@ function onKeyEvent(key as string, press as boolean) as boolean
     ' results grid it drops focus back up onto the filter chips.
     if key = "options" and m.grid.HasFocus()
         m.filterBar.callFunc("FocusChips")
+        UpdateFiltersHint()
         return true
     else if key = "down" and m.filterBar.callFunc("FocusIsOnChips")
         m.filterBar.callFunc("BlurChips")
         m.grid.SetFocus(true)
+        UpdateFiltersHint()
         return true
     else if key = "up" and m.grid.HasFocus()
         m.filterBar.callFunc("FocusChips")
+        UpdateFiltersHint()
         return true
     end if
     return false

@@ -121,6 +121,30 @@
 
         <FilterBar id="filterBar" translation="[90, 552]" chipItemWidth="320" chipItemHeight="48" menuItemHeight="48" />
 
+        <!-- Contextual shortcut hint: the asterisk keycap, one self-contained
+             image. It sits left of the first filter chip and appears only
+             while the grid focus is past the first row, where Up is consumed
+             by the RowList and the asterisk key is the only way back. -->
+        <Poster
+            id="filtersHint"
+            translation="[30, 554]"
+            width="44"
+            height="44"
+            loadWidth="44"
+            loadHeight="44"
+            loadDisplayMode="limitSize"
+            uri="pkg:/images/asterisk.png"
+            visible="false"
+            opacity="0" />
+
+        <Animation id="filtersHintFade" duration="0.2" repeat="false" easeFunction="linear">
+            <FloatFieldInterpolator
+                id="filtersHintFadeInterp"
+                fieldToInterp="filtersHint.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]" />
+        </Animation>
+
         <Animation id="heroPosterFadeAnim" duration="0.2" repeat="false" easeFunction="linear">
             <FloatFieldInterpolator
                 id="heroPosterFadeInterp"
