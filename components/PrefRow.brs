@@ -29,10 +29,12 @@ end sub
 sub UpdateLook()
     t = Theme()
     if m.top.itemHasFocus
-        m.face.color = t.itemFace
-        m.value.color = t.textPrimary
+        m.face.color = t.textPrimary
+        m.title.color = t.screenBg
+        m.value.color = t.screenBg
     else
         m.face.color = t.tileFace
+        m.title.color = t.textPrimary
         m.value.color = t.textSecondary
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
