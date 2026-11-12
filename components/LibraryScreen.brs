@@ -1,36 +1,57 @@
-' LibraryScreen — the saved library for the current session. Two chips drive the
-' grid: a content-type filter (All/Movies/Series) and a sort order (Recently
-' added/A-Z/Z-A/Watched). OK on a chip opens a dropdown menu of that chip's
-' options — Up/Down move, OK picks, Back dismisses without changing anything —
-' so a wrong pick is an instant undo, never a full cycle. The layout is
-' DiscoverScreen's: chips + dropdown above a poster grid, but everything is
-' served straight from LibraryStore, no tasks, nothing to load.
+' LibraryScreen — the saved library for the current session, in the same
+' hero-led browse style as Discover. Two chips drive the grid: a content-type
+' filter (All/Movies/Series/Channels) and a sort order (Recently added/A-Z/
+' Z-A/Watched). OK on a chip opens a dropdown menu of that chip's options —
+' Up/Down move, OK picks, Back dismisses without changing anything. The hero
+' reflects the focused saved item; saved records are slim (name/poster/type),
+' so the shared hero pipeline degrades gracefully — poster backdrop + title,
+' with logo/description/rating/genres hidden when absent.
 '
+' Everything is served straight from LibraryStore, no tasks, nothing to load.
 ' The grid is re-sliced whenever a filter or sort changes and on every
-' OnEnter/RefreshRows, so a save made on another screen (or a background library
-' sync landing while this screen is top) shows up on the next build. A filter
-' change keeps the focus on the chips (close the menu, pick a new one); with a
-' non-empty view the entry re-focuses the results so OK opens Details like any
-' other tile.
+' OnEnter/RefreshRows, so a save made on another screen (or a background
+' library sync landing while this screen is top) shows up on the next build.
 
 sub init()
     m.status = m.top.FindNode("libraryStatus")
-    m.header = m.top.FindNode("libraryHeader")
-    m.title = m.top.FindNode("libraryTitle")
-    m.sub = m.top.FindNode("librarySub")
+    m.empty = m.top.FindNode("libraryEmpty")
     m.filterBar = m.top.FindNode("filterBar")
     m.grid = m.top.FindNode("libraryGrid")
 
+    m.heroPoster = m.top.FindNode("heroPoster")
+    m.heroScrim = m.top.FindNode("heroScrim")
+    m.heroLogo = m.top.FindNode("heroLogo")
+    m.heroTitle = m.top.FindNode("heroTitle")
+    m.heroMeta = m.top.FindNode("heroMeta")
+    m.heroRating = m.top.FindNode("heroRating")
+    m.heroRatingText = m.top.FindNode("heroRatingText")
+    m.heroGenres = m.top.FindNode("heroGenres")
+    m.heroDescription = m.top.FindNode("heroDescription")
+    m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
+    m.heroPosterFadeAnim = m.top.FindNode("heroPosterFadeAnim")
+    m.filtersHint = m.top.FindNode("filtersHint")
+    m.filtersHintFade = m.top.FindNode("filtersHintFade")
+
+    HeroInitState()
+
     t = Theme()
-    m.title.color = t.accent
-    m.sub.color = t.textSecondary
     m.status.color = t.accent
-    m.header.color = t.textSecondary
-    m.grid.focusBitmapBlendColor = t.accent
+    m.empty.color = t.textSecondary
+    m.heroScrim.color = t.scrim
+    m.heroTitle.color = t.textPrimary
+    m.heroMeta.color = t.textSecondary
+    m.heroRatingText.color = t.accentWarm
+    m.heroGenres.color = t.textSecondary
+    m.heroDescription.color = t.textPrimary
+    m.grid.focusBitmapBlendColor = t.accentFocus
 
     m.filterBar.ObserveField("chipActivated", "onChipActivated")
     m.filterBar.ObserveField("optionPicked", "onOptionPicked")
     m.grid.ObserveField("rowItemSelected", "onResultSelected")
+    m.grid.ObserveField("rowItemFocused", "onGridItemFocused")
+    m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
+    m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
 
     m.chunk = 6
     m.typeFilter = "all"
@@ -41,8 +62,6 @@ end sub
 
 function OnEnter(params as object) as void
     RefreshTexts()
-    m.title.text = Lang("library", "title")
-    m.sub.text = Lang("library", "subtitle")
     if m.stores <> invalid
         addon = m.stores.addons.callFunc("AddonsGet", "com.linvo.cinemeta")
         if addon <> invalid then m.cinemetaAddress = addon.address
@@ -57,9 +76,12 @@ function OnEnter(params as object) as void
     BuildRows()
     if m.items.Count() > 0
         m.grid.SetFocus(true)
+        RefreshLibraryHeroFromFocus()
     else
+        HeroClear()
         m.filterBar.callFunc("FocusChips")
     end if
+    UpdateFiltersHint()
 end function
 
 function OnExit() as void
@@ -70,29 +92,34 @@ function OnBackPressed() as boolean
 end function
 
 sub BlurFocus()
+    if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
+    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+    if m.filtersHint <> invalid then m.filtersHint.visible = false
 end sub
 
 ' The Scene's poke when a background library sync lands while this screen is
-' top (the relaunched-stremio-session case). Same rebuild as entry — idempotent;
-' the grid content is replaced so the freshly synced saved set shows up.
-' Leaving the focus where it is keeps an in-flight re-slice from stealing
-' navigation.
+' top. Same rebuild as entry — idempotent; leaving the focus where it is keeps
+' an in-flight re-slice from stealing navigation.
 function RefreshRows() as void
+    gridHadFocus = m.grid.HasFocus()
     BuildRows()
+    if m.items.Count() > 0
+        if gridHadFocus then RefreshLibraryHeroFromFocus()
+    else
+        HeroClear()
+    end if
+    UpdateFiltersHint()
 end function
-
-' --- chips ------------------------------------------------------------------
 
 ' --- filter chips (data) ----------------------------------------------------
 
 ' The chip row itself lives in FilterBar; the screen owns the values
-' (m.typeFilter/m.sort) and their labels. "Type · All"-style labels make each
-' chip's role readable. Rebuilt on every pick so the label always reflects the
-' active value.
+' (m.typeFilter/m.sort) and their labels. Chips show the active selection
+' directly (like Discover), rebuilt on every pick.
 sub SetChips()
     entries = [
-        { raw: m.typeFilter, label: Lang("library", "typePrefix") + TypeLabel(m.typeFilter) }
-        { raw: m.sort, label: Lang("library", "sortPrefix") + SortLabel(m.sort) }
+        { raw: m.typeFilter, label: TypeLabel(m.typeFilter) }
+        { raw: m.sort, label: SortLabel(m.sort) }
     ]
     m.filterBar.callFunc("SetChips", entries)
 end sub
@@ -111,10 +138,6 @@ function SortLabel(sort as string) as string
     return Lang("common", "recentlyAdded")
 end function
 
-' The chip OK'd in the FilterBar: hand it that chip's options and the index of
-' the current value, and the component opens the dropdown pre-scrolled there —
-' whatever is focused is the value that OK will commit, Back leaves everything
-' untouched.
 sub onChipActivated()
     chip = m.filterBar.chipActivated
     if chip < 0 then return
@@ -152,11 +175,6 @@ function CurrentOptionIndex(chip as integer) as integer
     return 0
 end function
 
-' An option OK'd in the FilterBar's dropdown, then re-slices the grid. The raw
-' value and the commit effect are the screen's; the component reports which chip
-' and which row were picked. Re-picking the current value just closes the menu.
-' A fresh slice (filter or sort) always rebuilds from the store, so the new
-' ordering cannot be stale.
 sub onOptionPicked()
     pick = m.filterBar.optionPicked
     if pick = invalid or pick.chip = invalid or pick.index = invalid then return
@@ -177,16 +195,16 @@ sub onOptionPicked()
     m.filterBar.callFunc("HideMenu")
     SetChips()
     BuildRows()
+    if m.items.Count() > 0
+        RefreshLibraryHeroFromFocus()
+    else
+        HeroClear()
+    end if
+    UpdateFiltersHint()
 end sub
 
 ' --- grid -------------------------------------------------------------------
 
-' Re-slice the saved library through LibraryStore with the current type filter
-' and sort, then lay each item out as a poster row of m.chunk tiles. The grid is
-' rebuilt on entry, on RefreshRows, and on every filter/sort pick; the selection
-' always reflects the active filter. An empty view shows the hint on the status
-' line and entry parks focus on the chips (the grid has nothing to focus; the
-' hint explains why and how to fix it).
 sub BuildRows()
     if m.stores = invalid then
         m.items = []
@@ -211,15 +229,10 @@ sub BuildRows()
             if item.metaType <> invalid and LCase(item.metaType) = "channel" then tile.watchedGlyph = ""
             TileWatchFields(tile, item.metaId, item.metaType)
         end for
-        ' The library is a flat poster wall: one cell size for the whole grid from
-        ' the type filter (channel -> 1:1, everything else -> 2:3), so a mixed set
-        ' never goes 16:9 mid-wall and breaks the grid.
         sizes.Push(TileCellSize(m.typeFilter))
     end for
     m.grid.content = content
     m.grid.rowItemSize = sizes
-    ' Per-row slot heights (see TileRowHeights): the library grid is uniform today,
-    ' but this keeps the row gap honest if a filter ever mixes tile heights.
     m.grid.rowHeights = TileRowHeights(sizes)
     if m.items.Count() > 0
         m.grid.numRows = (m.items.Count() + m.chunk - 1) / m.chunk
@@ -227,21 +240,21 @@ sub BuildRows()
         m.grid.numRows = 0
     end if
 
-    m.header.text = LibraryLabel()
     if m.items.Count() = 0
+        m.status.text = ""
         if m.typeFilter = "channel"
-            m.status.text = Lang("library", "emptyChannels")
+            m.empty.text = Lang("library", "emptyChannels")
         else
-            m.status.text = Lang("library", "emptyLibrary")
+            m.empty.text = Lang("library", "emptyLibrary")
         end if
+        m.empty.visible = true
     else
         m.status.text = ""
+        m.empty.text = ""
+        m.empty.visible = false
     end if
 end sub
 
-' Paint the watched overlays on one saved-library tile: the continue-watching
-' bar from ProgressFraction, and the coarse glyph by WatchedGlyph (eye for a
-' finished movie/series, clock for an in-progress one).
 sub TileWatchFields(tile as object, metaId as dynamic, metaType as dynamic)
     if m.stores = invalid then return
     fraction = m.stores.library.callFunc("LibraryProgressFraction", metaId)
@@ -251,17 +264,82 @@ sub TileWatchFields(tile as object, metaId as dynamic, metaType as dynamic)
     tile.watchedGlyph = glyph
 end sub
 
-' The human summary of the current view, e.g. "All · Recently added".
-function LibraryLabel() as string
-    return TypeLabel(m.typeFilter) + " · " + SortLabel(m.sort)
-end function
+' --- hero -------------------------------------------------------------------
+
+sub onGridItemFocused()
+    data = m.grid.rowItemFocused
+    if data = invalid or data.Count() < 2 then return
+    UpdateLibraryHero(data)
+    UpdateFiltersHint()
+end sub
+
+sub RefreshLibraryHeroFromFocus()
+    data = m.grid.rowItemFocused
+    if data <> invalid and data.Count() >= 2
+        flat = data[0] * m.chunk + data[1]
+        if flat >= 0 and flat < m.items.Count()
+            RenderLibraryHero(m.items[flat])
+            return
+        end if
+    end if
+    if m.items.Count() > 0
+        RenderLibraryHero(m.items[0])
+    else
+        HeroClear()
+    end if
+end sub
+
+sub UpdateLibraryHero(position as object)
+    if position = invalid or position.Count() < 2 then return
+    flat = position[0] * m.chunk + position[1]
+    if flat < 0 or flat >= m.items.Count()
+        if m.items.Count() > 0 then RenderLibraryHero(m.items[0])
+        return
+    end if
+    RenderLibraryHero(m.items[flat])
+end sub
+
+' Saved items are slim (name/poster/metaType/posterShape); the shared hero
+' falls back to the poster as backdrop and to a title-only layout when there
+' is no logo/description/rating/genres, so the hero degrades gracefully.
+sub RenderLibraryHero(item as object)
+    if item = invalid then return
+    meta = {
+        name: item.name
+        title: item.name
+        poster: item.poster
+        type: item.metaType
+    }
+    HeroRender(meta)
+end sub
+
+' The asterisk-key hint: shown only while grid focus is past the first row
+' (Up is consumed by the RowList) and the grid holds focus.
+sub UpdateFiltersHint()
+    if m.filtersHint = invalid then return
+    visible = false
+    if m.grid.HasFocus()
+        data = m.grid.rowItemFocused
+        if data <> invalid and data.Count() >= 2 and data[0] >= 1 then visible = true
+    end if
+    if m.filtersHint.visible = visible then return
+    m.filtersHint.visible = visible
+    if m.filtersHintFade = invalid then
+        m.filtersHint.opacity = 1
+        return
+    end if
+    if visible
+        m.filtersHintFade.control = "stop"
+        m.filtersHint.opacity = 0
+        m.filtersHintFade.control = "start"
+    else
+        m.filtersHintFade.control = "stop"
+        m.filtersHint.opacity = 0
+    end if
+end sub
 
 ' --- selection --------------------------------------------------------------
 
-' A result opens DetailsScreen through the same one-action channel Home, Search
-' and Discover use: the slim saved record + the Cinemeta address. The full hero
-' is top-filled by DetailsScreen.MaybeRefreshMeta exactly as a Search/Discover
-' slim tile would be, so a record missing its original addon still opens.
 sub onResultSelected()
     data = m.grid.rowItemSelected
     if data = invalid or data.Count() < 2 then return
@@ -282,9 +360,6 @@ sub onResultSelected()
     }
 end sub
 
-' Where the meta for a saved tile comes from. The library records no addon
-' origin, so the Cinemeta built-in (the meta authority) is the default,
-' mirroring Home's MetaAddress.
 function CinemetaAddress() as string
     if m.stores = invalid then return ""
     addon = m.stores.addons.callFunc("AddonsGet", "com.linvo.cinemeta")
@@ -293,22 +368,23 @@ function CinemetaAddress() as string
 end function
 
 ' Focus travel between the chips and the results grid. The dropdown's own keys
-' are handled inside FilterBar (it owns the menu focus); with the menu closed
-' Down from the chips enters the results grid and Up from the grid returns.
+' are handled inside FilterBar; with the menu closed Down from the chips enters
+' the results grid and Up from the grid returns.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
 
-    ' The asterisk key is a one-press escape hatch: from anywhere in the
-    ' results grid it drops focus back up onto the filter chips.
     if key = "options" and m.grid.HasFocus()
         m.filterBar.callFunc("FocusChips")
+        UpdateFiltersHint()
         return true
     else if key = "down" and m.filterBar.callFunc("FocusIsOnChips")
         m.filterBar.callFunc("BlurChips")
         m.grid.SetFocus(true)
+        UpdateFiltersHint()
         return true
     else if key = "up" and m.grid.HasFocus()
         m.filterBar.callFunc("FocusChips")
+        UpdateFiltersHint()
         return true
     end if
     return false
