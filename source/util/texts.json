@@ -269,7 +269,8 @@
             "loadFailedAddons": "Failed to load add-ons.",
             "loadFailedCatalog": "Failed to load \"{label}\".",
             "noResults": "No results for \"{label}\".",
-            "noCatalogAddons": "No catalog add-ons installed."
+            "noCatalogAddons": "No catalog add-ons installed.",
+            "loadFailedCatalogRetry": "Couldn't load {label}. Press replay to retry"
         },
         "search": {
             "hint": "Type a title to search",
@@ -571,7 +572,8 @@
             "loadFailedAddons": "No se pudieron cargar los add-ons.",
             "loadFailedCatalog": "No se pudo cargar «{label}».",
             "noResults": "Sin resultados para «{label}».",
-            "noCatalogAddons": "No hay add-ons de catálogo instalados."
+            "noCatalogAddons": "No hay add-ons de catálogo instalados.",
+            "loadFailedCatalogRetry": "No se pudo cargar {label}. Presiona replay para reintentar"
         },
         "search": {
             "hint": "Escribe un título para buscar",

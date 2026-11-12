@@ -795,7 +795,7 @@ sub onDiscoverLoaded()
                     FetchDiscover(false)
                 end if
             else
-                m.status.text = Fill(Lang("discover", "loadFailedCatalog"), { label: label })
+                m.status.text = Fill(Lang("discover", "loadFailedCatalogRetry"), { label: label })
                 LandingChipsFocus()
             end if
         else if wantedOffset > 0 and wantedOffset = m.metas.Count() and m.metas.Count() > 0
@@ -965,6 +965,20 @@ end sub
 ' Down from the chips enters the results grid and Up from the grid returns.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+
+    ' Replay/instantreplay (↺) re-fetches the current catalog from scratch
+    ' (manual recovery after failures or to refresh results).
+    if key = "instantreplay" or key = "replay"
+        if m.selectedCatalog <> invalid
+            if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
+            m.discoverRetryCount = 0
+            m.discoverRetryOffset = 0
+            ResetDiscover()
+            FetchDiscover()
+            return true
+        end if
+        return false
+    end if
 
     ' The asterisk key is a one-press escape hatch: from anywhere in the
     ' results grid it drops focus back up onto the filter chips.
