@@ -270,11 +270,8 @@
             "noCatalogAddons": "No catalog add-ons installed."
         },
         "search": {
+            "hint": "Type a title to search",
             "title": "Search",
-            "subtitle": "Type a title, then OK · * to search again · Back to exit",
-            "dialogTitle": "Search",
-            "dialogHelp": "Enter a title",
-            "searchButton": "Search",
             "typeNothing": "Type something to search.",
             "searching": "Searching…",
             "searchFailed": "Search failed.",
@@ -573,11 +570,8 @@
             "noCatalogAddons": "No hay add-ons de catálogo instalados."
         },
         "search": {
+            "hint": "Escribe un título para buscar",
             "title": "Buscar",
-            "subtitle": "Escribe un título y pulsa OK · * para buscar otra vez · Atrás para salir",
-            "dialogTitle": "Buscar",
-            "dialogHelp": "Introduce un título",
-            "searchButton": "Buscar",
             "typeNothing": "Escribe algo para buscar.",
             "searching": "Buscando…",
             "searchFailed": "La búsqueda falló.",

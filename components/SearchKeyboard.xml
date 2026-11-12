@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="SearchKeyboard" extends="DynamicMiniKeyboard">
+    <!-- The embedded search keyboard. The built-in DynamicMiniKeyboard
+         handles its arrows natively behind the scenes, and keys it consumes
+         are never exposed to onKeyEvent handlers OUTSIDE the node — a screen
+         wrapping it can never see Down/Right, so a user could type but could
+         never leave the pane (the documented Roku behavior for native grid
+         nodes). Extending the node itself is the one interception point: this
+         script's onKeyEvent runs in the node's own scope.
+
+         Escape channel: the screen observes the escape field.
+           "down"/"right" — the press produced no focus movement, so the grid
+                           was already at that edge; the pane hand-off is due.
+           "up"          — the same probe at the top edge: return to the
+                           query box, i.e. the internal VoiceTextEditBox,
+                           which is the focused voice-enabled field the OS
+                           routes the remote's mic button to.
+           "OK"          — fired from the edit-field state: search at once.
+           "options"     — the * key, intercepted before anything else.
+         Edge detection compares a monotonic counter of keyFocused changes
+         rather than key labels, so two keys sharing an empty label cannot
+         fake a focus move (or hide a real one). -->
+    <interface>
+        <field id="escape" type="string" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/SearchKeyboard.brs" />
+
+    <children>
+        <!-- One-shot probe: a short window after an arrow press in which a
+             real in-grid move fires the keyFocused observer. If the counter
+             has not advanced by fire time, the press hit an edge. -->
+        <Timer id="edgeTimer" duration="0.06" repeat="false" />
+    </children>
+</component>

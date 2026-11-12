@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="SearchScreen" extends="Screen">
-    <!-- Search: every installed add-on's search-capable catalogs. A
-         KeyboardDialog prompt on entry, then results as poster rows, one per
-         search-capable catalog (Stremio-style). OK on a result publishes a
-         pushRequest the Scene routes to Details. The * (options) key reopens
-         the keyboard prefilled with the last query. -->
+    <!-- Search: a Netflix-style split pane under a shared screen title. The
+         left column is the keyboard (the SearchKeyboard extension of
+         DynamicMiniKeyboard — what makes the pane escapable, see that
+         component's header) whose native VoiceTextEditBox is the query box:
+         it draws the text field, mic icon and voice hints itself, and it is
+         the focused voice-enabled field the OS routes remote dictation to.
+         Every settled keystroke fans the query out to every search-capable
+         catalog across all installed add-ons; results land as poster rows on
+         the right, one per search-capable catalog (rows appear only for
+         catalogs that returned results). OK on a result publishes a
+         pushRequest the Scene routes to Details. The * (options) key toggles
+         between the panes. -->
     <interface>
         <!-- The one action Search reports upward: a push request. -->
         <field id="pushRequest" type="assocarray" alwaysNotify="true" />
@@ -23,43 +30,111 @@
 
     <children>
         <Rectangle id="searchBg" width="1920" height="1080" color="0x0" />
+
+        <!-- Live-search debounce: every keystroke restarts this window, so a
+             typed word fans out once, not per letter, and stale tasks are
+             reaped along the way (see onQueryChanged). -->
+        <Timer id="queryDebounce" duration="0.7" repeat="false" />
+        <!-- One-shot geometry check: the key grid builds from its Key
+             Definition File off the render thread, so its painted width is
+             only known a beat after init; FitKeyboard scales the keyboard
+             down if it would cross into the results pane. -->
+        <Timer id="keyboardFit" duration="0.25" repeat="false" />
+
+        <!-- Screen title: the anchor every screen opens with (Home's hero
+             title, Discover's hero) — Search's equivalent in the app's heading
+             voice: LargeBoldSystemFont on textPrimary, at the shared left
+             margin. -->
         <Label
             id="searchTitle"
-            translation="[150, 48]"
-            width="1760"
-            height="70"
-            text="Search"
+            translation="[90, 48]"
+            width="600"
+            height="72"
             font="font:LargeBoldSystemFont" />
-        <Label
-            id="searchSub"
-            translation="[150, 128]"
-            width="1760"
-            height="40"
-            text="Type a title, then OK · * to search again · Back to exit"
-            font="font:SmallSystemFont" />
 
+        <!-- The left pane, nav-style: the keyboard's own VoiceTextEditBox is
+             the query box (it draws the text field and its mic icon and
+             voice hints natively — the configuration the OS routes remote
+             voice dictation to), with the key grid below it. Hiding the box
+             (hideTextBox) was tried and breaks voice: the OS ignores hidden
+             voice fields and falls through to the system-wide search. The
+             keyboard's colors are assigned in init() through the key grid's
+             palette field (an RSGPalette must never be an ancestor of
+             rendered content: it is non-renderable, and the render
+             traversal skips it and everything under it). -->
+        <Group id="keyboardPane" translation="[90, 160]">
+            <!-- Pane backdrop: separates the keyboard section from the
+                 results; sized to the keyboard's painted bounds with a 24px
+                 padding in FitKeyboard. -->
+            <Poster
+                id="paneBg"
+                translation="[-24, -24]"
+                width="648"
+                height="748"
+                loadWidth="648"
+                loadHeight="748"
+                loadDisplayMode="limitSize"
+                uri="pkg:/images/chip.9.png" />
+            <SearchKeyboard
+                id="searchKeyboard"
+                translation="[0, 0]"
+                domain="generic" />
+        </Group>
+
+        <!-- Right pane: a quiet status line (used for "Searching…", errors,
+             and "no results") sits above the first row, and the results align
+             with the keyboard pane's top edge so the two columns read as one
+             surface. "Searching…" pulses via searchPulse instead of shouting
+             in accent green. -->
         <Label
             id="searchStatus"
-            translation="[150, 180]"
-            width="1760"
-            height="40"
-            font="font:SmallSystemFont" />
+            translation="[750, 98]"
+            width="1080"
+            height="36"
+            font="font:SmallSystemFont"
+            visible="false" />
 
-        <!-- Results grid: poster rows, one per catalog that returned results.
-             numRows is set from m.rows; a catalog with no matches gets no row,
-             so the grid can start empty and fill in as add-ons answer. -->
+        <Animation
+            id="searchPulse"
+            duration="1.2"
+            repeat="true"
+            easeFunction="inOutQuad">
+            <FloatFieldInterpolator
+                key="[0.0, 0.5, 1.0]"
+                keyValue="[0.35, 1.0, 0.35]"
+                fieldToInterp="searchStatus.opacity" />
+        </Animation>
+
+        <!-- Results rows, one per search-capable catalog that returned
+             results. numRows is set from m.rows; nothing is premised, so the
+             list can start empty and fill in as add-ons answer. The row label
+             offset gives the title breathing room above its posters. -->
         <RowList
             id="searchResults"
-            translation="[150, 230]"
+            translation="[750, 136]"
             numRows="2"
-            itemSize="[1780, 405]"
-            itemSpacing="[0, 66]"
+            itemSize="[1080, 405]"
+            itemSpacing="[0, 96]"
             rowItemSize="[[270, 405]]"
             rowItemSpacing="[[18, 0]]"
             showRowLabel="[true]"
-            rowLabelOffset="[0, 10]"
+            rowLabelOffset="[[0, 32]]"
             rowLabelFont="font:MediumBoldSystemFont"
             drawFocusFeedback="true"
             itemComponentName="PosterTile" />
+
+        <!-- Empty state: the quiet "type something" line, centered in the
+             results column the way Home's empty state is — not a floating
+             corner note. Shown until the first typed character. -->
+        <Label
+            id="searchHint"
+            translation="[750, 470]"
+            width="1080"
+            height="60"
+            horizAlign="center"
+            vertAlign="center"
+            wrap="true"
+            font="font:MediumSystemFont"
+            visible="false" />
     </children>
 </component>

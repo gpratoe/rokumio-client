@@ -51,8 +51,12 @@ function Theme() as object
     return m._theme
 end function
 
-' The RSGPalette for the native StandardDialogs, assembled from the app palette
-' so the dialogs restyle with the rest of the app.
+' The RSGPalette for the native StandardDialogs and the dynamic keyboards,
+' assembled from the app palette so dialogs and keyboards restyle with the
+' rest of the app. The two naming families coexist because each consumer
+' reads only its own: StandardDialogs look up the Dialog* names, the
+' DynamicKeyGrid looks up KeyboardColor/PrimaryTextColor/FocusColor/
+' FocusItemColor/SecondaryItemColor.
 function AppPalette() as object
     c = Theme()
     palette = CreateObject("roSGNode", "RSGPalette")
@@ -67,6 +71,11 @@ function AppPalette() as object
         DialogInputFieldColor: c.dropdownBg
         DialogKeyboardColor: c.dropdownBg
         DialogFootprintColor: c.accentFaint
+        KeyboardColor: c.dropdownBg
+        PrimaryTextColor: c.textPrimary
+        SecondaryItemColor: c.textSecondary
+        FocusColor: c.accent
+        FocusItemColor: c.screenBg
     }
     return palette
 end function
