@@ -76,6 +76,7 @@ sub init()
     m.discoverRetryTimer.ObserveField("fire", "onDiscoverRetry")
     m.discoverRetryCount = 0
     m.discoverMaxRetries = 3
+    m.discoverRetryOffset = 0
 end sub
 
 function OnEnter(params as object) as void
@@ -618,6 +619,7 @@ sub FetchDiscover(resetRetry = true as boolean)
     if resetRetry
         if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
         m.discoverRetryCount = 0
+        m.discoverRetryOffset = 0
     end if
     CancelLoad()
 
@@ -634,10 +636,15 @@ sub FetchDiscover(resetRetry = true as boolean)
 end sub
 
 sub onDiscoverRetry()
-    ' Retry the initial catalog fetch after a transient failure.
+    ' Retry a catalog fetch after a transient failure (initial or load-more).
     if m.selectedCatalog = invalid then return
-    if m.metas.Count() > 0 then return
-    FetchDiscover(false)
+    if m.discoverRetryOffset = 0
+        if m.metas.Count() > 0 then return
+        FetchDiscover(false)
+    else
+        if m.metas.Count() = 0 or m.allLoaded then return
+        FetchDiscoverPage(m.discoverRetryOffset, false)
+    end if
 end sub
 
 ' The user scrolled near the bottom of the fetched results: fetch the next page
@@ -648,6 +655,21 @@ sub LoadMore()
     if m.loadTask <> invalid then return
     if m.allLoaded then return
     if m.metas.Count() = 0 then return
+    m.discoverRetryCount = 0
+    m.discoverRetryOffset = m.metas.Count()
+    FetchDiscoverPage(m.metas.Count(), false)
+end sub
+
+' Fetch a specific page offset. Used for load-more and its retries; retries do
+' not reset the retry counter/offset (resetRetry=false from timer path).
+sub FetchDiscoverPage(offset as integer, resetRetry = false as boolean)
+    if m.selectedCatalog = invalid then return
+    if resetRetry
+        if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
+        m.discoverRetryCount = 0
+        m.discoverRetryOffset = offset
+    end if
+    CancelLoad()
 
     task = AsyncTask_Launch(m.top, "DiscoverLoaderTask", "onDiscoverLoaded", {
         addonAddress: m.selectedCatalog.address
@@ -655,7 +677,7 @@ sub LoadMore()
         catalogId: m.selectedCatalog.catalogId
         supportsPagination: m.selectedCatalog.supportsPagination
         genre: GenreFilter()
-        pageOffset: m.metas.Count()
+        pageOffset: offset
     }, "discoverLoaderMore")
     m.loadTask = task
 end sub
@@ -764,6 +786,7 @@ sub onDiscoverLoaded()
         if wantedOffset = 0 and m.metas.Count() = 0
             if m.discoverRetryCount < m.discoverMaxRetries
                 m.discoverRetryCount = m.discoverRetryCount + 1
+                m.discoverRetryOffset = 0
                 m.status.text = Lang("discover", "loading")
                 if m.discoverRetryTimer <> invalid
                     m.discoverRetryTimer.control = "stop"
@@ -775,12 +798,26 @@ sub onDiscoverLoaded()
                 m.status.text = Fill(Lang("discover", "loadFailedCatalog"), { label: label })
                 LandingChipsFocus()
             end if
+        else if wantedOffset > 0 and wantedOffset = m.metas.Count() and m.metas.Count() > 0
+            ' Append failed: retry silently so a transient error doesn't look like
+            ' the end of the catalog.
+            if m.discoverRetryCount < m.discoverMaxRetries
+                m.discoverRetryCount = m.discoverRetryCount + 1
+                m.discoverRetryOffset = wantedOffset
+                if m.discoverRetryTimer <> invalid
+                    m.discoverRetryTimer.control = "stop"
+                    m.discoverRetryTimer.control = "start"
+                else
+                    FetchDiscoverPage(wantedOffset, false)
+                end if
+            end if
         end if
         return
     end if
 
     if wantedOffset = 0
         m.discoverRetryCount = 0
+        m.discoverRetryOffset = 0
         m.metas = result.metas
         m.loaded = true
         m.allLoaded = not result.hasMore or result.metas.Count() = 0
@@ -798,6 +835,8 @@ sub onDiscoverLoaded()
         RefreshDiscoverHeroFromFocus()
         LandingChipsFocus()
     else
+        m.discoverRetryCount = 0
+        m.discoverRetryOffset = 0
         ' Append only metas not already shown. Cinemeta's skip=49 page
         ' repeats the last item of the 49-item first page, and an add-on
         ' that ignores skip returns the same page forever — a page that
