@@ -27,6 +27,8 @@
         <field id="loadState" type="string" />
         <!-- PosterTile: bumped on explicit refresh to force poster reload/retry. -->
         <field id="reloadNonce" type="integer" value="0" />
+        <!-- PosterTile/Home: sentinel item at row end to open the full catalog. -->
+        <field id="seeMore" type="boolean" />
         <!-- StreamTile: separate direct-play codec verdicts per media type. -->
         <field id="videoCompatibilityState" type="string" />
         <field id="audioCompatibilityState" type="string" />

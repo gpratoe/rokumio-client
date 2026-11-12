@@ -89,5 +89,13 @@
             <Rectangle id="watchedPlate" width="60" height="60" />
             <Poster id="watchedGlyph" width="48" height="48" loadWidth="48" loadHeight="48" loadDisplayMode="limitSize" translation="[6, 6]" />
         </Group>
+
+        <!-- "See more" sentinel: end-of-row action that jumps to the full catalog
+             in Discover. Rendered in place of poster/artless content. -->
+        <Group id="seeMoreGroup" visible="false">
+            <Rectangle id="seeMoreBg" width="270" height="405" />
+            <Label id="seeMorePlus" width="270" height="180" translation="[0, 90]" horizAlign="center" vertAlign="center" text="+" font="font:LargeBoldSystemFont" />
+            <Label id="seeMoreLabel" width="230" height="70" translation="[20, 260]" horizAlign="center" vertAlign="top" wrap="true" font="font:SmallSystemFont" />
+        </Group>
     </children>
 </component>

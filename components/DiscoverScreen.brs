@@ -77,19 +77,22 @@ end sub
 function OnEnter(params as object) as void
     RefreshTexts()
     if m.filterBar.callFunc("IsMenuOpen") then m.filterBar.callFunc("HideMenu")
+    CancelLoad()
+    CancelSources()
 
-    ' The add-on set can move while Discover is off-screen (install/uninstall,
-    ' session swap). Re-derive when it did, so the chips never describe a
-    ' registry that no longer exists.
-    if m.stores <> invalid and CatalogSignature() <> m.sourcesSignature then ResetDiscover()
+    m.targetCatalog = invalid
+    if params <> invalid and params.targetCatalog <> invalid then m.targetCatalog = params.targetCatalog
 
-    ' Re-entry after Details: results are still here, just take focus back.
-    if m.metas.Count() > 0
-        m.grid.SetFocus(true)
-        RefreshDiscoverHeroFromFocus()
-        return
-    end if
-
+    ' Fresh entry by default: do not preserve previous results/filters/position.
+    ' A target catalog (from Home's "see more") is applied once sources resolve.
+    ResetDiscover()
+    m.selectedCatalog = invalid
+    m.typeKey = ""
+    m.genre = ""
+    m.sources = []
+    m.sourcesSignature = ""
+    m.loaded = false
+    m.allLoaded = false
     ClearDiscoverHero()
     EnsureSources()
 end function
@@ -200,10 +203,30 @@ sub ReadySources()
         ShowEmpty()
         return
     end if
+    ApplyTargetCatalog()
     m.loaded = false
     FetchDiscover()
     SetChips()
     m.filterBar.callFunc("FocusChips")
+end sub
+
+' If opened with a target catalog (Home "see more"), select that catalog when
+' available; otherwise keep the defaults SelectDefaults chose.
+sub ApplyTargetCatalog()
+    target = m.targetCatalog
+    m.targetCatalog = invalid
+    if target = invalid then return
+    targetType = TypeKey(target.metaType)
+    if targetType = "" then return
+    m.typeKey = targetType
+    catalogs = CatalogsForType()
+    for each candidate in catalogs
+        if candidate.address = target.addonAddress and candidate.catalogId = target.catalogId and TypeMatches(candidate.rawType, targetType) then
+            m.selectedCatalog = candidate
+            EnsureGenre()
+            return
+        end if
+    end for
 end sub
 
 ' The catalog type keys present across the sources, in a stable order: the

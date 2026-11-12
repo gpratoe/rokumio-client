@@ -34,6 +34,7 @@ sub load()
                                 row = {
                                     index: index
                                     addonAddress: addon.address
+                                    catalogId: descriptor.id
                                     title: CatalogTitle(descriptor, addon)
                                     metaType: descriptor.type
                                     metas: response.metas

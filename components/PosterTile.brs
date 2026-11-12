@@ -29,12 +29,20 @@ sub init()
     m.watchedPlate = m.top.FindNode("watchedPlate")
     m.watchedGlyph = m.top.FindNode("watchedGlyph")
 
+    m.seeMoreGroup = m.top.FindNode("seeMoreGroup")
+    m.seeMoreBg = m.top.FindNode("seeMoreBg")
+    m.seeMorePlus = m.top.FindNode("seeMorePlus")
+    m.seeMoreLabel = m.top.FindNode("seeMoreLabel")
+
     t = Theme()
     m.tileBg.color = t.tileFace
     m.titleText.color = t.textPrimary
     m.progressTrack.color = t.progressTrack
     m.progressFill.color = t.progressFill
     m.watchedPlate.color = t.glyphPlate
+    if m.seeMoreBg <> invalid then m.seeMoreBg.color = t.tileFace
+    if m.seeMorePlus <> invalid then m.seeMorePlus.color = t.accent
+    if m.seeMoreLabel <> invalid then m.seeMoreLabel.color = t.textSecondary
 
     m.lastReloadNonce = 0
 
@@ -103,6 +111,16 @@ sub ApplyTileSize()
     m.progressFill.translation = [0, h - 8]
     m.progressFill.width = w
     m.watchedBadge.translation = [w - 62, 8]
+    if m.seeMoreGroup <> invalid
+        m.seeMoreBg.width = w
+        m.seeMoreBg.height = h
+        m.seeMorePlus.width = w
+        m.seeMorePlus.translation = [0, Int(h * 0.22)]
+        m.seeMorePlus.height = Int(h * 0.45)
+        m.seeMoreLabel.width = w - 24
+        m.seeMoreLabel.translation = [12, Int(h * 0.62)]
+        m.seeMoreLabel.height = Int(h * 0.2)
+    end if
 
     if w = 270 and h = 405
         m.titleText.translation = [18, 8]
@@ -135,6 +153,21 @@ end sub
 
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
+    if m.top.itemContent.seeMore = true
+        m.poster.uri = ""
+        m.artless.visible = false
+        if m.progressTrack <> invalid then m.progressTrack.visible = false
+        if m.progressFill <> invalid then m.progressFill.visible = false
+        if m.watchedBadge <> invalid then m.watchedBadge.visible = false
+        if m.seeMoreGroup <> invalid
+            m.seeMoreGroup.visible = true
+            if m.seeMoreLabel <> invalid then m.seeMoreLabel.text = m.top.itemContent.title
+        end if
+        UpdateLook()
+        return
+    end if
+    if m.seeMoreGroup <> invalid then m.seeMoreGroup.visible = false
+
     loading = m.top.itemContent.loadState = "loading"
     if loading
         m.poster.uri = ""

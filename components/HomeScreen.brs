@@ -204,12 +204,22 @@ end sub
 ' ascending index order, so the grid stays in task order even though each
 ' snapshot is a full copy.
 sub ApplyCatalogRow(row as object)
+    displayMetas = row.metas
+    if displayMetas <> invalid and displayMetas.Count() > 15
+        capped = []
+        for i = 0 to 14
+            capped.Push(displayMetas[i])
+        end for
+        capped.Push({ seeMore: true, name: Lang("home", "seeMore") })
+        displayMetas = capped
+    end if
     descriptor = {
         addonAddress: row.addonAddress
+        catalogId: row.catalogId
         title: row.title
         metaType: row.metaType
         posterShape: TilePosterShape(row.metas)
-        metas: row.metas
+        metas: displayMetas
     }
     cwOffset = 0
     if m.gridRows.Count() > 0 and m.gridRows[0].source = "library" then cwOffset = 1
@@ -303,6 +313,13 @@ sub UpdateHomeHero(position as dynamic)
     metas = m.gridRows[rowIndex].metas
     if metas = invalid or itemIndex < 0 or itemIndex >= metas.Count() then return
     meta = metas[itemIndex]
+    if meta <> invalid and meta.seeMore = true
+        ' Keep the previously shown hero artwork/details; "see more" is an action,
+        ' not a title to preview.
+        CancelHeroMetaRequest()
+        CancelHeroPrefetch()
+        return
+    end if
     key = HomeHeroMetaKey(meta)
     if key <> m.heroFocusKey
         CancelHeroMetaRequest()
@@ -717,9 +734,19 @@ function MakeRowNode(row as object, counts = invalid as object) as object
     if counts <> invalid and counts[label] > 1 then label = label + " · " + TypeLabel(row.metaType)
     node.title = label
     for each meta in row.metas
-        glyph = meta.watchedGlyph
-        if glyph = invalid and m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
-        PaintTileFields(node.CreateChild("TileContent"), meta, glyph)
+        item = node.CreateChild("TileContent")
+        if meta.seeMore = true
+            item.seeMore = true
+            item.title = Lang("home", "seeMore")
+            item.hdPosterUrl = ""
+            item.progress = 0
+            item.watchedGlyph = ""
+            item.reloadNonce = 0
+        else
+            glyph = meta.watchedGlyph
+            if glyph = invalid and m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
+            PaintTileFields(item, meta, glyph)
+        end if
     end for
     return node
 end function
@@ -1142,6 +1169,19 @@ sub onRowItemSelected(event as object)
     if index >= metas.Count() then return
 
     item = metas[index]
+    if item <> invalid and item.seeMore = true
+        m.top.pushRequest = {
+            screen: "discoverScreen"
+            params: {
+                targetCatalog: {
+                    addonAddress: m.gridRows[row].addonAddress
+                    catalogId: m.gridRows[row].catalogId
+                    metaType: m.gridRows[row].metaType
+                }
+            }
+        }
+        return
+    end if
     if m.gridRows[row].source = "library"
         OpenContinueWatching(item)
     else
