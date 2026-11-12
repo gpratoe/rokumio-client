@@ -30,10 +30,13 @@ sub init()
     m.fitTimer = m.top.FindNode("keyboardFit")
     m.keyboardPane = m.top.FindNode("keyboardPane")
     m.paneBg = m.top.FindNode("paneBg")
+    m.title = m.top.FindNode("searchTitle")
+    m.searchPulse = m.top.FindNode("searchPulse")
 
     t = Theme()
-    m.status.color = t.accent
+    m.status.color = t.textSecondary
     m.hint.color = t.textSecondary
+    m.title.color = t.textPrimary
     m.results.focusBitmapBlendColor = t.accentFocus
     ' The key grid reads its colors from the RSGPalette node set on its own
     ' palette field (never from a palette node in the tree: RSGPalette is
@@ -76,6 +79,7 @@ sub init()
     m.searchFailed = false
     m.rows = []
     m.searchTasks = invalid
+    m.title.text = Lang("search", "title")
 end sub
 
 ' The key grid builds from its Key Definition File off the render thread, so
@@ -99,13 +103,14 @@ sub FitKeyboard()
     else
         m.keyboard.scale = [1.0, 1.0]
     end if
-    ' Backdrop: 16px padding on every side of the whole keyboard.
+    ' Backdrop: 24px padding on every side of the whole keyboard — the same
+    ' generous framing the app's chips and panels use.
     h = rect.height * m.keyboard.scale[0]
     if rect.height = invalid or rect.height <= 0 then h = 700
-    m.paneBg.width = w + 32
-    m.paneBg.loadWidth = w + 32
-    m.paneBg.height = h + 32
-    m.paneBg.loadHeight = h + 32
+    m.paneBg.width = w + 48
+    m.paneBg.loadWidth = w + 48
+    m.paneBg.height = h + 48
+    m.paneBg.loadHeight = h + 48
 end sub
 
 sub FocusKeyboardPane()
@@ -149,10 +154,33 @@ sub FocusResultsPane()
     m.results.SetFocus(true)
 end sub
 
+' The status line above the results: "Searching…" pulses quietly; terminal
+' states (errors, no results) hold steady; an empty text hides it. The pulse
+' animation is stopped when hidden so it never runs invisibly.
+sub SetSearchStatus(text as string, searching = false as dynamic)
+    if searching <> true then searching = false
+    if text = ""
+        m.status.text = ""
+        m.status.visible = false
+        m.status.opacity = 1.0
+        if m.searchPulse <> invalid then m.searchPulse.control = "stop"
+        return
+    end if
+    m.status.text = text
+    m.status.visible = true
+    if searching
+        if m.searchPulse <> invalid then m.searchPulse.control = "start"
+    else
+        if m.searchPulse <> invalid then m.searchPulse.control = "stop"
+        m.status.opacity = 1.0
+    end if
+end sub
+
 function OnEnter(params as object) as void
-    ' The language first, then the empty-state hint (the markup holds the
-    ' English default; the table decides what is shown).
+    ' The language first, then the labels that read it (the markup holds the
+    ' English defaults; the table decides what is shown).
     RefreshTexts()
+    m.title.text = Lang("search", "title")
     ' The add-on set can move while Search is off-screen (install/uninstall,
     ' session swap). Re-derive when it did, so the rows never describe a
     ' registry that no longer exists.
@@ -254,7 +282,7 @@ end function
 ' need it).
 sub EnsureSources()
     if m.stores = invalid
-        m.status.text = Lang("search", "loadFailedAddons")
+        SetSearchStatus(Lang("search", "loadFailedAddons"))
         return
     end if
 
@@ -313,7 +341,7 @@ sub onSourcesLoaded()
 
     result = task.result
     if result = invalid or result.sources = invalid or Type(result.sources) <> "roArray"
-        m.status.text = Lang("search", "loadFailedAddons")
+        SetSearchStatus(Lang("search", "loadFailedAddons"))
         return
     end if
 
@@ -371,7 +399,7 @@ end sub
 ' new search replaces them.
 sub onQueryChanged()
     CancelSearch()
-    m.status.text = ""
+    SetSearchStatus("")
 
     query = m.keyboard.text.Trim()
     if query.Len() < 2
@@ -421,7 +449,7 @@ end sub
 ' the catalog's discovery order.
 sub RunSearch(query as string)
     if query = "" then
-        m.status.text = Lang("search", "typeNothing")
+        SetSearchStatus(Lang("search", "typeNothing"))
         return
     end if
 
@@ -430,10 +458,10 @@ sub RunSearch(query as string)
     if m.sources = invalid or m.sources.Count() = 0
         if m.sourcesTask <> invalid
             m.pendingQuery = query
-            m.status.text = Lang("search", "searching")
+            SetSearchStatus(Lang("search", "searching"), true)
             return
         end if
-        m.status.text = Lang("search", "noSearchAddons")
+        SetSearchStatus(Lang("search", "noSearchAddons"))
         return
     end if
 
@@ -449,7 +477,7 @@ sub RunSearch(query as string)
         m.searchFailed = false
         m.rows = []
         ClearResults()
-        m.status.text = Lang("search", "noSearchAddons")
+        SetSearchStatus(Lang("search", "noSearchAddons"))
         return
     end if
 
@@ -458,7 +486,7 @@ sub RunSearch(query as string)
     m.searchFailed = false
     m.rows = []
     m.searchTasks = {}
-    m.status.text = Lang("search", "searching")
+    SetSearchStatus(Lang("search", "searching"), true)
     m.hint.visible = false
     ClearResults()
 
@@ -658,13 +686,19 @@ sub UpdateSearchStatus()
         if m.searchTasks[key] <> invalid then pending = pending + 1
     end for
     if pending > 0
-        m.status.text = Lang("search", "searching")
+        ' The moment any catalog has landed results, stop the busy state — the
+        ' rows are already useful and more may stream in quietly behind them.
+        if m.rows.Count() = 0
+            SetSearchStatus(Lang("search", "searching"), true)
+        else
+            SetSearchStatus("")
+        end if
     else if m.rows.Count() > 0
-        m.status.text = ""
+        SetSearchStatus("")
     else if m.searchFailed
-        m.status.text = Lang("search", "searchFailed")
+        SetSearchStatus(Lang("search", "searchFailed"))
     else
-        m.status.text = Fill(Lang("search", "noResults"), { query: m.lastQuery })
+        SetSearchStatus(Fill(Lang("search", "noResults"), { query: m.lastQuery }))
     end if
 end sub
 

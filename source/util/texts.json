@@ -271,6 +271,7 @@
         },
         "search": {
             "hint": "Type a title to search",
+            "title": "Search",
             "typeNothing": "Type something to search.",
             "searching": "Searching…",
             "searchFailed": "Search failed.",
@@ -570,6 +571,7 @@
         },
         "search": {
             "hint": "Escribe un título para buscar",
+            "title": "Buscar",
             "typeNothing": "Escribe algo para buscar.",
             "searching": "Buscando…",
             "searchFailed": "La búsqueda falló.",
