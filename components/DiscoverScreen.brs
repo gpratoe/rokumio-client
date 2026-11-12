@@ -72,6 +72,10 @@ sub init()
     m.loaded = false
     m.allLoaded = false
     m.loadTask = invalid
+    m.discoverRetryTimer = m.top.FindNode("discoverRetryTimer")
+    m.discoverRetryTimer.ObserveField("fire", "onDiscoverRetry")
+    m.discoverRetryCount = 0
+    m.discoverMaxRetries = 3
 end sub
 
 function OnEnter(params as object) as void
@@ -79,6 +83,8 @@ function OnEnter(params as object) as void
     if m.filterBar.callFunc("IsMenuOpen") then m.filterBar.callFunc("HideMenu")
     CancelLoad()
     CancelSources()
+    if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
+    m.discoverRetryCount = 0
 
     m.targetCatalog = invalid
     if params <> invalid and params.targetCatalog <> invalid then m.targetCatalog = params.targetCatalog
@@ -98,6 +104,7 @@ function OnEnter(params as object) as void
 end function
 
 function OnExit() as void
+    if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
     CancelLoad()
     CancelSources()
 end function
@@ -581,6 +588,8 @@ sub onOptionPicked()
 
     m.filterBar.callFunc("HideMenu")
     SetChips()
+    if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
+    m.discoverRetryCount = 0
     ResetDiscover()
     FetchDiscover()
 end sub
@@ -604,8 +613,12 @@ end sub
 ' below), so picks never queue behind a stale load. The wanted offset is
 ' captured so a page that lands after the user changed filters (or exited) is
 ' dropped instead of appended to the wrong list.
-sub FetchDiscover()
+sub FetchDiscover(resetRetry = true as boolean)
     if m.selectedCatalog = invalid then return
+    if resetRetry
+        if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
+        m.discoverRetryCount = 0
+    end if
     CancelLoad()
 
     m.status.text = Lang("discover", "loading")
@@ -618,6 +631,13 @@ sub FetchDiscover()
         pageOffset: 0
     }, "discoverLoader")
     m.loadTask = task
+end sub
+
+sub onDiscoverRetry()
+    ' Retry the initial catalog fetch after a transient failure.
+    if m.selectedCatalog = invalid then return
+    if m.metas.Count() > 0 then return
+    FetchDiscover(false)
 end sub
 
 ' The user scrolled near the bottom of the fetched results: fetch the next page
@@ -741,14 +761,26 @@ sub onDiscoverLoaded()
     label = DiscoverLabel()
     result = task.result
     if result = invalid or not result.ok or result.metas = invalid
-        if m.metas.Count() = 0
-            m.status.text = Fill(Lang("discover", "loadFailedCatalog"), { label: label })
-            LandingChipsFocus()
+        if wantedOffset = 0 and m.metas.Count() = 0
+            if m.discoverRetryCount < m.discoverMaxRetries
+                m.discoverRetryCount = m.discoverRetryCount + 1
+                m.status.text = Lang("discover", "loading")
+                if m.discoverRetryTimer <> invalid
+                    m.discoverRetryTimer.control = "stop"
+                    m.discoverRetryTimer.control = "start"
+                else
+                    FetchDiscover(false)
+                end if
+            else
+                m.status.text = Fill(Lang("discover", "loadFailedCatalog"), { label: label })
+                LandingChipsFocus()
+            end if
         end if
         return
     end if
 
     if wantedOffset = 0
+        m.discoverRetryCount = 0
         m.metas = result.metas
         m.loaded = true
         m.allLoaded = not result.hasMore or result.metas.Count() = 0

@@ -23,6 +23,7 @@
     <children>
         <Rectangle id="discoverBg" width="1920" height="1080" color="0x0" />
         <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
+        <Timer id="discoverRetryTimer" duration="2.0" repeat="false" />
 
         <Poster
             id="heroPoster"
