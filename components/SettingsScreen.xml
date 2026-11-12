@@ -86,8 +86,7 @@
                 height="510"
                 horizAlign="center"
                 vertAlign="top"
-                wrap="true"
-                font="font:SmallSystemFont" />
+                wrap="true" />
         </Group>
 
         <!-- The status line has a fixed home, so a section that grows does not

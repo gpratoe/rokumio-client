@@ -54,7 +54,6 @@ sub init()
     m.title.color = palette.accent
     m.sub.color = palette.textSecondary
     m.status.color = palette.accent
-    m.list.focusBitmapBlendColor = palette.accent
     m.infoPlate.color = palette.screenBg
     m.infoTitle.color = palette.accent
     m.infoWarn.color = palette.danger

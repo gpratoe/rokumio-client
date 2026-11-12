@@ -17,7 +17,6 @@ sub init()
     m.title.color = palette.accent
     m.sub.color = palette.textSecondary
     m.status.color = palette.accent
-    m.list.focusBitmapBlendColor = palette.accent
     m.panelPlate = m.top.FindNode("homeRowsPlate")
     m.panelPlate.color = palette.screenBg
     m.panelTitle.color = palette.accent
