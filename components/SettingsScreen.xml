@@ -30,12 +30,12 @@
 
         <!-- Section chips. The selected section is marked `active` (dimmed) so
              the chip row and the options below agree on which section is shown. -->
-        <ChipsRow id="settingsChips" translation="[80, 126]" />
+        <ChipsRow id="settingsChips" translation="[80, 150]" />
 
         <!-- Options for the selected section (shared custom-node list). -->
         <ChevronList
             id="settingsList"
-            translation="[80, 216]"
+            translation="[80, 240]"
             numRows="5"
             itemWidth="1000"
             rowHeight="110"
@@ -44,7 +44,7 @@
             exitOptions="true" />
 
         <!-- Side panel: follows the focused row and explains it. -->
-        <Group id="infoPanel" translation="[1140, 216]">
+        <Group id="infoPanel" translation="[1140, 240]">
             <Rectangle id="infoPlate" width="700" height="700" />
             <Label
                 id="infoTitle"
