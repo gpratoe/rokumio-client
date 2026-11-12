@@ -5,6 +5,7 @@
 ' remote-control picker, while SettingsStore owns the persisted hidden set.
 
 sub init()
+    m.title = m.top.FindNode("homeRowsTitle")
     m.status = m.top.FindNode("homeRowsStatus")
     m.list = m.top.FindNode("homeRowsList")
     m.panelTitle = m.top.FindNode("homeRowsPanelTitle")
@@ -12,6 +13,7 @@ sub init()
     m.panelStatus = m.top.FindNode("homeRowsPanelStatus")
 
     palette = Theme()
+    m.title.color = palette.textPrimary
     m.status.color = palette.accent
     m.panelPlate = m.top.FindNode("homeRowsPlate")
     m.panelPlate.color = palette.tileFace
@@ -30,6 +32,7 @@ end sub
 
 function OnEnter(params as object) as void
     RefreshTexts()
+    m.title.text = Lang("homeRows", "title")
     CancelSources()
     m.rows = []
     m.focusedRow = -1

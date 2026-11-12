@@ -455,7 +455,7 @@
             "seeMore": "Ver más"
         },
         "homeRows": {
-            "title": "Filas de catálogos de Home",
+            "title": "Catálogos de Home",
             "subtitle": "OK muestra u oculta un catálogo · Atrás vuelve a Ajustes",
             "loading": "Cargando catálogos de add-ons…",
             "loadFailed": "No se pudieron cargar los catálogos de add-ons.",
