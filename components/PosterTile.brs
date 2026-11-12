@@ -145,11 +145,11 @@ sub onItemContentChanged()
 
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
-    ' Assigned unconditionally, and that is deliberate. Re-assigning the same uri
-    ' is what makes Roku re-request a texture the memory manager has evicted, so
-    ' a "has this changed?" guard here would leave a recycled cell showing the
-    ' artless face forever: uri matches, no new load is requested, loadStatus
-    ' never re-fires, and the forced ShowArtless below never gets undone.
+    ' Clear first so Roku treats this as a fresh load even when the uri is
+    ' unchanged (e.g. a prior failed/stale load on poor connectivity, or a
+    ' recycled cell). A same-value reassign is not always enough to retry, so
+    ' reset-to-empty then set forces the request while the tile shows artless.
+    m.poster.uri = ""
     m.poster.uri = poster
     m.titleText.text = m.top.itemContent.title
     UpdateOverlays()

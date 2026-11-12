@@ -147,7 +147,8 @@
             "railSettings": "Settings",
             "railSupport": "Support",
             "loading": "Loading…",
-            "emptyCatalogRows": "No catalog rows are showing. Install catalog add-ons or enable rows in Settings → Home."
+            "emptyCatalogRows": "No catalog rows are showing. Install catalog add-ons or enable rows in Settings → Home.",
+            "refreshing": "Refreshing…"
         },
         "homeRows": {
             "title": "Home catalog rows",
@@ -447,7 +448,8 @@
             "railSettings": "Ajustes",
             "railSupport": "Apoyar",
             "loading": "Cargando…",
-            "emptyCatalogRows": "No se muestran filas de catálogo. Instala add-ons de catálogo o activa filas en Ajustes → Inicio."
+            "emptyCatalogRows": "No se muestran filas de catálogo. Instala add-ons de catálogo o activa filas en Ajustes → Inicio.",
+            "refreshing": "Actualizando…"
         },
         "homeRows": {
             "title": "Filas de catálogos de Home",

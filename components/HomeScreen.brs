@@ -110,7 +110,11 @@ end sub
 ' recognised as stale once add-ons arrive, and a signature left at "" would make
 ' that indistinguishable from a correct empty grid.
 sub StartCatalogLoad()
-    if m.catalogRowsBuilt or m.catalogTask <> invalid then return
+    ? "[HomeScreen] StartCatalogLoad: built="; m.catalogRowsBuilt; " task="; (m.catalogTask <> invalid)
+    if m.catalogRowsBuilt or m.catalogTask <> invalid then
+        ? "[HomeScreen] StartCatalogLoad: skipped"
+        return
+    end if
     if m.stores = invalid then
         m.catalogRowsBuilt = true
         UpdateHomeEmptyState()
@@ -124,6 +128,7 @@ sub StartCatalogLoad()
     hiddenCatalogs = m.stores.settings.callFunc("SettingsGetHiddenHomeCatalogs")
     if hiddenCatalogs = invalid then hiddenCatalogs = []
     m.catalogVisibilitySignature = FormatJson(hiddenCatalogs)
+    ? "[HomeScreen] StartCatalogLoad: addons="; addons.Count()
     if addons.Count() = 0 then
         m.catalogRowsBuilt = true
         UpdateHomeEmptyState()
@@ -134,6 +139,7 @@ sub StartCatalogLoad()
         hiddenCatalogs: hiddenCatalogs
     }, invalid)
     m.catalogTask = task
+    ? "[HomeScreen] StartCatalogLoad: task launched"
 end sub
 
 ' The add-on set Home's catalog rows were derived from, as a comparable string.
@@ -881,6 +887,7 @@ end sub
 ' rows one at a time behind it, and the existing guards (gridBuilt /
 ' catalogRowsBuilt / catalogTask) keep later OnEnter visits consistent.
 function RebuildRows() as void
+    ? "[HomeScreen] RebuildRows: catalogTask="; (m.catalogTask <> invalid); " catalogRowsBuilt="; m.catalogRowsBuilt
     CancelHeroMetaRequest()
     if m.catalogTask <> invalid
         ' STOP, and not a bare RemoveChild. The walk is a Task on its own thread,
@@ -903,6 +910,7 @@ function RebuildRows() as void
     m.gridBuilt = false
     BuildRows()
     m.gridLanguage = TextsLanguage()
+    ? "[HomeScreen] RebuildRows: rebuilt base rows, starting catalog load"
     StartCatalogLoad()
 end function
 
@@ -1294,8 +1302,18 @@ end sub
 ' the rail; Right from the rail enters the grid. The rail tiles are plain
 ' focusable nodes, so Up/Down/OK are handled here and the default focus
 ' navigation is suppressed while the rail owns focus.
+' Replay/instantreplay (↺) forces a full home refresh so partial/failed loads
+' on poor connections can be retried without leaving and re-entering Home.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    if key = "instantreplay" or key = "replay"
+        ? "[HomeScreen] replay key="; key; " forcing refresh"
+        scene = m.top.getScene()
+        if scene <> invalid then scene.callFunc("Notify", Lang("home", "refreshing"), "info")
+        RebuildRows()
+        return true
+    end if
+
     if m.railFocusIndex >= 0
         if key = "right"
             CollapseRail()
