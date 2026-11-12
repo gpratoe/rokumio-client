@@ -53,8 +53,8 @@ sub init()
 
     palette = Theme()
     m.status.color = palette.accent
-    m.infoPlate.color = palette.screenBg
-    m.infoTitle.color = palette.accent
+    m.infoPlate.color = palette.tileFace
+    m.infoTitle.color = palette.textPrimary
     m.infoWarn.color = palette.danger
     m.infoBody.color = palette.textSecondary
 
@@ -63,7 +63,7 @@ sub init()
     ' markup is a colour nobody can change.
     m.infoBody.drawingStyles = {
         "default": { fontUri: "font:SmallSystemFont", color: palette.textSecondary }
-        "bold": { fontUri: "font:MediumBoldSystemFont", color: palette.accent }
+        "bold": { fontUri: "font:MediumBoldSystemFont", color: palette.textPrimary }
     }
 
     m.chips.ObserveField("selection", "onChipSelected")
