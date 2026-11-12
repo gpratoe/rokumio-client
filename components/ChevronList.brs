@@ -13,9 +13,9 @@ sub init()
     m.chevronDown = m.top.FindNode("chevronDown")
 
     m.chevronUp.width = 48
-    m.chevronUp.height = 28
+    m.chevronUp.height = 48
     m.chevronDown.width = 48
-    m.chevronDown.height = 28
+    m.chevronDown.height = 48
 
     m.rowNodes = []
     m.itemNodes = []

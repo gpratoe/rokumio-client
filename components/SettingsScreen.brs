@@ -40,6 +40,7 @@
 ' (that is a BrighterScript feature, and this is a .brs file).
 
 sub init()
+    m.title = m.top.FindNode("settingsTitle")
     m.status = m.top.FindNode("settingsStatus")
     m.chips = m.top.FindNode("settingsChips")
     m.list = m.top.FindNode("settingsList")
@@ -49,6 +50,7 @@ sub init()
     m.infoPlate = m.top.FindNode("infoPlate")
 
     palette = Theme()
+    m.title.color = palette.textPrimary
     m.status.color = palette.accent
     m.infoPlate.color = palette.tileFace
     m.infoTitle.color = palette.textPrimary
@@ -122,6 +124,7 @@ function OnEnter(params as object) as void
     ' The language of the visit is settled FIRST, so rows and panel render in
     ' the persisted language.
     RefreshTexts()
+    m.title.text = Lang("settings", "title")
     CancelTestServer()
     CancelNetDiag()
     CancelDeviceCap()
@@ -1139,6 +1142,7 @@ end sub
 ' holds its own title, and the chip row is not where the cursor is.
 sub ApplyLanguage() as void
     RefreshTexts()
+    m.title.text = Lang("settings", "title")
     BuildChips()
     RefreshValues()
     UpdatePanel()

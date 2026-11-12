@@ -33,10 +33,14 @@
         <Poster
             id="chevronUp"
             uri="pkg:/images/chevron-up.png"
+            width="48"
+            height="48"
             visible="false" />
         <Poster
             id="chevronDown"
             uri="pkg:/images/chevron-down.png"
+            width="48"
+            height="48"
             visible="false" />
     </children>
 </component>
