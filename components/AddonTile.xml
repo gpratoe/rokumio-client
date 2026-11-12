@@ -13,8 +13,14 @@
     <children>
         <Rectangle id="tileFace" width="992" height="152" translation="[4, 4]" />
         <Poster
+            id="logoBg"
+            uri="pkg:/images/chip.9.png"
+            width="96"
+            height="136"
+            translation="[12, 12]" />
+        <Poster
             id="addonLogo"
-            translation="[20, 36]"
+            translation="[20, 40]"
             width="80"
             height="80"
             loadWidth="80"
@@ -23,7 +29,7 @@
             failedBitmapUri="pkg:/images/puzzle.png" />
         <LayoutGroup
             id="nameVersionRow"
-            translation="[118, 30]"
+            translation="[124, 28]"
             layoutDirection="horiz"
             itemSpacings="[12]"
             vertAlignment="center">
@@ -38,14 +44,14 @@
         </LayoutGroup>
         <Label
             id="addonScope"
-            translation="[118, 68]"
-            width="630"
+            translation="[124, 66]"
+            width="620"
             height="28"
             font="font:SmallBoldSystemFont" />
         <Label
             id="addonDescription"
-            translation="[118, 102]"
-            width="630"
+            translation="[124, 98]"
+            width="620"
             height="56"
             wrap="true"
             maxLines="2"

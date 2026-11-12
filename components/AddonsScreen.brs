@@ -26,26 +26,45 @@
 ' guard.
 
 sub init()
+    m.title = m.top.FindNode("addonsTitle")
     m.status = m.top.FindNode("addonsStatus")
     m.list = m.top.FindNode("addonsList")
 
-    ' Decorative companion-app panel (see the XML comment). Coloured here rather
-    ' than in markup so it follows Theme() like every other screen does.
-    m.companionPlate = m.top.FindNode("companionPlate")
+    ' Contextual side panel (add/install options or focused add-on details).
+    m.infoPlate = m.top.FindNode("infoPlate")
+    m.addPanel = m.top.FindNode("addPanel")
+    m.detailPanel = m.top.FindNode("detailPanel")
     m.companionTitle = m.top.FindNode("companionTitle")
     m.companionCaption = m.top.FindNode("companionCaption")
+    m.companionQr = m.top.FindNode("companionQr")
     m.setupHint = m.top.FindNode("setupHint")
     m.setupUrl = m.top.FindNode("setupUrl")
+    m.detailLogoBg = m.top.FindNode("detailLogoBg")
+    m.detailLogo = m.top.FindNode("detailLogo")
+    m.detailName = m.top.FindNode("detailName")
+    m.detailMeta = m.top.FindNode("detailMeta")
+    m.detailDescription = m.top.FindNode("detailDescription")
+    m.detailAddress = m.top.FindNode("detailAddress")
+    m.detailAction = m.top.FindNode("detailAction")
 
     t = Theme()
+    m.title.color = t.textPrimary
     m.status.color = t.accent
-    m.companionPlate.color = t.tileFace
+    m.infoPlate.color = t.tileFace
     m.companionTitle.color = t.textPrimary
     m.companionCaption.color = t.textSecondary
     m.setupHint.color = t.textSecondary
     m.setupUrl.color = t.accent
+    m.detailLogoBg.blendColor = t.tileFaceFocus
+    m.detailName.color = t.textPrimary
+    m.detailMeta.color = t.textSecondary
+    m.detailDescription.color = t.textSecondary
+    m.detailAddress.color = t.textSecondary
+    m.detailAction.color = t.textPrimary
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
+    m.list.ObserveField("rowItemFocused", "onRowFocused")
+    m.detailLogo.ObserveField("loadStatus", "onDetailLogoLoadStatus")
 
     m.rows = []
     m.rowNodes = []
@@ -53,21 +72,23 @@ sub init()
     m.metadataTask = invalid
     m.metadataFailures = 0
     m.installTask = invalid
+    m.focusedIndex = -1
+    m.setupAddress = ""
+    m.detailLogoIsPlaceholder = true
 end sub
 
-' Address of the local setup page, forwarded from the Scene at launch. The two
-' labels are born hidden so this screen never flashes an address that has not
-' been published yet.
+' Address of the local setup page, forwarded from the Scene at launch.
 sub SetSetupAddress(url as dynamic)
     if url = invalid then return
     if url = "" then return
+    m.setupAddress = url
     m.setupUrl.text = url
-    m.setupHint.visible = true
-    m.setupUrl.visible = true
+    UpdatePanel()
 end sub
 
 function OnEnter(params as object) as void
     RefreshTexts()
+    m.title.text = Lang("addons", "title")
     m.companionTitle.text = Lang("addons", "companionTitle")
     m.companionCaption.text = Lang("addons", "companionCaption")
     m.setupHint.text = Lang("addons", "setupHint")
@@ -77,6 +98,7 @@ function OnEnter(params as object) as void
     BuildRows()
     m.list.callFunc("SetListFocus")
     StartMetadataRefresh()
+    UpdatePanel()
 end function
 
 function OnExit() as void
@@ -154,12 +176,14 @@ sub BuildRows()
     if focusRow < 0 then focusRow = 0
     m.list.focusRow = focusRow
     m.list.content = content
+    m.focusedIndex = focusRow
 
     installed = m.rows.Count() - 1
     if installed < 0 then installed = 0
     quantity = Fill(Lang("addons", "countMany"), { count: installed.ToStr() })
     if installed = 1 then quantity = Lang("addons", "countOne")
     ' Subtitle removed from layout.
+    UpdatePanel()
 end sub
 
 ' Copy one row model into its AddonTileContent node. The tile watches those
@@ -174,9 +198,81 @@ sub PaintRowNode(item as object, row as object)
     item.actionLabel = row.actionLabel
 end sub
 
+sub onRowFocused()
+    data = m.list.rowItemFocused
+    if data = invalid or data.Count() < 1 then return
+    m.focusedIndex = data[0]
+    UpdatePanel()
+end sub
+
+sub UpdatePanel()
+    if m.rows.Count() = 0
+        ShowAddPanel()
+        return
+    end if
+    index = m.focusedIndex
+    if index < 0 or index >= m.rows.Count() then index = 0
+    row = m.rows[index]
+    if row <> invalid and row.actionKey = "add"
+        ShowAddPanel()
+    else
+        ShowDetailPanel(row)
+    end if
+end sub
+
+sub ShowAddPanel()
+    if m.addPanel <> invalid then m.addPanel.visible = true
+    if m.detailPanel <> invalid then m.detailPanel.visible = false
+    hasSetup = m.setupAddress <> invalid and m.setupAddress <> ""
+    if m.setupHint <> invalid then m.setupHint.visible = hasSetup
+    if m.setupUrl <> invalid then m.setupUrl.visible = hasSetup
+    if hasSetup and m.setupUrl <> invalid then m.setupUrl.text = m.setupAddress
+end sub
+
+function IsPlaceholderAddonLogo(uri as dynamic) as boolean
+    value = StringOf(uri).Trim()
+    if value = "" then return true
+    if value = "pkg:/images/puzzle.png" then return true
+    if value.InStr("puzzle.png") >= 0 then return true
+    return false
+end function
+
+function RokuLogoUri(uri as dynamic) as string
+    value = StringOf(uri).Trim()
+    if value = "" then return ""
+    path = value
+    queryStart = value.InStr("?")
+    if queryStart >= 0 then path = value.Left(queryStart)
+    if path.Len() < 4 then return value
+    if LCase(path.Right(4)) <> ".svg" then return value
+    return value.Left(path.Len() - 4) + ".png" + value.Mid(path.Len())
+end function
+
+sub ShowDetailPanel(row as object)
+    if m.addPanel <> invalid then m.addPanel.visible = false
+    if m.detailPanel <> invalid then m.detailPanel.visible = true
+    if row = invalid then return
+
+    rawLogo = ""
+    if row.logo <> invalid then rawLogo = StringOf(row.logo).Trim()
+    m.detailLogoIsPlaceholder = IsPlaceholderAddonLogo(rawLogo)
+    if m.detailLogo <> invalid then m.detailLogo.uri = RokuLogoUri(rawLogo)
+
+    if m.detailName <> invalid then m.detailName.text = StringOf(row.name)
+    meta = StringOf(row.scope)
+    version = StringOf(row.version)
+    if version <> ""
+        if meta <> "" then meta = version + " · " + meta else meta = version
+    end if
+    if m.detailMeta <> invalid then m.detailMeta.text = meta
+    if m.detailDescription <> invalid then m.detailDescription.text = StringOf(row.description)
+    if m.detailAddress <> invalid then m.detailAddress.text = StringOf(row.address)
+    if m.detailAction <> invalid then m.detailAction.text = StringOf(row.actionLabel)
+end sub
+
 sub onRowSelected()
     data = m.list.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
+    if data = invalid or data.Count() < 1 then return
     index = data[0]
     if index < 0 or index >= m.rows.Count() then return
     row = m.rows[index]
@@ -292,6 +388,7 @@ sub ApplyMetadataToRows(address as string)
         if row.logo = "" then row.logo = "pkg:/images/puzzle.png"
         PaintRowNode(m.rowNodes[i], row)
     end for
+    UpdatePanel()
 end sub
 
 sub MarkMetadataFailed(address as string)
@@ -305,6 +402,7 @@ sub MarkMetadataFailed(address as string)
         if row.logo = "" then row.logo = "pkg:/images/puzzle.png"
         PaintRowNode(m.rowNodes[i], row)
     end for
+    UpdatePanel()
 end sub
 
 ' The worker has ended. Any row still pending lost its result (or the task was
@@ -323,6 +421,7 @@ sub FinishMetadataRefresh()
     if m.metadataFailures > 0
         Notify(Lang("addons", "metadataUnavailable"), "error")
     end if
+    UpdatePanel()
 end sub
 
 sub CancelMetadata()
@@ -358,6 +457,22 @@ function AddonTypeLabel(metaType as string) as string
     if metaType = "other" then return Lang("addons", "scopeOther")
     return UCase(metaType.Left(1)) + metaType.Mid(1)
 end function
+
+sub onDetailLogoLoadStatus()
+    status = ""
+    if m.detailLogo <> invalid then status = m.detailLogo.loadStatus
+    if status = "failed"
+        m.detailLogoIsPlaceholder = true
+    else if status = "ready" and m.focusedIndex >= 0 and m.focusedIndex < m.rows.Count()
+        row = m.rows[m.focusedIndex]
+        if row <> invalid
+            rawLogo = ""
+            if row.logo <> invalid then rawLogo = StringOf(row.logo).Trim()
+            m.detailLogoIsPlaceholder = IsPlaceholderAddonLogo(rawLogo)
+        end if
+    end if
+    ' Detail logo sits on a dark backing, so no tint changes needed.
+end sub
 
 ' --- install / remove ------------------------------------------------------
 

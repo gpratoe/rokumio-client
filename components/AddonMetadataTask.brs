@@ -79,7 +79,7 @@ function CheckImageUrl(url as string, httpClient as object) as boolean
     headers = result.responseHeaders
     if headers <> invalid
         contentType = LCase(StringOf(headers["content-type"]))
-        if contentType <> "" and contentType.InStr("image/") = 0 then return false
+        if contentType <> "" and contentType.InStr("image/") < 0 then return false
     end if
     return true
 end function
