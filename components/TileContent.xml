@@ -25,6 +25,8 @@
         <field id="dateUpcoming" type="boolean" />
         <!-- SearchScreen loading state consumed by PosterTile's spinner. -->
         <field id="loadState" type="string" />
+        <!-- PosterTile: bumped on explicit refresh to force poster reload/retry. -->
+        <field id="reloadNonce" type="integer" value="0" />
         <!-- StreamTile: separate direct-play codec verdicts per media type. -->
         <field id="videoCompatibilityState" type="string" />
         <field id="audioCompatibilityState" type="string" />

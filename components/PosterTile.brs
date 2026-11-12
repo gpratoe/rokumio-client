@@ -36,6 +36,8 @@ sub init()
     m.progressFill.color = t.progressFill
     m.watchedPlate.color = t.glyphPlate
 
+    m.lastReloadNonce = 0
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
@@ -145,21 +147,46 @@ sub onItemContentChanged()
 
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
-    ' Clear first so Roku treats this as a fresh load even when the uri is
-    ' unchanged (e.g. a prior failed/stale load on poor connectivity, or a
-    ' recycled cell). A same-value reassign is not always enough to retry, so
-    ' reset-to-empty then set forces the request while the tile shows artless.
-    m.poster.uri = ""
-    m.poster.uri = poster
+    prevUri = m.poster.uri
+    prevStatus = m.poster.loadStatus
+    changed = prevUri <> poster
+    nonce = 0
+    if m.top.itemContent.reloadNonce <> invalid then nonce = m.top.itemContent.reloadNonce
+    forceReload = nonce <> 0 and nonce <> m.lastReloadNonce
+    if forceReload then m.lastReloadNonce = nonce
+
+    ' Avoid churning textures in steady state: if the URL is unchanged and the
+    ' poster is already ready, keep the resident image (rebinds from scroll,
+    ' streaming row inserts, or syncs shouldn't reload it). Still force a fresh
+    ' load when the URL changed, the previous load failed/wasn't ready, or an
+    ' explicit refresh requested a retry (nonce bump).
+    needsReload = changed or forceReload or poster = "" or prevStatus = "failed" or prevStatus = "none" or prevStatus = "loading"
+
     m.titleText.text = m.top.itemContent.title
     UpdateOverlays()
-    ' Forced rather than read back from loadStatus: the uri was just set, so
-    ' this cell is artless whatever the status field still reports from the
-    ' previous one.
-    ShowArtless()
-    ' A uri that resolves from cache can settle before the observer ever fires,
-    ' so re-read the status now instead of trusting the callback alone.
-    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed" then onPosterLoadStatus()
+
+    if needsReload
+        ' Clear first so Roku treats this as a fresh load even when retrying the
+        ' same URI (a failed/stale load, or an explicit refresh). Reset-to-empty
+        ' then set forces the request while the tile shows artless.
+        m.poster.uri = ""
+        m.poster.uri = poster
+        ' Forced rather than read back from loadStatus: the uri was just set, so
+        ' this cell is artless whatever the status field still reports from the
+        ' previous one.
+        ShowArtless()
+        ' A uri that resolves from cache can settle before the observer ever fires,
+        ' so re-read the status now instead of trusting the callback alone.
+        if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed" then onPosterLoadStatus()
+    else
+        ' Keep the already-ready poster; just ensure the artless face isn't shown.
+        if m.poster.loadStatus = "ready"
+            ShowPoster()
+        else
+            ShowArtless()
+            if m.poster.loadStatus = "failed" then onPosterLoadStatus()
+        end if
+    end if
     UpdateLook()
 end sub
 

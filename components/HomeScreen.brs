@@ -83,6 +83,9 @@ sub init()
     ' The language the grid was built in — see OnEnter, where a
     ' change of it is what makes the grid rebuild.
     m.gridLanguage = ""
+    ' Bumped on explicit replay refresh so PosterTile retries images even when
+    ' they were already ready (recovers from stale/failed loads on bad links).
+    m.posterReloadNonce = 0
     m.cwSignature = ""
     m.catalogSignature = ""
     m.catalogVisibilitySignature = ""
@@ -782,6 +785,7 @@ sub PaintTileFields(item as object, meta as object, fallbackGlyph as dynamic)
     if glyph = invalid then glyph = fallbackGlyph
     if glyph = invalid then glyph = ""
     item.watchedGlyph = glyph
+    if m.posterReloadNonce <> invalid then item.reloadNonce = m.posterReloadNonce
 end sub
 
 ' The top row when the user has watched something: one tile per local
@@ -1079,6 +1083,7 @@ end sub
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if key = "instantreplay" or key = "replay"
+        m.posterReloadNonce = m.posterReloadNonce + 1
         scene = m.top.getScene()
         if scene <> invalid then scene.callFunc("Notify", Lang("home", "refreshing"), "info")
         RebuildRows()
