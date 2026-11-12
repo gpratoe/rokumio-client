@@ -2024,9 +2024,17 @@ sub PlayPreparedNext()
     CancelSubtitles()
     m.pendingPreparedNext = prepared
     ' Video.stop is asynchronous. Wait for the stopped state before replacing
-    ' content, otherwise the old and new media players race during the swap.
+    ' content while playback is active, otherwise the old and new media players
+    ' race during the swap. At natural episode completion the node is already
+    ' finished and Roku may never emit another stopped notification; begin the
+    ' prepared episode immediately or autoplay remains on a locked black frame.
     if m.video <> invalid
-        m.video.control = "stop"
+        oldState = m.video.state
+        if oldState = "finished" or oldState = "stopped"
+            BeginPreparedNext()
+        else
+            m.video.control = "stop"
+        end if
     else
         BeginPreparedNext()
     end if

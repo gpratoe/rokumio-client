@@ -161,6 +161,10 @@ function checkDeferredVideoPlayContract() {
     if (!nextSwap || !/StartSubtitles\(prepared\)[\s\S]*?StartPlayback\(/.test(nextSwap[0])) {
         err('PlayerScreen seamless next-episode swap does not start the new episode subtitle drain before playback');
     }
+    const playPrepared = /sub\s+PlayPreparedNext\(\)[\s\S]*?end\s+sub/i.exec(code);
+    if (!playPrepared || !/oldState\s*=\s*"finished"[\s\S]*?oldState\s*=\s*"stopped"[\s\S]*?BeginPreparedNext\(\)/.test(playPrepared[0])) {
+        err('PlayerScreen autoplay waits for a stopped event after the old video is already finished, which leaves the prepared next episode on a black screen');
+    }
     const kick = new RegExp('^[ \\t]*sub\\s+onPlayKickFire\\s*\\(', 'm').exec(code);
     if (!kick) {
         err('PlayerScreen.brs has no onPlayKickFire() — the field observer names a handler that does not exist, which is a no-op, so the deferred play never happens');
