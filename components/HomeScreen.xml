@@ -23,6 +23,7 @@
     <script type="text/brightscript" uri="pkg:/source/core/TileSize.bs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Hero.brs" />
 
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />

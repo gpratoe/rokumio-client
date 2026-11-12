@@ -35,16 +35,9 @@ sub init()
     m.railBrandCollapseAnim = m.top.FindNode("railBrandCollapseAnim")
     m.railBg = m.top.FindNode("railBg")
     m.heroPoster = m.top.FindNode("heroPoster")
-    m.heroPoster.ObserveField("loadStatus", "onHeroPosterStatus")
     m.heroPosterFadeAnim = m.top.FindNode("heroPosterFadeAnim")
-    m.heroPosterPendingUri = ""
     m.heroScrim = m.top.FindNode("heroScrim")
     m.heroLogo = m.top.FindNode("heroLogo")
-    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
-    m.heroLogoUri = ""
-    m.heroLogoGraceUri = ""
-    m.heroLogoFallbackUri = ""
-    m.heroLayoutMode = "title"
     m.heroTitle = m.top.FindNode("heroTitle")
     m.heroMeta = m.top.FindNode("heroMeta")
     m.heroRating = m.top.FindNode("heroRating")
@@ -56,7 +49,6 @@ sub init()
     m.heroPrefetchDelay = m.top.FindNode("heroPrefetchDelay")
     m.heroPrefetchDelay.ObserveField("fire", "onHeroPrefetchDelayFire")
     m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
-    m.heroTitleGrace.ObserveField("fire", "onHeroTitleGraceFire")
     m.heroLogoWarmers = [m.top.FindNode("heroLogoWarm1"), m.top.FindNode("heroLogoWarm2")]
     m.heroPrefetchTasks = []
     m.heroPrefetchKeys = {}
@@ -64,7 +56,11 @@ sub init()
     m.heroMetaRequest = invalid
     m.heroMetaTask = invalid
     m.heroMetaTaskKey = ""
-    m.heroFocusKey = ""
+
+    HeroInitState()
+    m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
+    m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
 
@@ -110,11 +106,7 @@ end sub
 ' recognised as stale once add-ons arrive, and a signature left at "" would make
 ' that indistinguishable from a correct empty grid.
 sub StartCatalogLoad()
-    ? "[HomeScreen] StartCatalogLoad: built="; m.catalogRowsBuilt; " task="; (m.catalogTask <> invalid)
-    if m.catalogRowsBuilt or m.catalogTask <> invalid then
-        ? "[HomeScreen] StartCatalogLoad: skipped"
-        return
-    end if
+    if m.catalogRowsBuilt or m.catalogTask <> invalid then return
     if m.stores = invalid then
         m.catalogRowsBuilt = true
         UpdateHomeEmptyState()
@@ -128,7 +120,6 @@ sub StartCatalogLoad()
     hiddenCatalogs = m.stores.settings.callFunc("SettingsGetHiddenHomeCatalogs")
     if hiddenCatalogs = invalid then hiddenCatalogs = []
     m.catalogVisibilitySignature = FormatJson(hiddenCatalogs)
-    ? "[HomeScreen] StartCatalogLoad: addons="; addons.Count()
     if addons.Count() = 0 then
         m.catalogRowsBuilt = true
         UpdateHomeEmptyState()
@@ -139,7 +130,6 @@ sub StartCatalogLoad()
         hiddenCatalogs: hiddenCatalogs
     }, invalid)
     m.catalogTask = task
-    ? "[HomeScreen] StartCatalogLoad: task launched"
 end sub
 
 ' The add-on set Home's catalog rows were derived from, as a comparable string.
@@ -373,117 +363,20 @@ function HomeHeroMetaKey(meta as object) as string
 end function
 
 sub RenderHomeHero(meta as object)
-    title = StringOf(meta.name)
-    if title.Trim() = "" then title = StringOf(meta.title)
-    if title.Trim() = "" then title = Lang("home", "continueWatching")
-    description = StringOf(meta.description)
-    if description.Trim() = "" then description = StringOf(meta.overview)
-    if description.Trim() = "" and meta.season <> invalid and meta.episode <> invalid
-        description = Fill(Lang("common", "episodeMarker"), { season: StringOf(meta.season), episode: StringOf(meta.episode) })
+    if meta = invalid then return
+    enriched = {}
+    for each key in meta
+        enriched[key] = meta[key]
+    end for
+    title = StringOf(enriched.name)
+    if title.Trim() = "" then title = StringOf(enriched.title)
+    if title.Trim() = "" then enriched.name = Lang("home", "continueWatching")
+    description = StringOf(enriched.description)
+    if description.Trim() = "" then description = StringOf(enriched.overview)
+    if description.Trim() = "" and enriched.season <> invalid and enriched.episode <> invalid
+        enriched.description = Fill(Lang("common", "episodeMarker"), { season: StringOf(enriched.season), episode: StringOf(enriched.episode) })
     end if
-    kind = HeroTypeLabel(StringOf(meta.type))
-    releaseInfo = StringOf(meta.releaseInfo)
-    if releaseInfo <> "" then kind = kind + " · " + releaseInfo
-    rating = StringOf(meta.imdbRating)
-    if StringOf(meta.type) <> "series"
-        runtime = FormatRuntime(meta.runtime)
-        if runtime <> "" then kind = kind + " · " + runtime
-    end if
-    genres = HeroGenresText(meta.genres)
-    if title.Len() > 44 then title = Left(title, 41) + "..."
-    if description.Len() > 150 then description = Left(description, 147) + "..."
-
-    logo = StringOf(meta.logo)
-    background = StringOf(meta.background)
-    currentLogoUri = m.heroLogo.uri
-    currentLogoReady = currentLogoUri <> "" and currentLogoUri = m.heroLogoUri and m.heroLogo.loadStatus = "ready"
-    sameLogoReady = logo <> "" and logo = currentLogoUri and currentLogoReady and logo = m.heroLogoUri
-
-    if m.heroTitle.text <> title then m.heroTitle.text = title
-    if m.heroMeta.text <> kind then m.heroMeta.text = kind
-    if m.heroRatingText.text <> rating then m.heroRatingText.text = rating
-    ratingVisible = rating.Trim() <> ""
-    if m.heroRating.visible <> ratingVisible then m.heroRating.visible = ratingVisible
-    if m.heroGenres.text <> genres then m.heroGenres.text = genres
-    genresVisible = genres <> ""
-    if m.heroGenres.visible <> genresVisible then m.heroGenres.visible = genresVisible
-    if m.heroDescription.text <> description then m.heroDescription.text = description
-    descVisible = description.Trim() <> ""
-    if m.heroDescription.visible <> descVisible then m.heroDescription.visible = descVisible
-
-    if background = ""
-        m.heroPosterPendingUri = ""
-        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-        m.heroPoster.opacity = 1
-        if m.heroPoster.uri <> "" then m.heroPoster.uri = ""
-        m.heroPoster.visible = false
-    else if m.heroPoster.uri <> background
-        m.heroPosterPendingUri = background
-        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-        m.heroPoster.opacity = 0
-        m.heroPoster.uri = background
-        m.heroPoster.visible = true
-    else
-        m.heroPosterPendingUri = background
-        m.heroPoster.visible = true
-        if m.heroPoster.loadStatus = "ready" or m.heroPoster.loadStatus = "failed"
-            if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-            m.heroPoster.opacity = 1
-        end if
-    end if
-
-    if logo = ""
-        m.heroLogoUri = ""
-        m.heroLogoGraceUri = ""
-        m.heroLogoFallbackUri = ""
-        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        if m.heroLogo.uri <> "" then m.heroLogo.uri = ""
-        ApplyHeroLayout("title", true)
-        return
-    end if
-
-    if sameLogoReady
-        ' Keep the fitted logo and current layout in place; only the changeable
-        ' fields above update, so common chrome (rating/positions) does not flash.
-        m.heroLogoGraceUri = ""
-        m.heroLogoFallbackUri = ""
-        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        m.heroLogo.visible = true
-        m.heroTitle.visible = false
-        return
-    end if
-
-    logoChanged = logo <> m.heroLogoUri
-    if logoChanged
-        m.heroLogoUri = logo
-        m.heroLogoGraceUri = ""
-        m.heroLogoFallbackUri = ""
-        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        m.heroLogo.uri = logo
-    end if
-
-    ' Logo present but not ready: hold the fallback briefly so a fast logo can
-    ' appear without flashing the title, then reveal the title if it takes long.
-    if m.heroLogoFallbackUri = logo
-        ShowHeroTitleFallback()
-        return
-    end if
-
-    if logoChanged or m.heroLogoGraceUri <> logo
-        m.heroLogoGraceUri = logo
-        m.heroLogoFallbackUri = ""
-        if m.heroTitleGrace <> invalid
-            m.heroTitleGrace.control = "stop"
-            m.heroTitleGrace.control = "start"
-        end if
-    end if
-
-    if m.heroLayoutMode = "wide"
-        m.heroLogo.visible = false
-        m.heroTitle.visible = false
-    else
-        ApplyHeroLayout("title", false)
-    end if
+    HeroRender(enriched)
 end sub
 
 sub UpdateHomeTileMeta(rowIndex as integer, itemIndex as integer, meta as object)
@@ -534,24 +427,6 @@ sub onHomeHeroMetaLoaded()
     row.metas[request.item] = display
     UpdateHomeTileMeta(request.row, request.item, display)
     RenderHomeHero(display)
-end sub
-
-sub onHeroPosterStatus()
-    if m.heroPoster = invalid then return
-    if m.heroPoster.uri <> m.heroPosterPendingUri then return
-    status = m.heroPoster.loadStatus
-    if status = "ready"
-        if m.heroPosterFadeAnim <> invalid
-            m.heroPosterFadeAnim.control = "stop"
-            m.heroPoster.opacity = 0
-            m.heroPosterFadeAnim.control = "start"
-        else
-            m.heroPoster.opacity = 1
-        end if
-    else if status = "failed"
-        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-        m.heroPoster.opacity = 1
-    end if
 end sub
 
 sub CancelHeroMetaRequest()
@@ -769,107 +644,6 @@ sub onHeroPrefetchLoaded(event as object)
 end sub
 
 
-function HeroTypeLabel(metaType as string) as string
-    if metaType = "movie" then return Lang("common", "kindMovie")
-    if metaType = "series" then return Lang("common", "kindSeries")
-    return metaType
-end function
-
-sub onHeroLogoStatus()
-    if m.heroLogo.uri <> m.heroLogoUri then return
-    if m.heroLogo.loadStatus = "ready"
-        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        m.heroLogoGraceUri = ""
-        m.heroLogoFallbackUri = ""
-        FitHeroLogo()
-    else if m.heroLogo.loadStatus = "failed"
-        if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        m.heroLogoGraceUri = ""
-        m.heroLogoFallbackUri = m.heroLogoUri
-        ShowHeroTitleFallback()
-    end if
-end sub
-
-sub ShowHeroTitleFallback()
-    m.heroLogo.visible = false
-    m.heroTitle.visible = true
-    if m.heroLayoutMode = "tall"
-        ApplyHeroLayout("title", true)
-    else if m.heroLayoutMode <> "wide"
-        ApplyHeroLayout("title", true)
-    end if
-end sub
-
-sub onHeroTitleGraceFire()
-    if m.heroLogoUri = "" then return
-    if m.heroLogo.uri <> m.heroLogoUri then return
-    if m.heroLogo.loadStatus = "ready" then return
-    m.heroLogoGraceUri = ""
-    m.heroLogoFallbackUri = m.heroLogoUri
-    ShowHeroTitleFallback()
-end sub
-
-sub ApplyHeroLayout(mode as string, showTitle = true as boolean)
-    if mode = "tall"
-        ' Tall-logo layout is applied by FitHeroLogo with measured dimensions.
-        return
-    else if mode = "wide"
-        ' Wide-logo layout is applied by FitHeroLogo with measured dimensions.
-        return
-    end if
-    m.heroLayoutMode = "title"
-    m.heroLogo.visible = false
-    m.heroTitle.visible = showTitle
-    m.heroLogo.translation = [162, 72]
-    m.heroLogo.width = 820
-    m.heroLogo.height = 460
-    m.heroMeta.translation = [166, 216]
-    m.heroRating.translation = [166, 256]
-    m.heroGenres.translation = [166, 307]
-    m.heroDescription.translation = [166, 357]
-    m.heroDescription.width = 860
-    m.heroDescription.height = 150
-end sub
-
-' Fit each loaded logo into the shared ratio-aware envelope (see HeroFit).
-' Bitmap dimensions are available only after Poster reports ready;
-' loadWidth/loadHeight remain capped in XML to bound texture memory.
-sub FitHeroLogo()
-    fit = HeroFit(m.heroLogo.bitmapWidth, m.heroLogo.bitmapHeight)
-    if fit = invalid then return
-    logoWidth = fit.width
-    logoHeight = fit.height
-
-    m.heroLogo.width = logoWidth
-    m.heroLogo.height = logoHeight
-    if fit.tall
-        m.heroLayoutMode = "tall"
-        m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
-        contentX = 162 + logoWidth + 48
-        m.heroMeta.translation = [contentX, 110]
-        m.heroRating.translation = [contentX, 158]
-        m.heroGenres.translation = [contentX, 206]
-        m.heroDescription.translation = [contentX, 256]
-        m.heroDescription.width = 1920 - contentX - 160
-        m.heroDescription.height = 260
-    else
-        m.heroLayoutMode = "wide"
-        m.heroLogo.translation = [162, 70 + Int((190 - logoHeight) / 2)]
-        m.heroMeta.translation = [166, 274]
-        m.heroRating.translation = [166, 316]
-        m.heroGenres.translation = [166, 360]
-        m.heroDescription.translation = [166, 402]
-        m.heroDescription.width = 1000
-        m.heroDescription.height = 138
-    end if
-    m.heroLogo.visible = true
-    m.heroTitle.visible = false
-end sub
-
-sub ResetHeroLogoLayout()
-    ApplyHeroLayout("title", true)
-end sub
-
 ' If Continue Watching and every catalog row are absent, explain where catalog
 ' rows come from and how to enable them instead of leaving an unexplained blank.
 sub UpdateHomeEmptyState()
@@ -887,7 +661,6 @@ end sub
 ' rows one at a time behind it, and the existing guards (gridBuilt /
 ' catalogRowsBuilt / catalogTask) keep later OnEnter visits consistent.
 function RebuildRows() as void
-    ? "[HomeScreen] RebuildRows: catalogTask="; (m.catalogTask <> invalid); " catalogRowsBuilt="; m.catalogRowsBuilt
     CancelHeroMetaRequest()
     if m.catalogTask <> invalid
         ' STOP, and not a bare RemoveChild. The walk is a Task on its own thread,
@@ -910,7 +683,6 @@ function RebuildRows() as void
     m.gridBuilt = false
     BuildRows()
     m.gridLanguage = TextsLanguage()
-    ? "[HomeScreen] RebuildRows: rebuilt base rows, starting catalog load"
     StartCatalogLoad()
 end function
 
@@ -1307,7 +1079,6 @@ end sub
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if key = "instantreplay" or key = "replay"
-        ? "[HomeScreen] replay key="; key; " forcing refresh"
         scene = m.top.getScene()
         if scene <> invalid then scene.callFunc("Notify", Lang("home", "refreshing"), "info")
         RebuildRows()
