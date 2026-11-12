@@ -376,7 +376,7 @@ sub RenderHomeHero(meta as object)
     if description.Trim() = "" and enriched.season <> invalid and enriched.episode <> invalid
         enriched.description = Fill(Lang("common", "episodeMarker"), { season: StringOf(enriched.season), episode: StringOf(enriched.episode) })
     end if
-    HeroRender(enriched)
+    HeroRender(enriched, "", false)
 end sub
 
 sub UpdateHomeTileMeta(rowIndex as integer, itemIndex as integer, meta as object)

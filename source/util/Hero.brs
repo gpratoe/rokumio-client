@@ -59,10 +59,11 @@ end sub
 ' Render the hero for one meta. Degrades gracefully: missing fields stay hidden
 ' and a missing logo falls back to the title layout, so slim records (e.g.
 ' saved library items that only carry name/poster/type) still produce a valid
-' hero. background falls back to poster when no dedicated background art exists.
-' fallbackMetaType is used when the meta carries no type of its own (catalog
-' context).
-sub HeroRender(meta as object, fallbackMetaType = "" as string)
+' hero. background falls back to poster when no dedicated background art exists
+' unless posterFallback is false (Home prefers no backdrop over a stretched
+' poster). fallbackMetaType is used when the meta carries no type of its own
+' (catalog context).
+sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback = true as boolean)
     if meta = invalid then return
     title = StringOf(meta.name)
     if title.Trim() = "" then title = StringOf(meta.title)
@@ -88,7 +89,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string)
 
     logo = StringOf(meta.logo)
     background = StringOf(meta.background)
-    if background = "" then background = StringOf(meta.poster)
+    if background = "" and posterFallback then background = StringOf(meta.poster)
     currentLogoUri = m.heroLogo.uri
     currentLogoReady = currentLogoUri <> "" and currentLogoUri = m.heroLogoUri and m.heroLogo.loadStatus = "ready"
     sameLogoReady = logo <> "" and logo = currentLogoUri and currentLogoReady and logo = m.heroLogoUri
