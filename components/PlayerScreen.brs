@@ -63,6 +63,8 @@ sub init()
     m.torrentStatsTask = invalid
     m.pauseActionsGroup = m.top.FindNode("pauseActionsGroup")
     m.pauseResumeBg = m.top.FindNode("pauseResumeBg")
+    m.pauseResumePlayIcon = m.top.FindNode("pauseResumePlayIcon")
+    m.pauseResumePauseIcon = m.top.FindNode("pauseResumePauseIcon")
     m.pauseNextBg = m.top.FindNode("pauseNextBg")
     m.pauseCaptionsBg = m.top.FindNode("pauseCaptionsBg")
     m.pauseCaptionsText = m.top.FindNode("pauseCaptionsText")
@@ -74,6 +76,10 @@ sub init()
     m.seekDuration = m.top.FindNode("seekDuration")
     m.pauseActionIndex = 0
     m.pauseHasNext = false
+    m.controlsVisible = false
+    m.controlsPaused = false
+    m.seekTarget = 0
+    m.seekDirty = false
     m.playNextWhenReady = false
     t = Theme()
     m.top.FindNode("playerBg").color = t.playerBg
@@ -85,6 +91,14 @@ sub init()
     if m.seekDuration <> invalid then m.seekDuration.color = t.textSecondary
     m.playerUiTick = m.top.FindNode("playerUiTick")
     if m.playerUiTick <> invalid then m.playerUiTick.ObserveField("fire", "onPlayerUiTick")
+    m.seekRepeat = m.top.FindNode("seekRepeat")
+    m.seekRepeatActive = false
+    m.seekRepeatDirection = 0
+    m.seekRepeatCoarse = false
+    m.seekRepeatTicks = 0
+    if m.seekRepeat <> invalid then m.seekRepeat.ObserveField("fire", "onSeekRepeat")
+    m.controlsHide = m.top.FindNode("controlsHide")
+    if m.controlsHide <> invalid then m.controlsHide.ObserveField("fire", "onControlsHide")
 
     ' Observed here rather than in CreateVideo: this screen is a static child
     ' that survives every pop, so CreateVideo runs once per play and observing
@@ -275,8 +289,21 @@ function TorrentRateText(value as dynamic) as string
 end function
 
 sub ShowPausedControls()
+    ShowPlayerControls(true)
+end sub
+
+sub ShowPlayingControls()
+    ShowPlayerControls(false)
+end sub
+
+sub ShowPlayerControls(paused as boolean)
+    m.controlsVisible = true
+    m.controlsPaused = paused
     m.pauseActionIndex = 0
     m.pauseHasNext = NextEpisodeParams() <> invalid
+    m.seekDirty = false
+    m.seekTarget = 0
+    if m.video <> invalid and m.video.position <> invalid then m.seekTarget = Int(m.video.position)
     if m.pauseTitle <> invalid
         title = ""
         if m.playParams <> invalid and m.playParams.name <> invalid then title = m.playParams.name
@@ -290,11 +317,30 @@ sub ShowPausedControls()
     end if
     StartTorrentStats()
     UpdatePausedControlFocus()
+    if paused
+        if m.controlsHide <> invalid then m.controlsHide.control = "stop"
+    else
+        ArmControlsHide()
+    end if
 end sub
 
 sub HidePausedControls()
+    StopSeekRepeat()
+    m.controlsVisible = false
+    if m.controlsHide <> invalid then m.controlsHide.control = "stop"
     if m.pauseActionsGroup <> invalid then m.pauseActionsGroup.visible = false
     if m.playerUiTick <> invalid then m.playerUiTick.control = "stop"
+    StopTorrentStats()
+end sub
+
+sub ArmControlsHide()
+    if m.controlsHide = invalid or m.controlsPaused then return
+    m.controlsHide.control = "stop"
+    m.controlsHide.control = "start"
+end sub
+
+sub onControlsHide()
+    if m.controlsVisible and not m.controlsPaused then HidePausedControls()
 end sub
 
 sub UpdatePausedControlFocus()
@@ -307,6 +353,8 @@ sub UpdatePausedControlFocus()
     if m.pauseResumeBg <> invalid
         if m.pauseActionIndex = 1 then m.pauseResumeBg.color = t.accent else m.pauseResumeBg.color = idle
     end if
+    if m.pauseResumePlayIcon <> invalid then m.pauseResumePlayIcon.visible = m.controlsPaused
+    if m.pauseResumePauseIcon <> invalid then m.pauseResumePauseIcon.visible = not m.controlsPaused
     if m.pauseNextBg <> invalid
         if not m.pauseHasNext
             m.pauseNextBg.color = disabled
@@ -317,11 +365,15 @@ sub UpdatePausedControlFocus()
         end if
     end if
     if m.pauseCaptionsBg <> invalid
-        if m.pauseActionIndex = 3 then m.pauseCaptionsBg.color = t.accent else m.pauseCaptionsBg.color = idle
+        if m.pauseActionIndex = 3
+            m.pauseCaptionsBg.color = t.accent
+        else if CaptionIsOn()
+            m.pauseCaptionsBg.color = "0x51407AF2"
+        else
+            m.pauseCaptionsBg.color = idle
+        end if
     end if
-    if m.pauseCaptionsText <> invalid
-        if CaptionIsOn() then m.pauseCaptionsText.text = "CC " + Chr(10003) else m.pauseCaptionsText.text = "CC"
-    end if
+    if m.pauseCaptionsText <> invalid then m.pauseCaptionsText.text = "CC"
 end sub
 
 function CaptionIsOn() as boolean
@@ -415,6 +467,10 @@ sub UpdateSeekDisplay()
     duration = m.video.duration
     if position = invalid or position < 0 then position = 0
     if duration = invalid or duration < 0 then duration = 0
+    ' While scrubbing, the marker is a preview. Do not write Video.seek until
+    ' OK confirms it; an immediate write leaves paused state after one press and
+    ' is why the old timeline could move only once.
+    if m.seekDirty then position = m.seekTarget
     fraction = 0
     if duration > 0 then fraction = position / duration
     if fraction < 0 then fraction = 0
@@ -440,17 +496,95 @@ function PlaybackTime(value as dynamic) as string
     return minuteText + ":" + secondText
 end function
 
-sub SeekPausedBy(delta as integer)
+sub AdjustTimeline(direction as integer, coarse as boolean)
     if m.video = invalid then return
-    if not m.video.HasField("seek") then return
-    position = m.video.position
     duration = m.video.duration
-    if position = invalid then position = 0
-    target = Int(position) + delta
+    if duration = invalid or duration <= 0 then return
+    if not m.seekDirty
+        m.seekTarget = 0
+        if m.video.position <> invalid then m.seekTarget = Int(m.video.position)
+    end if
+    ' Normal arrows move one percent of the program (at least ten seconds), so
+    ' holding a direction can cross the whole timeline. FF/RW move ten percent.
+    stepSize = Int(duration / 100)
+    if stepSize < 10 then stepSize = 10
+    if coarse
+        stepSize = Int(duration / 10)
+        if stepSize < 60 then stepSize = 60
+    end if
+    target = m.seekTarget + (direction * stepSize)
     if target < 0 then target = 0
     if duration <> invalid and duration > 0 and target > duration - 1 then target = Int(duration - 1)
+    m.seekTarget = target
+    m.seekDirty = true
+    UpdateSeekDisplay()
+    ArmControlsHide()
+end sub
+
+' Roku reports a held direction as one key-down followed later by key-up on
+' devices that do not synthesize repeat presses. Own the repeat cadence so the
+' marker keeps travelling for as long as the viewer holds the button.
+sub StartSeekRepeat(direction as integer, coarse as boolean)
+    if m.seekRepeatActive and m.seekRepeatDirection = direction and m.seekRepeatCoarse = coarse then return
+    StopSeekRepeat()
+    m.seekRepeatActive = true
+    m.seekRepeatDirection = direction
+    m.seekRepeatCoarse = coarse
+    m.seekRepeatTicks = 0
+    AdjustTimeline(direction, coarse)
+    if m.seekRepeat <> invalid
+        m.seekRepeat.control = "stop"
+        m.seekRepeat.control = "start"
+    end if
+end sub
+
+sub StopSeekRepeat()
+    m.seekRepeatActive = false
+    m.seekRepeatDirection = 0
+    m.seekRepeatTicks = 0
+    if m.seekRepeat <> invalid then m.seekRepeat.control = "stop"
+end sub
+
+sub onSeekRepeat()
+    if not m.seekRepeatActive then return
+    if m.video = invalid
+        StopSeekRepeat()
+        return
+    end if
+    state = m.video.state
+    if (state <> "paused" and state <> "playing") or not m.controlsVisible or m.pauseActionIndex <> 0
+        StopSeekRepeat()
+        return
+    end if
+    m.seekRepeatTicks = m.seekRepeatTicks + 1
+    ' Accelerate a held arrow in stages: fine control first, then increasingly
+    ' fast travel so a viewer can cross a long episode without dozens of taps.
+    moves = 1
+    if m.seekRepeatTicks >= 28
+        moves = 8
+    else if m.seekRepeatTicks >= 17
+        moves = 4
+    else if m.seekRepeatTicks >= 8
+        moves = 2
+    end if
+    for moveIndex = 1 to moves
+        AdjustTimeline(m.seekRepeatDirection, m.seekRepeatCoarse)
+    end for
+end sub
+
+sub CommitTimelineSeek()
+    StopSeekRepeat()
+    if m.video = invalid then return
+    if not m.seekDirty
+        if m.controlsPaused then m.video.control = "resume" else HidePausedControls()
+        return
+    end if
+    if not m.video.HasField("seek") then return
+    if m.video.HasField("autoplayAfterSeek") then m.video.autoplayAfterSeek = true
+    target = m.seekTarget
+    m.seekDirty = false
+    HidePausedControls()
     m.video.seek = target
-    if m.seekElapsed <> invalid then m.seekElapsed.text = PlaybackTime(target)
 end sub
 
 ' Stremio's explicit NextVideo action adapted to the Roku remote. A warm result
@@ -1182,6 +1316,7 @@ end sub
 sub ClearSubtitles()
     m.subtitleTracks = invalid
     m.subtitleIndex = -1
+    m.captionSelection = ""
     m.subtitleNodesApplied = false
 end sub
 
@@ -1345,9 +1480,9 @@ sub CustomizeVideoNode()
     if m.video = invalid then return
 
     ApplyCaptionStyle()
-    ' Seeking from our paused timeline should remain paused. Roku OS 15.1+
-    ' exposes this alongside the write-only seek field; older firmware simply
-    ' keeps its default behavior and the guarded seek path becomes a no-op.
+    ' Arrow presses only move our preview marker, so seeking stays disarmed
+    ' until OK commits it. CommitTimelineSeek flips this back on for the actual
+    ' jump; older firmware simply keeps its default behavior.
     if m.video.HasField("autoplayAfterSeek") then m.video.autoplayAfterSeek = false
 
     ' Before the trick-play tint and independent of it: the native buffering
@@ -1922,6 +2057,10 @@ sub BeginPreparedNext()
     m.playMode = prepared.directPlayMode
     ClearSubtitles()
     print "[next] direct player swap -> " ; prepared.videoId
+    ' This is a new video even though it reuses the same PlayerScreen. Start the
+    ' full subtitle provider drain before StartPlayback builds its ContentNode,
+    ' exactly like OnEnter does for a manually opened episode.
+    StartSubtitles(prepared)
     StartPlayback(prepared.resolvedUrl, prepared.streamFormat, prepared.requestHeaders)
 end sub
 
@@ -1987,9 +2126,11 @@ sub LogVideoError()
     end if
 end sub
 
-' Center/OK is handled explicitly so its behavior is stable across Roku OS
-' versions: it pauses a playing video and activates the selected paused action.
-' Both halves are consumed so the Video node cannot toggle it again underneath.
+' Up/Down reveals our compact controls without changing playback. Center/OK is
+' handled explicitly so its behavior is stable across Roku OS versions: with
+' the controls hidden it pauses immediately; with them visible it activates the
+' focused timeline, pause/resume, next, or caption action. Both halves are
+' consumed so the Video node cannot also toggle playback underneath.
 '
 ' Before the stream resolves (or after a failure) there is no video: Back still
 ' pops (OnBackPressed returns false) and every other key is swallowed so a
@@ -2003,25 +2144,69 @@ function OnKeyEvent(key as string, press as boolean) as boolean
     end if
     currentVideoState = ""
     if m.video <> invalid then currentVideoState = m.video.state
-    if currentVideoState = "paused"
-        if not press then return true
+
+    ' Reveal controls without changing playback. Only act on key-down so the
+    ' matching release cannot reopen an overlay that has just been hidden.
+    if not m.controlsVisible and press and (key = "up" or key = "down")
+        if currentVideoState = "playing"
+            ShowPlayingControls()
+        else if currentVideoState = "paused"
+            ShowPausedControls()
+        end if
+        return true
+    end if
+
+    ' Left/Right from clean playback opens the timeline and immediately starts
+    ' a seek preview. The repeat timer accelerates while the key stays held.
+    if not m.controlsVisible and press and (key = "left" or key = "right")
+        if currentVideoState = "playing"
+            ShowPlayingControls()
+        else if currentVideoState = "paused"
+            ShowPausedControls()
+        else
+            return true
+        end if
+        if key = "left" then StartSeekRepeat(-1, false) else StartSeekRepeat(1, false)
+        return true
+    end if
+
+    if currentVideoState = "paused" or m.controlsVisible
+        if not press
+            if key = "left" or key = "right" or key = "rewind" or key = "fastforward" then StopSeekRepeat()
+            return true
+        end if
+        if currentVideoState = "playing" then ArmControlsHide()
         if key = "rewind"
-            SeekPausedBy(-30)
-            return true
-        else if key = "fastforward"
-            SeekPausedBy(30)
-            return true
-        else if key = "up"
             m.pauseActionIndex = 0
             UpdatePausedControlFocus()
+            StartSeekRepeat(-1, true)
+            return true
+        else if key = "fastforward"
+            m.pauseActionIndex = 0
+            UpdatePausedControlFocus()
+            StartSeekRepeat(1, true)
+            return true
+        else if key = "up"
+            StopSeekRepeat()
+            ' The action buttons are physically above the timeline.
+            if m.pauseActionIndex = 0
+                m.pauseActionIndex = 1
+                UpdatePausedControlFocus()
+            end if
             return true
         else if key = "down"
-            if m.pauseActionIndex = 0 then m.pauseActionIndex = 1
-            UpdatePausedControlFocus()
+            StopSeekRepeat()
+            if m.pauseActionIndex = 0
+                ' Down from the lowest row dismisses the compact overlay.
+                HidePausedControls()
+            else
+                m.pauseActionIndex = 0
+                UpdatePausedControlFocus()
+            end if
             return true
         else if key = "left"
             if m.pauseActionIndex = 0
-                SeekPausedBy(-10)
+                StartSeekRepeat(-1, false)
             else
                 if m.pauseActionIndex = 3 and m.pauseHasNext then
                     m.pauseActionIndex = 2
@@ -2033,7 +2218,7 @@ function OnKeyEvent(key as string, press as boolean) as boolean
             return true
         else if key = "right"
             if m.pauseActionIndex = 0
-                SeekPausedBy(10)
+                StartSeekRepeat(1, false)
             else if m.pauseActionIndex = 1 and m.pauseHasNext
                 m.pauseActionIndex = 2
                 UpdatePausedControlFocus()
@@ -2043,12 +2228,19 @@ function OnKeyEvent(key as string, press as boolean) as boolean
             end if
             return true
         else if key = "OK"
+            StopSeekRepeat()
             if m.pauseActionIndex = 2 and m.pauseHasNext
                 PlayNextFromPause()
             else if m.pauseActionIndex = 3
                 ShowCaptionChoice()
+            else if m.pauseActionIndex = 0
+                CommitTimelineSeek()
             else
-                m.video.control = "resume"
+                if currentVideoState = "playing"
+                    m.video.control = "pause"
+                else if currentVideoState = "paused"
+                    m.video.control = "resume"
+                end if
             end if
             return true
         end if

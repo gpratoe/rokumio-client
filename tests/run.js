@@ -121,6 +121,9 @@ function checkDeferredVideoPlayContract() {
     if (!/ObserveField\(\s*"fire"\s*,\s*"onPlayKickFire"\s*\)/.test(code)) {
         err('PlayerScreen.brs does not ObserveField("fire", "onPlayKickFire") on the playKick Timer — an unobserved Timer fires into nothing and the deferred play never happens');
     }
+    if (!/<Timer\s+id="seekRepeat"[^>]*repeat="true"/.test(xml) || !/ObserveField\(\s*"fire"\s*,\s*"onSeekRepeat"\s*\)/.test(code)) {
+        err('PlayerScreen has no repeating seek-hold timer wired to onSeekRepeat — held Left/Right would move the timeline only once');
+    }
 
     const keyHandler = /function\s+OnKeyEvent\([^)]*\)[\s\S]*?end\s+function/i.exec(code);
     if (!keyHandler || !/key\s*=\s*"OK"/.test(keyHandler[0])) {
@@ -132,6 +135,31 @@ function checkDeferredVideoPlayContract() {
         if (!/state\s*=\s*"paused"[\s\S]*?control\s*=\s*"resume"/i.test(keyHandler[0])) {
             err('PlayerScreen center/OK does not resume a paused video');
         }
+        if (!/key\s*=\s*"left"[\s\S]*?StartSeekRepeat\(\s*-1/.test(keyHandler[0]) || !/key\s*=\s*"right"[\s\S]*?StartSeekRepeat\(\s*1/.test(keyHandler[0])) {
+            err('PlayerScreen paused timeline does not start held-key repeat for both Left and Right');
+        }
+        if (!/not\s+m\.controlsVisible[\s\S]*?key\s*=\s*"left"[\s\S]*?key\s*=\s*"right"[\s\S]*?ShowPlayingControls\(\)[\s\S]*?StartSeekRepeat\(/.test(keyHandler[0])) {
+            err('PlayerScreen hidden Left/Right does not reveal the timeline and immediately begin seeking');
+        }
+        if (!/not\s+m\.controlsVisible[\s\S]*?key\s*=\s*"up"[\s\S]*?key\s*=\s*"down"[\s\S]*?currentVideoState\s*=\s*"playing"[\s\S]*?ShowPlayingControls\(\)/.test(keyHandler[0])) {
+            err('PlayerScreen Up/Down does not reveal playing controls without pausing playback');
+        }
+        if (!/key\s*=\s*"up"[\s\S]*?m\.pauseActionIndex\s*=\s*1[\s\S]*?key\s*=\s*"down"[\s\S]*?m\.pauseActionIndex\s*=\s*0[\s\S]*?HidePausedControls\(\)/.test(keyHandler[0])) {
+            err('PlayerScreen vertical navigation does not move Up from timeline to buttons and dismiss Down from the timeline');
+        }
+    }
+    if (!/m\.seekRepeatTicks\s*=\s*m\.seekRepeatTicks\s*\+\s*1[\s\S]*?moves\s*=\s*8[\s\S]*?AdjustTimeline\(/.test(code)) {
+        err('PlayerScreen held seeking does not progressively accelerate toward distant timestamps');
+    }
+    if (!/<Label\s+id="pauseCaptionsText"[^>]*width="72"[^>]*text="CC"/.test(xml)) {
+        err('PlayerScreen compact caption action does not reserve enough width for the full CC label');
+    }
+    if (!/<Rectangle\s+translation="\[0, 825\]"\s+width="1920"\s+height="255"/.test(xml)) {
+        err('PlayerScreen compact control panel is not anchored to the bottom of the 1080p screen');
+    }
+    const nextSwap = /sub\s+BeginPreparedNext\(\)[\s\S]*?end\s+sub/i.exec(code);
+    if (!nextSwap || !/StartSubtitles\(prepared\)[\s\S]*?StartPlayback\(/.test(nextSwap[0])) {
+        err('PlayerScreen seamless next-episode swap does not start the new episode subtitle drain before playback');
     }
     const kick = new RegExp('^[ \\t]*sub\\s+onPlayKickFire\\s*\\(', 'm').exec(code);
     if (!kick) {
