@@ -30,31 +30,16 @@
     <children>
         <Rectangle id="addonsBg" width="1920" height="1080" color="0x0" />
 
-        <Label
-            id="addonsTitle"
-            translation="[80, 48]"
-            width="1760"
-            height="70"
-            text="Add-ons"
-            font="font:LargeBoldSystemFont" />
-        <Label
-            id="addonsSub"
-            translation="[80, 128]"
-            width="1760"
-            height="40"
-            text="OK adds or removes an add-on, Back returns to Home"
-            font="font:SmallSystemFont" />
-
         <ChevronList
             id="addonsList"
-            translation="[80, 240]"
-            numRows="4"
+            translation="[80, 80]"
+            numRows="5"
             itemWidth="1000"
             rowHeight="160"
             rowComponent="AddonTile" />
 
-       <Group id="companionPanel" translation="[1140, 140]">
-            <Rectangle id="companionPlate" width="700" height="720" />
+       <Group id="companionPanel" translation="[1140, 80]">
+            <Rectangle id="companionPlate" width="700" height="820" />
             <Label
                 id="companionTitle"
                 translation="[40, 36]"

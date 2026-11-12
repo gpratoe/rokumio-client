@@ -43,16 +43,17 @@ end sub
 sub UpdateLook()
     palette = Theme()
     if m.top.itemHasFocus
-        m.face.color = palette.itemFace
+        m.face.color = palette.textPrimary
+        m.title.color = palette.screenBg
+        m.visibility.color = palette.screenBg
     else
         m.face.color = palette.tileFace
-    end if
-
-    m.title.color = palette.textPrimary
-    if m.visibleOnHome
-        m.visibility.color = palette.accent
-    else
-        m.visibility.color = palette.accentWarm
+        m.title.color = palette.textPrimary
+        if m.visibleOnHome
+            m.visibility.color = palette.accent
+        else
+            m.visibility.color = palette.textSecondary
+        end if
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub

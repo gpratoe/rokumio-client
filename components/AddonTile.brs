@@ -54,17 +54,18 @@ end sub
 sub UpdateLook()
     palette = Theme()
     if m.top.itemHasFocus
-        m.face.color = palette.itemFace
+        m.face.color = palette.textPrimary
+        m.name.color = palette.screenBg
+        m.version.color = palette.screenBg
+        m.scope.color = palette.screenBg
+        m.description.color = palette.screenBg
+        m.action.color = palette.screenBg
     else
         m.face.color = palette.tileFace
-    end if
-    m.name.color = palette.textPrimary
-    m.version.color = palette.textSecondary
-    m.scope.color = palette.textSecondary
-    m.description.color = palette.textSecondary
-    if m.top.itemHasFocus
-        m.action.color = palette.accentFocus
-    else
+        m.name.color = palette.textPrimary
+        m.version.color = palette.textSecondary
+        m.scope.color = palette.textSecondary
+        m.description.color = palette.textSecondary
         m.action.color = palette.accent
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55

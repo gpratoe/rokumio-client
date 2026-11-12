@@ -15,29 +15,16 @@
     <children>
         <Rectangle id="homeRowsBg" width="1920" height="1080" color="0x0" />
 
-        <Label
-            id="homeRowsTitle"
-            translation="[80, 48]"
-            width="1760"
-            height="70"
-            font="font:LargeBoldSystemFont" />
-        <Label
-            id="homeRowsSub"
-            translation="[80, 126]"
-            width="1760"
-            height="40"
-            font="font:SmallSystemFont" />
-
         <ChevronList
             id="homeRowsList"
-            translation="[80, 240]"
-            numRows="6"
+            translation="[80, 80]"
+            numRows="7"
             itemWidth="1000"
             rowHeight="100"
             rowComponent="HomeCatalogRow" />
 
-        <Group id="homeRowsPanel" translation="[1140, 240]">
-            <Rectangle id="homeRowsPlate" width="700" height="690" />
+        <Group id="homeRowsPanel" translation="[1140, 80]">
+            <Rectangle id="homeRowsPlate" width="700" height="780" />
             <Label
                 id="homeRowsPanelTitle"
                 translation="[40, 30]"
@@ -49,14 +36,14 @@
                 id="homeRowsPanelBody"
                 translation="[50, 120]"
                 width="600"
-                height="500"
+                height="560"
                 horizAlign="center"
                 vertAlign="top"
                 wrap="true"
                 font="font:SmallSystemFont" />
             <Label
                 id="homeRowsPanelStatus"
-                translation="[40, 590]"
+                translation="[40, 700]"
                 width="620"
                 height="44"
                 horizAlign="center"
@@ -65,7 +52,7 @@
 
         <Label
             id="homeRowsStatus"
-            translation="[80, 970]"
+            translation="[80, 940]"
             width="1760"
             height="40"
             font="font:SmallSystemFont" />

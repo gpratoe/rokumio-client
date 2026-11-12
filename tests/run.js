@@ -3373,20 +3373,20 @@ function checkSettingsSectionsContract() {
         err('PrefRow.brs does not watch the content node\'s description — a value written into the node would never reach the screen');
     }
 
-    // The options are custom rows (no RowList/ChevronList): overflow is shown
-    // with chevron indicators and a windowed layout, and the focused row/index
-    // is preserved across rebuilds so the cursor does not jump.
-    if (!/id="chevronUp"/.test(xml) || !/id="chevronDown"/.test(xml) || !/id="optionsClip"/.test(xml)) {
-        err('SettingsScreen.xml is missing the options container/chevrons — overflowed options would scroll away with nothing to indicate more content');
+    // The options use the shared custom-node ChevronList: overflow is shown
+    // with chevron indicators/windowing, and the focused row is preserved
+    // across rebuilds so the cursor does not jump.
+    if (!/<ChevronList\s+id="settingsList"/.test(xml) || !/rowComponent="PrefRow"/.test(xml)) {
+        err('SettingsScreen.xml does not use the shared ChevronList for options — options would diverge from the custom list behavior/style');
     }
-    if (!/m\.focusedRow/.test(brs) || !/EnsureOptionsRowVisible/.test(brs)) {
-        err('SettingsScreen.brs does not track/keep the focused option visible — a rebuild or navigation would lose the cursor/overflow context');
+    if (!/m\.focusedRow/.test(brs) || !/m\.list\.focusRow\s*=/.test(brs)) {
+        err('SettingsScreen.brs does not preserve the focused option across rebuilds — the cursor would jump');
     }
 
-    // Focus travel between the chips and options. Up from options reaches chips;
-    // Down from chips enters options.
-    if (!/m\.optionsListFocused/.test(brs) || !/m\.chips\.callFunc\("HoldingFocus"\)/.test(brs)) {
-        err('SettingsScreen.brs does not track options/chips focus — Up from options would never reach the chips, and section switching becomes unreachable');
+    // Focus travel between the chips and options. Up/options at the top exits
+    // the list to chips; Down from chips enters the list.
+    if (!/focusExit/.test(brs) || !/SetListFocus/.test(brs) || !/m\.chips\.callFunc\("HoldingFocus"\)/.test(brs)) {
+        err('SettingsScreen.brs does not handle chip↔options focus travel — Up from options or Down from chips would not move focus correctly');
     }
 
     // The device is asked ONCE per visit to the screen. Asking again when a
@@ -3403,27 +3403,20 @@ function checkSettingsSectionsContract() {
         }
     }
 
-    // The focus correction after a content change. Replacing the content
-    // resets the list's focus to the first row, and the reset lands on the
-    // render pass after the one the content was set on — so a jump made at
-    // that moment is undone by it. The list remembers the target and corrects
-    // the focus when it lands, and does not forward the reset: a consumer
-    // that watches the focused row would otherwise repaint from the row the
-    // cursor is leaving.
+    // The focus correction after a content change. Replacing content must
+    // not throw the cursor to the first row or emit a spurious reset: remember
+    // the target, restore it, and report the intended focused row.
     const chevron = read('components/ChevronList.brs');
     if (!/pendingFocus/.test(chevron)) {
         err('ChevronList.brs does not remember a pending focus — replacing the content throws the cursor to the first row and nothing puts it back');
     }
-    if (!/jumpToRowItem\s*=\s*\[0,\s*target\]/.test(chevron)) {
-        err('ChevronList.brs does not jump to the pending focus — the cursor stays on the first row after the list is rebuilt');
+    if (!/ApplyInitialFocus|m\.focusedIndex\s*=\s*target/.test(chevron)) {
+        err('ChevronList.brs does not restore the pending focus after rebuilding content — the cursor would stay on the first row');
     }
-    // The target has to be remembered BEFORE the content is replaced: the
-    // reset can arrive while the content is still being set, and a target
-    // remembered afterwards is one step too late to catch it.
     const onContent = chevron.slice(chevron.indexOf('sub onContent()'));
     const body = onContent.slice(0, onContent.indexOf('end sub'));
-    if (body.indexOf('pendingFocus') > body.indexOf('m.rowList.content')) {
-        err('ChevronList.brs onContent() sets the content BEFORE remembering the pending focus — the focus reset can arrive while the content is being set, and a target remembered afterwards is too late to catch it');
+    if (!/m\.pendingFocus\s*=\s*m\.top\.focusRow/.test(body) || body.indexOf('m.pendingFocus') > body.indexOf('RebuildRows()')) {
+        err('ChevronList.brs onContent() does not capture the target focus before rebuilding rows — the cursor/focus restore can be lost');
     }
 
     // The side panel: the title, the eligibility line in red, and the body.

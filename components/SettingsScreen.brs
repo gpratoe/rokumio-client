@@ -42,10 +42,7 @@
 sub init()
     m.status = m.top.FindNode("settingsStatus")
     m.chips = m.top.FindNode("settingsChips")
-    m.optionsClip = m.top.FindNode("optionsClip")
-    m.optionsRowsGroup = m.optionsClip.CreateChild("Group")
-    m.chevronUp = m.top.FindNode("chevronUp")
-    m.chevronDown = m.top.FindNode("chevronDown")
+    m.list = m.top.FindNode("settingsList")
     m.infoTitle = m.top.FindNode("infoTitle")
     m.infoWarn = m.top.FindNode("infoWarn")
     m.infoBody = m.top.FindNode("infoBody")
@@ -67,21 +64,18 @@ sub init()
     }
 
     m.chips.ObserveField("selection", "onChipSelected")
+    m.list.ObserveField("rowItemFocused", "onListRowFocused")
+    m.list.ObserveField("rowItemSelected", "onListRowSelected")
+    m.list.ObserveField("focusExit", "onListFocusExit")
 
     m.rows = []
     ' The content node of each row, by action. A value change is written into
     ' these, so the list is never rebuilt over the user's cursor.
     m.rowNodes = {}
-    m.optionRowNodes = []
     m.sections = []
     m.activeSection = 0
     ' The row the cursor is on, for the side panel.
     m.focusedRow = -1
-    m.optionsFirstVisible = 0
-    m.optionsSlotHeight = 118
-    m.optionsAreaHeight = 708
-    m.optionsVisibleCount = Int(m.optionsAreaHeight / m.optionsSlotHeight)
-    m.optionsListFocused = false
     ' Invalid until the probe lands: the row says "On" rather than claiming the
     ' device takes nothing before anyone has asked it.
     m.passthruCodecs = invalid
@@ -361,49 +355,38 @@ sub BuildChips()
     m.chips.callFunc("SetChips", entries)
 end sub
 
-' The options for the selected section. Custom focusable PrefRow nodes (no
-' RowList): each row gets a content node kept in m.rowNodes so values can be
-' written in place without rebuilding/moving focus.
+' Build the options list for the selected section (shared ChevronList).
+' Each row keeps a content node in m.rowNodes so values update in place.
 sub BuildRows()
     m.rows = []
     m.rowNodes = {}
-    m.optionRowNodes = []
 
-    while m.optionsRowsGroup.GetChildCount() > 0
-        m.optionsRowsGroup.RemoveChildIndex(0)
-    end while
+    if m.sections.Count() = 0
+        m.list.focusRow = 0
+        m.list.content = CreateObject("roSGNode", "ContentNode")
+        m.focusedRow = -1
+        return
+    end if
 
-    if m.sections.Count() = 0 then return
     section = m.sections[m.activeSection]
     for each action in section.rows
         m.rows.Push(action)
     end for
 
-    y = 0
+    content = CreateObject("roSGNode", "ContentNode")
     for each action in m.rows
-        node = CreateObject("roSGNode", "ContentNode")
-        node.title = RowLabel(action)
-        node.description = RowValue(action)
-        m.rowNodes[action] = node
-
-        row = m.optionsRowsGroup.CreateChild("PrefRow")
-        row.translation = [0, y]
-        row.itemContent = node
-        row.itemHasFocus = false
-        row.rowHasFocus = m.optionsListFocused
-        m.optionRowNodes.Push(row)
-        y = y + m.optionsSlotHeight
+        entry = content.CreateChild("ContentNode")
+        item = entry.CreateChild("ContentNode")
+        item.title = RowLabel(action)
+        item.description = RowValue(action)
+        m.rowNodes[action] = item
     end for
 
-    if m.rows.Count() = 0
-        m.focusedRow = -1
-        m.optionsFirstVisible = 0
-    else
-        if m.focusedRow < 0 or m.focusedRow >= m.rows.Count() then m.focusedRow = 0
-        EnsureOptionsRowVisible(m.focusedRow)
-    end if
-    ApplyOptionsLayout()
-    ApplyOptionsFocusState()
+    focusRow = m.focusedRow
+    if focusRow < 0 or focusRow >= m.rows.Count() then focusRow = 0
+    m.focusedRow = focusRow
+    m.list.focusRow = focusRow
+    m.list.content = content
 end sub
 
 ' Write the current values into the rows. The options are NOT rebuilt: PrefRow
@@ -425,122 +408,46 @@ sub onChipSelected()
     if index = m.activeSection then return
     m.activeSection = index
     m.focusedRow = -1
-    m.optionsFirstVisible = 0
     RefreshSections()
     UpdatePanel()
 end sub
 
-' Focus travel between section chips and options. Up from options reaches
-' chips; Down from chips enters options; options/* from options reaches chips.
+' Focus travel between section chips and options. Down from chips enters the
+' list; the list emits focusExit on Up/options at the top boundary.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
-    if m.optionsListFocused
-        if key = "up"
-            if m.focusedRow <= 0
-                BlurOptionsFocus()
-                m.chips.callFunc("FocusChip", -1)
-            else
-                FocusOptionByDelta(-1)
-            end if
-            return true
-        else if key = "down"
-            if m.focusedRow < m.rows.Count() - 1 then FocusOptionByDelta(1)
-            return true
-        else if key = "OK"
-            SelectFocusedOption()
-            return true
-        else if key = "options"
-            BlurOptionsFocus()
-            m.chips.callFunc("FocusChip", -1)
-            return true
-        end if
-    else if m.chips.callFunc("HoldingFocus")
-        if key = "down"
-            m.chips.callFunc("Blur")
-            SetOptionsFocus()
-            return true
-        end if
+    if m.chips.callFunc("HoldingFocus") and key = "down"
+        m.chips.callFunc("Blur")
+        SetOptionsFocus()
+        return true
     end if
     return false
 end function
 
 sub SetOptionsFocus()
-    if m.rows.Count() = 0
-        m.optionsListFocused = false
-        m.focusedRow = -1
-        m.optionsRowsGroup.SetFocus(true)
-        ApplyOptionsFocusState()
-        UpdatePanel()
-        return
-    end if
-    m.optionsListFocused = true
-    if m.focusedRow < 0 or m.focusedRow >= m.rows.Count() then m.focusedRow = 0
-    EnsureOptionsRowVisible(m.focusedRow)
-    ApplyOptionsLayout()
-    m.optionsRowsGroup.SetFocus(true)
-    ApplyOptionsFocusState()
+    if m.rows.Count() > 0 and (m.focusedRow < 0 or m.focusedRow >= m.rows.Count()) then m.focusedRow = 0
+    m.list.callFunc("SetListFocus")
     UpdatePanel()
 end sub
 
-sub BlurOptionsFocus()
-    m.optionsListFocused = false
-    ApplyOptionsFocusState()
+sub onListFocusExit()
+    direction = m.list.focusExit
+    if direction = "up" or direction = "options"
+        m.chips.callFunc("FocusChip", -1)
+    end if
 end sub
 
-sub FocusOptionByDelta(delta as integer)
-    if m.rows.Count() = 0 then return
-    nextIndex = m.focusedRow + delta
-    if nextIndex < 0 then nextIndex = 0
-    if nextIndex >= m.rows.Count() then nextIndex = m.rows.Count() - 1
-    if nextIndex = m.focusedRow then return
-    m.focusedRow = nextIndex
-    EnsureOptionsRowVisible(m.focusedRow)
-    ApplyOptionsLayout()
-    ApplyOptionsFocusState()
+sub onListRowFocused()
+    data = m.list.rowItemFocused
+    if data = invalid or data.Count() < 1 then return
+    m.focusedRow = data[0]
     UpdatePanel()
 end sub
 
-sub SelectFocusedOption()
-    if m.focusedRow < 0 or m.focusedRow >= m.rows.Count() then return
-    ActivateRow(m.focusedRow)
-end sub
-
-sub ApplyOptionsFocusState()
-    for i = 0 to m.optionRowNodes.Count() - 1
-        row = m.optionRowNodes[i]
-        if row = invalid then continue for
-        row.rowHasFocus = m.optionsListFocused
-        row.itemHasFocus = m.optionsListFocused and i = m.focusedRow
-    end for
-end sub
-
-sub EnsureOptionsRowVisible(index as integer)
-    if m.rows.Count() = 0 then
-        m.optionsFirstVisible = 0
-        return
-    end if
-    visible = m.optionsVisibleCount
-    if visible < 1 then visible = 1
-    if index < m.optionsFirstVisible
-        m.optionsFirstVisible = index
-    else if index >= m.optionsFirstVisible + visible
-        m.optionsFirstVisible = index - visible + 1
-    end if
-    maxFirst = m.rows.Count() - visible
-    if maxFirst < 0 then maxFirst = 0
-    if m.optionsFirstVisible > maxFirst then m.optionsFirstVisible = maxFirst
-    if m.optionsFirstVisible < 0 then m.optionsFirstVisible = 0
-end sub
-
-sub ApplyOptionsLayout()
-    m.optionsRowsGroup.translation = [0, -(m.optionsFirstVisible * m.optionsSlotHeight)]
-    total = m.rows.Count()
-    visible = m.optionsVisibleCount
-    if visible < 1 then visible = 1
-    lastVisible = m.optionsFirstVisible + visible - 1
-    if lastVisible > total - 1 then lastVisible = total - 1
-    if m.chevronUp <> invalid then m.chevronUp.visible = m.optionsFirstVisible > 0
-    if m.chevronDown <> invalid then m.chevronDown.visible = lastVisible < total - 1
+sub onListRowSelected()
+    data = m.list.rowItemSelected
+    if data = invalid or data.Count() < 1 then return
+    ActivateRow(data[0])
 end sub
 
 ' The signed-in-account label for the logout row. Prefer the profile email;
@@ -1234,7 +1141,6 @@ sub ApplyLanguage() as void
     RefreshTexts()
     BuildChips()
     RefreshValues()
-    ApplyOptionsFocusState()
     UpdatePanel()
     ' The status line is re-rendered from its key — but only when it HAS one:
     ' a raw line (a probe summary) is not ours to translate and must survive

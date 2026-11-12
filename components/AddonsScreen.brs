@@ -26,8 +26,6 @@
 ' guard.
 
 sub init()
-    m.title = m.top.FindNode("addonsTitle")
-    m.sub = m.top.FindNode("addonsSub")
     m.status = m.top.FindNode("addonsStatus")
     m.list = m.top.FindNode("addonsList")
 
@@ -40,11 +38,9 @@ sub init()
     m.setupUrl = m.top.FindNode("setupUrl")
 
     t = Theme()
-    m.title.color = t.accent
-    m.sub.color = t.textSecondary
     m.status.color = t.accent
-    m.companionPlate.color = t.screenBg
-    m.companionTitle.color = t.accent
+    m.companionPlate.color = t.tileFace
+    m.companionTitle.color = t.textPrimary
     m.companionCaption.color = t.textSecondary
     m.setupHint.color = t.textSecondary
     m.setupUrl.color = t.accent
@@ -72,7 +68,6 @@ end sub
 
 function OnEnter(params as object) as void
     RefreshTexts()
-    m.title.text = Lang("addons", "title")
     m.companionTitle.text = Lang("addons", "companionTitle")
     m.companionCaption.text = Lang("addons", "companionCaption")
     m.setupHint.text = Lang("addons", "setupHint")
@@ -164,7 +159,7 @@ sub BuildRows()
     if installed < 0 then installed = 0
     quantity = Fill(Lang("addons", "countMany"), { count: installed.ToStr() })
     if installed = 1 then quantity = Lang("addons", "countOne")
-    m.sub.text = Fill(Lang("addons", "subtitle"), { count: quantity })
+    ' Subtitle removed from layout.
 end sub
 
 ' Copy one row model into its AddonTileContent node. The tile watches those
