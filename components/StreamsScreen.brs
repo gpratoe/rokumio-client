@@ -562,6 +562,13 @@ sub onEpisodeMetaLoaded()
 
     if m.stores <> invalid then m.stores.episodes.callFunc("EpisodesCacheFullMeta", result.meta)
 
+    ' Continue Watching starts from a slim library record. If its Home metadata
+    ' fetch was unavailable or stale, this full series response is the last safe
+    ' place to restore artwork before PushPlayer hands the params to the player.
+    if StringOf(m.params.logo) = "" then m.params.logo = StringOf(result.meta.logo)
+    if StringOf(m.params.background) = "" then m.params.background = StringOf(result.meta.background)
+    if StringOf(m.params.poster) = "" then m.params.poster = StringOf(result.meta.poster)
+
     episode = EpisodeInMeta(result.meta, m.params.season, m.params.episode)
     if episode = invalid then return
     if m.params.episodeName = invalid or m.params.episodeName = "" then m.params.episodeName = episode.name
@@ -905,6 +912,7 @@ sub PushPlayer(index as integer, playMode as string)
             videoId: m.params.videoId
             season: m.params.season
             episode: m.params.episode
+            episodeName: m.params.episodeName
             position: position
             name: m.headTitle.text
             poster: m.params.poster

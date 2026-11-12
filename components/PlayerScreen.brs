@@ -69,6 +69,7 @@ sub init()
     m.pauseCaptionsBg = m.top.FindNode("pauseCaptionsBg")
     m.pauseCaptionsText = m.top.FindNode("pauseCaptionsText")
     m.pauseTitle = m.top.FindNode("pauseTitle")
+    m.pauseEpisodeTitle = m.top.FindNode("pauseEpisodeTitle")
     m.seekFocus = m.top.FindNode("seekFocus")
     m.seekFill = m.top.FindNode("seekFill")
     m.seekKnob = m.top.FindNode("seekKnob")
@@ -86,6 +87,7 @@ sub init()
     m.status.color = t.textPrimary
     if m.torrentStatsText <> invalid then m.torrentStatsText.color = t.textPrimary
     if m.pauseTitle <> invalid then m.pauseTitle.color = t.textPrimary
+    if m.pauseEpisodeTitle <> invalid then m.pauseEpisodeTitle.color = t.textSecondary
     if m.pauseCaptionsText <> invalid then m.pauseCaptionsText.color = t.textPrimary
     if m.seekElapsed <> invalid then m.seekElapsed.color = t.textSecondary
     if m.seekDuration <> invalid then m.seekDuration.color = t.textSecondary
@@ -105,6 +107,10 @@ sub init()
     ' there would re-observe the same two fields on each one.
     m.video.ObserveField("state", "onVideoStateChanged")
     m.video.ObserveField("bufferingStatus", "onBufferingStatusChanged")
+    ' Add-on tracks are known before play, but tracks carried inside the video
+    ' only appear after Roku's demuxer opens the stream. Watch that discovery so
+    ' an embedded copy can replace the temporary add-on default.
+    if m.video.HasField("availableSubtitleTracks") then m.video.ObserveField("availableSubtitleTracks", "onAvailableSubtitleTracksChanged")
 
     m.resolveTask = invalid
     m.subtitleTask = invalid
@@ -114,6 +120,13 @@ sub init()
     m.subtitleTracks = invalid
     m.subtitleIndex = -1
     m.captionSelection = ""
+    m.captionPreferenceSet = false
+    m.captionPreferenceEnabled = false
+    m.captionPreferenceLanguage = ""
+    m.captionPreferenceLabel = ""
+    m.captionPreferenceOrdinal = 1
+    m.captionPreferenceEmbedded = false
+    m.captionPreferenceMetaId = ""
     m.subtitleNodesApplied = false
     m.subtitleAsked = ""
     m.subtitleReached = 0
@@ -164,6 +177,13 @@ function OnEnter(params as object) as void
     ' pull here is the one that matters.
     RefreshTexts()
     if params = invalid or params.stream = invalid then return
+    ' Keep an explicit caption choice while moving between episodes of the same
+    ' series, including the StreamsScreen fallback route. A different title
+    ' starts with the normal locale-based default instead.
+    incomingMetaId = StringOf(params.metaId)
+    if m.captionPreferenceMetaId <> "" and incomingMetaId <> m.captionPreferenceMetaId
+        ResetCaptionPreference()
+    end if
     m.playParams = params
     m.saved = false
     m.hasPlayed = false
@@ -296,6 +316,32 @@ sub ShowPlayingControls()
     ShowPlayerControls(false)
 end sub
 
+' Movies keep their plain title. Series add the same localized S/E marker used
+' across Details and Streams so the overlay still identifies the exact episode
+' after seamless autoplay replaces the content without leaving the player.
+function PlayerOverlayTitle() as string
+    if m.playParams = invalid then return ""
+    title = StringOf(m.playParams.name)
+    metaType = LCase(StringOf(m.playParams.metaType))
+    if metaType <> "series" then return title
+    if m.playParams.season = invalid or m.playParams.episode = invalid then return title
+    marker = Fill(Lang("common", "episodeMarker"), {
+        season: StringOf(m.playParams.season)
+        episode: StringOf(m.playParams.episode)
+    })
+    if marker = "" then return title
+    if title = "" then return marker
+    return title + "  ·  " + marker
+end function
+
+' The episode's own title gets a quieter second line. It is separate from the
+' series/SxE line so adding it does not move the controls, timeline, or actions.
+function PlayerOverlayEpisodeTitle() as string
+    if m.playParams = invalid then return ""
+    if LCase(StringOf(m.playParams.metaType)) <> "series" then return ""
+    return StringOf(m.playParams.episodeName).Trim()
+end function
+
 sub ShowPlayerControls(paused as boolean)
     m.controlsVisible = true
     m.controlsPaused = paused
@@ -305,9 +351,11 @@ sub ShowPlayerControls(paused as boolean)
     m.seekTarget = 0
     if m.video <> invalid and m.video.position <> invalid then m.seekTarget = Int(m.video.position)
     if m.pauseTitle <> invalid
-        title = ""
-        if m.playParams <> invalid and m.playParams.name <> invalid then title = m.playParams.name
-        m.pauseTitle.text = title
+        m.pauseTitle.text = PlayerOverlayTitle()
+    end if
+    if m.pauseEpisodeTitle <> invalid
+        m.pauseEpisodeTitle.text = PlayerOverlayEpisodeTitle()
+        m.pauseEpisodeTitle.visible = m.pauseEpisodeTitle.text <> ""
     end if
     if m.pauseActionsGroup <> invalid then m.pauseActionsGroup.visible = true
     UpdateSeekDisplay()
@@ -384,17 +432,143 @@ end function
 
 function CurrentCaptionTrack() as string
     if m.video = invalid then return ""
-    if m.captionSelection <> invalid and m.captionSelection <> "" then return m.captionSelection
+    ' Ask Roku first: it may auto-select an embedded track after the app's
+    ' pre-play add-on selection, so the cached request is not always what is
+    ' actually rendering.
     if m.video.HasField("currentSubtitleTrack")
         current = m.video.currentSubtitleTrack
         if current <> invalid and Type(current) = "roString" and current <> "" then return current
     end if
+    if m.captionSelection <> invalid and m.captionSelection <> "" then return m.captionSelection
     if m.video.HasField("subtitleTrack")
         selected = m.video.subtitleTrack
         if selected <> invalid and Type(selected) = "roString" then return selected
     end if
     return ""
 end function
+
+function SubtitleTrackNamesMatch(leftName as dynamic, rightName as dynamic) as boolean
+    leftText = LCase(StringOf(leftName).Trim())
+    rightText = LCase(StringOf(rightName).Trim())
+    return leftText <> "" and leftText = rightText
+end function
+
+' Resolve a candidate through the list Roku is displaying. The media player can
+' expose a live identifier only after playback begins, while the app also keeps
+' the pre-play URL/track it requested. Validate each source against this exact
+' list so a stale or reformatted identifier cannot leave every row unchecked.
+function CaptionTrackFromList(tracks as object, candidate as dynamic) as string
+    if tracks = invalid or StringOf(candidate).Trim() = "" then return ""
+    for each track in tracks
+        trackName = StringOf(track.Lookup("TrackName")).Trim()
+        if trackName = "" then trackName = StringOf(track.Lookup("trackName")).Trim()
+        if SubtitleTrackNamesMatch(trackName, candidate) then return trackName
+    next
+    return ""
+end function
+
+function SelectedCaptionTrackFromList(tracks as object) as string
+    if m.video = invalid then return ""
+    if m.video.HasField("currentSubtitleTrack")
+        matched = CaptionTrackFromList(tracks, m.video.currentSubtitleTrack)
+        if matched <> "" then return matched
+    end if
+    matched = CaptionTrackFromList(tracks, m.captionSelection)
+    if matched <> "" then return matched
+    if m.video.HasField("subtitleTrack")
+        matched = CaptionTrackFromList(tracks, m.video.subtitleTrack)
+        if matched <> "" then return matched
+    end if
+    return ""
+end function
+
+' Side-loaded add-on captions identify themselves with their download URL.
+' Roku's in-stream identifiers use a source/id pair such as mkv/english1,
+' dash/..., or eia608/1. The URL boundary also covers future stream sources.
+function IsEmbeddedSubtitleTrack(track as dynamic) as boolean
+    if track = invalid then return false
+    trackName = StringOf(track.Lookup("TrackName")).Trim()
+    if trackName = "" then trackName = StringOf(track.Lookup("trackName")).Trim()
+    if trackName = "" then return false
+    lowered = LCase(trackName)
+    ' Roku prefixes side-loaded URLs after playback starts (for example
+    ' <dev_3_0>https://...). Search the whole identifier, not only its start,
+    ' or an external SRT is mistaken for an embedded stream track.
+    if Instr(0, lowered, "http://") >= 0 then return false
+    if Instr(0, lowered, "https://") >= 0 then return false
+    return Instr(0, trackName, "/") > 0
+end function
+
+' Compare the two-letter Roku locale with either ISO-639-1 or the common
+' ISO-639-2 codes found in MKV tracks.
+function SubtitleLanguageFamily(value as dynamic) as string
+    language = LCase(StringOf(value).Trim())
+    if language = "" then return ""
+    if Instr(0, language, "_") = 2 or Instr(0, language, "-") = 2 then return Left(language, 2)
+    aliases = {
+        eng: "en", spa: "es", fre: "fr", fra: "fr", ger: "de", deu: "de"
+        ita: "it", por: "pt", rus: "ru", jpn: "ja", kor: "ko", chi: "zh"
+        zho: "zh", ara: "ar", hin: "hi", dut: "nl", nld: "nl", pol: "pl"
+        tur: "tr", swe: "sv", nor: "no", dan: "da", fin: "fi", cze: "cs"
+        ces: "cs", hun: "hu", rum: "ro", ron: "ro", gre: "el", ell: "el"
+        heb: "he", ind: "id", tha: "th", vie: "vi", ukr: "uk"
+    }
+    if aliases.DoesExist(language) then return aliases[language]
+    return language
+end function
+
+function PreferredEmbeddedSubtitleTrack(tracks as object) as dynamic
+    if tracks = invalid then return invalid
+    wanted = SubtitleLanguageFamily(DeviceLocale())
+    wantedOrdinal = 1
+    if m.captionPreferenceSet and m.captionPreferenceEnabled and m.captionPreferenceEmbedded
+        preferred = SubtitleLanguageFamily(m.captionPreferenceLanguage)
+        if preferred <> "" then wanted = preferred
+        wantedOrdinal = m.captionPreferenceOrdinal
+        if wantedOrdinal < 1 then wantedOrdinal = 1
+    end if
+
+    firstEmbedded = invalid
+    firstEnglish = invalid
+    firstWanted = invalid
+    wantedCount = 0
+    for each track in tracks
+        if IsEmbeddedSubtitleTrack(track)
+            if firstEmbedded = invalid then firstEmbedded = track
+            language = SubtitleLanguageFamily(track.Lookup("language"))
+            if language = "en" and firstEnglish = invalid then firstEnglish = track
+            if wanted <> "" and language = wanted
+                wantedCount = wantedCount + 1
+                if firstWanted = invalid then firstWanted = track
+                if wantedCount = wantedOrdinal then return track
+            end if
+        end if
+    next
+    if firstWanted <> invalid then return firstWanted
+    if firstEnglish <> invalid then return firstEnglish
+    return firstEmbedded
+end function
+
+' Embedded subtitles arrive only after Roku opens the stream. Prefer them
+' automatically because their timing and authored placement belong to this
+' exact video. Explicit Off/external choices still win; an explicit embedded
+' choice is rematched by language on the next episode.
+sub onAvailableSubtitleTracksChanged()
+    if m.video = invalid then return
+    if m.captionPreferenceSet and (not m.captionPreferenceEnabled or not m.captionPreferenceEmbedded) then return
+    tracks = m.video.availableSubtitleTracks
+    embedded = PreferredEmbeddedSubtitleTrack(tracks)
+    if embedded = invalid then return
+    trackName = StringOf(embedded.Lookup("TrackName")).Trim()
+    if trackName = "" then trackName = StringOf(embedded.Lookup("trackName")).Trim()
+    if trackName = "" then return
+    if CaptionIsOn() and SubtitleTrackNamesMatch(CurrentCaptionTrack(), trackName) then return
+    m.captionSelection = trackName
+    if m.video.HasField("subtitleTrack") then m.video.subtitleTrack = trackName
+    SetCaptionMode("on")
+    print "[captions] preferred embedded track -> " ; trackName
+    UpdatePausedControlFocus()
+end sub
 
 ' Caption selection lives in the player chrome as well as Roku's * dialog. The
 ' list comes from Video.availableSubtitleTracks, so it includes both add-on SRT/
@@ -406,25 +580,42 @@ sub ShowCaptionChoice()
         tracks = m.video.availableSubtitleTracks
     end if
     captionOn = CaptionIsOn()
-    selectedTrack = CurrentCaptionTrack()
+    selectedTrack = SelectedCaptionTrackFromList(tracks)
     mark = Chr(10003) + "  "
     offLabel = Lang("player", "captionsOff")
     selectedButton = 0
     if not captionOn then offLabel = mark + offLabel
     buttons = [offLabel]
     m.captionDialogTracks = []
+    languageCounts = {}
     for each track in tracks
         trackName = StringOf(track.Lookup("TrackName"))
         if trackName = "" then trackName = StringOf(track.Lookup("trackName"))
         if trackName <> ""
             description = StringOf(track.Lookup("Description"))
             if description = "" then description = Lang("player", "captionsFallback")
-            if captionOn and trackName = selectedTrack
-                description = mark + description
+            embedded = IsEmbeddedSubtitleTrack(track)
+            displayDescription = description
+            if embedded then displayDescription = description + " · " + Lang("player", "captionsEmbedded")
+            language = LCase(StringOf(track.Lookup("language")).Trim())
+            label = LCase(description.Trim())
+            identity = language
+            if identity = "" then identity = label
+            ordinal = 1
+            if languageCounts.DoesExist(identity) then ordinal = languageCounts[identity] + 1
+            languageCounts[identity] = ordinal
+            if captionOn and SubtitleTrackNamesMatch(trackName, selectedTrack)
+                displayDescription = mark + displayDescription
                 selectedButton = buttons.Count()
             end if
-            buttons.Push(description)
-            m.captionDialogTracks.Push(trackName)
+            buttons.Push(displayDescription)
+            m.captionDialogTracks.Push({
+                trackName: trackName
+                language: language
+                label: label
+                ordinal: ordinal
+                embedded: embedded
+            })
         end if
     next
     buttons.Push(Lang("common", "cancel"))
@@ -443,15 +634,42 @@ sub onCaptionChoice()
     scene.dialog = invalid
     if index = 0
         if m.video.HasField("globalCaptionMode") then m.video.globalCaptionMode = "Off"
+        m.captionSelection = ""
+        m.captionPreferenceSet = true
+        m.captionPreferenceEnabled = false
+        RememberCaptionPreferenceTitle()
         UpdatePausedControlFocus()
         return
     end if
     trackIndex = index - 1
     if m.captionDialogTracks = invalid or trackIndex < 0 or trackIndex >= m.captionDialogTracks.Count() then return
-    m.captionSelection = m.captionDialogTracks[trackIndex]
-    if m.video.HasField("subtitleTrack") then m.video.subtitleTrack = m.captionDialogTracks[trackIndex]
+    selection = m.captionDialogTracks[trackIndex]
+    m.captionSelection = selection.trackName
+    m.captionPreferenceSet = true
+    m.captionPreferenceEnabled = true
+    m.captionPreferenceLanguage = selection.language
+    m.captionPreferenceLabel = selection.label
+    m.captionPreferenceOrdinal = selection.ordinal
+    m.captionPreferenceEmbedded = selection.embedded
+    RememberCaptionPreferenceTitle()
+    if m.video.HasField("subtitleTrack") then m.video.subtitleTrack = selection.trackName
     if m.video.HasField("globalCaptionMode") then m.video.globalCaptionMode = "On"
     UpdatePausedControlFocus()
+end sub
+
+sub RememberCaptionPreferenceTitle()
+    m.captionPreferenceMetaId = ""
+    if m.playParams <> invalid then m.captionPreferenceMetaId = StringOf(m.playParams.metaId)
+end sub
+
+sub ResetCaptionPreference()
+    m.captionPreferenceSet = false
+    m.captionPreferenceEnabled = false
+    m.captionPreferenceLanguage = ""
+    m.captionPreferenceLabel = ""
+    m.captionPreferenceOrdinal = 1
+    m.captionPreferenceEmbedded = false
+    m.captionPreferenceMetaId = ""
 end sub
 
 sub onPlayerUiTick()
@@ -1264,7 +1482,15 @@ sub onSubtitleResult()
     ' The built array is a snapshot of the raw list, so it has to be rebuilt
     ' before the newly appended tracks can reach the content node.
     m.subtitleNodesApplied = false
-    if firstTracks then m.subtitleIndex = m.subtitlePicker.PickTrack(m.subtitleTracks, DeviceLocale())
+    if m.captionPreferenceSet
+        if m.captionPreferenceEnabled
+            m.subtitleIndex = PreferredSubtitleIndex()
+        else
+            m.subtitleIndex = -1
+        end if
+    else
+        if firstTracks then m.subtitleIndex = m.subtitlePicker.PickTrack(m.subtitleTracks, DeviceLocale())
+    end if
 
     ' Everyone ranked is still worth asking, even though the list already has
     ' tracks in it.
@@ -1397,6 +1623,35 @@ function SelectedSubtitleTrack() as string
     if rawTrack.DoesExist("url") and rawTrack.url <> invalid then url = rawTrack.url
     if url = "" and rawTrack.DoesExist("downloadUrl") and rawTrack.downloadUrl <> invalid then url = rawTrack.downloadUrl
     return url
+end function
+
+' Match a user-selected caption across episodes by language and its ordinal
+' within that language. Track URLs contain the episode id and cannot be reused.
+' Falling back to the first same-language track keeps the preference useful when
+' a provider returns fewer duplicate tracks for the next episode.
+function PreferredSubtitleIndex() as integer
+    if m.subtitleTracks = invalid or not m.captionPreferenceEnabled then return -1
+    wantedOrdinal = m.captionPreferenceOrdinal
+    if wantedOrdinal < 1 then wantedOrdinal = 1
+    firstMatch = -1
+    ordinal = 0
+    for i = 0 to m.subtitleTracks.Count() - 1
+        track = m.subtitleTracks[i]
+        language = m.subtitlePicker.TrackLang(track)
+        label = LCase(TrackDisplayName(track))
+        matches = false
+        if m.captionPreferenceLanguage <> ""
+            matches = language = m.captionPreferenceLanguage
+        else if m.captionPreferenceLabel <> ""
+            matches = label = m.captionPreferenceLabel
+        end if
+        if matches
+            ordinal = ordinal + 1
+            if firstMatch < 0 then firstMatch = i
+            if ordinal = wantedOrdinal then return i
+        end if
+    end for
+    return firstMatch
 end function
 
 ' The content node currently driving the player, or invalid before StartPlayback.

@@ -73,6 +73,8 @@
             <Rectangle translation="[0, 825]" width="1920" height="255" color="0x090812E8" />
             <Label id="pauseTitle" translation="[180, 880]" width="1050" height="58"
                 font="font:MediumSystemFont" />
+            <Label id="pauseEpisodeTitle" translation="[180, 936]" width="1050" height="32"
+                font="font:SmallSystemFont" />
             <Group id="seekGroup" translation="[180, 990]">
                 <Rectangle id="seekFocus" translation="[-18, -22]" width="1596" height="70"
                     color="0x00000000" />
