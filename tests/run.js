@@ -121,6 +121,18 @@ function checkDeferredVideoPlayContract() {
     if (!/ObserveField\(\s*"fire"\s*,\s*"onPlayKickFire"\s*\)/.test(code)) {
         err('PlayerScreen.brs does not ObserveField("fire", "onPlayKickFire") on the playKick Timer — an unobserved Timer fires into nothing and the deferred play never happens');
     }
+
+    const keyHandler = /function\s+OnKeyEvent\([^)]*\)[\s\S]*?end\s+function/i.exec(code);
+    if (!keyHandler || !/key\s*=\s*"OK"/.test(keyHandler[0])) {
+        err('PlayerScreen.OnKeyEvent does not handle the Roku center/OK key');
+    } else {
+        if (!/state\s*=\s*"playing"[\s\S]*?control\s*=\s*"pause"/i.test(keyHandler[0])) {
+            err('PlayerScreen center/OK does not pause a playing video');
+        }
+        if (!/state\s*=\s*"paused"[\s\S]*?control\s*=\s*"resume"/i.test(keyHandler[0])) {
+            err('PlayerScreen center/OK does not resume a paused video');
+        }
+    }
     const kick = new RegExp('^[ \\t]*sub\\s+onPlayKickFire\\s*\\(', 'm').exec(code);
     if (!kick) {
         err('PlayerScreen.brs has no onPlayKickFire() — the field observer names a handler that does not exist, which is a no-op, so the deferred play never happens');
@@ -4071,6 +4083,10 @@ function checkMetaFieldCoercionContract() {
     }
 
     const setLine = (player.match(/.*callFunc\("LibrarySetPosition".*/) || [''])[0];
+    const setArgs = setLine.match(/callFunc\((.*)\)/);
+    if (setArgs && (setArgs[1].match(/,/g) || []).length > 10) {
+        err('PlayerScreen.brs sends more than ten arguments through LibrarySetPosition callFunc — Roku rejects the component call before the store runs');
+    }
     if (setLine.includes('params.poster')) {
         err('PlayerScreen.brs passes params.poster/posterShape straight into LibrarySetPosition — normalize a missing field to "" first');
     }
@@ -4520,6 +4536,9 @@ const ENGLISH_BY_DECISION = [
     // recognises. Both are English by definition.
     'On',
     'Off',
+    'White',
+    '100%',
+    'Drop shadow (right)',
     'no playable tracks',
     'not supported',
     // The DirectPlay verdict state codes. Compared, never displayed: the
@@ -4618,7 +4637,9 @@ function checkNoUntranslatedLiterals() {
         // They are English by nature — a trace is a debugging tool, not copy.
         const printed = new Set();
         for (const line of src.split('\n')) {
-            if (!/\bprint\b/.test(line)) continue;
+            // BrightScript's `?` is the shorthand form of `print`; treat both
+            // as console-only diagnostics rather than untranslated UI copy.
+            if (!/\bprint\b/.test(line) && !/^\s*\?/.test(line)) continue;
             for (const m of line.matchAll(/"([^"]*)"/g)) printed.add(m[1]);
         }
         // A KEY PRESS name is the platform's, not ours: `if key = "OK"` names

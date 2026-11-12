@@ -3,9 +3,8 @@
     <!-- Minimal player pushed from StreamsScreen with { stream, serverAddress,
          metaType, metaId, videoId, season, episode, position, name, poster,
          logo, ... }. The stream is resolved here (logo pulse while the torrent
-         engine warms up), then playback runs on Roku's native player chrome —
-         the pause screen, seek/trick-play, and Options/captions dialog belong
-         to the platform. Pops on Back and records the watched position through
+         engine warms up), then playback runs on Roku's Video node with the
+         app-owned pause controls layered above it. Pops on Back and records the watched position through
          LibraryStore.SetPosition. The buffering logo is the one branded piece
          that stays.
          A static child of MainScene, reused across plays: OnBackPressed only
@@ -22,6 +21,9 @@
              EnsureSubtitleProviders. -->
         <function name="EnsureSubtitleProviders" />
         <field id="watchStateUpdate" type="assocarray" alwaysNotify="true" />
+        <!-- A genuine series completion publishes the next episode here. The
+             Scene owns stack replacement; the player never navigates itself. -->
+        <field id="playbackAction" type="assocarray" alwaysNotify="true" />
     </interface>
 
     <script type="text/brightscript" uri="pkg:/source/stores/SubtitlesStore.bs" />
@@ -29,6 +31,7 @@
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/StreamIdentity.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/AddonJson.brs" />
 
     <children>
@@ -37,8 +40,8 @@
             id="video"
             width="1920"
             height="1080"
-            enableUI="true"
-            enableTrickPlay="true" />
+            enableUI="false"
+            enableTrickPlay="false" />
         <Label
             id="playerStatus"
             translation="[40, 812]"
@@ -46,6 +49,65 @@
             height="44"
             font="font:MediumSystemFont"
             horizAlign="center" />
+
+        <!-- Live statistics from the stock Stremio server. Kept outside the
+             artwork group so it stays readable whether the title has a logo or
+             only the plain player background. -->
+        <Group id="torrentStatsGroup" visible="false" translation="[710, 724]">
+            <Rectangle width="500" height="48" color="0x12101BCC" />
+            <Label
+                id="torrentStatsText"
+                translation="[14, 4]"
+                width="472"
+                height="40"
+                font="font:SmallSystemFont"
+                horizAlign="center"
+                vertAlign="center" />
+        </Group>
+
+        <!-- App-owned player chrome. Disabling Video's native UI makes OK pause
+             reliably, so this overlay supplies the missing timeline and actions.
+             Left/Right seeks while the timeline has focus; Down reaches the
+             compact icon row. -->
+        <Group id="pauseActionsGroup" visible="false">
+            <Rectangle width="1920" height="1080" color="0x00000066" />
+            <Rectangle translation="[0, 680]" width="1920" height="400" color="0x090812DD" />
+            <Label id="pauseTitle" translation="[180, 770]" width="1560" height="48"
+                font="font:MediumSystemFont" />
+            <Group id="seekGroup" translation="[180, 840]">
+                <Rectangle id="seekFocus" translation="[-18, -22]" width="1596" height="70"
+                    color="0x00000000" />
+                <Rectangle id="seekTrack" translation="[0, 9]" width="1560" height="8"
+                    color="0x777483CC" />
+                <Rectangle id="seekFill" translation="[0, 9]" width="0" height="8"
+                    color="0x8C65FFFF" />
+                <Rectangle id="seekKnob" translation="[-8, 1]" width="24" height="24"
+                    color="0xFFFFFFFF" />
+                <Label id="seekElapsed" translation="[0, 27]" width="220" height="38"
+                    font="font:SmallSystemFont" />
+                <Label id="seekDuration" translation="[1340, 27]" width="220" height="38"
+                    font="font:SmallSystemFont" horizAlign="right" />
+            </Group>
+            <Group id="pauseIconRow" translation="[820, 932]">
+                <Group id="pauseResumeAction">
+                    <Rectangle id="pauseResumeBg" width="78" height="78" color="0x242136F2" />
+                    <Poster uri="pkg:/images/play.png" translation="[15, 15]" width="48" height="48"
+                        loadDisplayMode="scaleToFit" blendColor="0xFFFFFFFF" />
+                </Group>
+                <Group id="pauseNextAction" translation="[142, 0]">
+                    <Rectangle id="pauseNextBg" width="78" height="78" color="0x242136F2" />
+                    <Poster uri="pkg:/images/arrow_right.png" translation="[9, 15]" width="48" height="48"
+                        loadDisplayMode="scaleToFit" blendColor="0xFFFFFFFF" />
+                    <Poster uri="pkg:/images/arrow_right.png" translation="[25, 15]" width="48" height="48"
+                        loadDisplayMode="scaleToFit" blendColor="0xFFFFFFFF" />
+                </Group>
+                <Group id="pauseCaptionsAction" translation="[284, 0]">
+                    <Rectangle id="pauseCaptionsBg" width="78" height="78" color="0x242136F2" />
+                    <Label id="pauseCaptionsText" translation="[6, 17]" width="66" height="44"
+                        text="CC" font="font:MediumBoldSystemFont" horizAlign="center" vertAlign="center" />
+                </Group>
+            </Group>
+        </Group>
 
         <Group id="bufferingGroup" visible="false" translation="[510, 287]">
             <Poster
@@ -98,5 +160,7 @@
              way playKick does for the first play. -->
         <Timer id="stallWatch" duration="1" repeat="true" />
         <Timer id="recoverKick" duration="0.5" repeat="false" />
+        <Timer id="playerUiTick" duration="0.5" repeat="true" />
+        <Timer id="nextWaitTimeout" duration="45" repeat="false" />
     </children>
 </component>

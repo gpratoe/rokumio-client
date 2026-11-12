@@ -75,6 +75,7 @@ sub init()
     m.directPlayCapsTask = invalid
     m.directPlayCapabilities = invalid
     m.pendingPlayIndex = -1
+    m.autoPlay = invalid
 end sub
 
 function OnEnter(params as object) as void
@@ -110,6 +111,7 @@ function OnEnter(params as object) as void
     CancelStreamsLoad()
     CancelEpisodeLoad()
     m.params = params
+    m.autoPlay = params.autoPlay
     ApplyParamsChrome(params)
 
     m.streams = []
@@ -355,6 +357,35 @@ sub onStreamsLoaded(event as object)
     if m.pendingCount > 0 then m.pendingCount = m.pendingCount - 1
     if index = m.activeIndex then RenderActiveProvider()
     UpdateStreamsStatus()
+    MaybeAutoPlayProvider(index)
+end sub
+
+' Autoplay only through the provider the viewer chose for the previous episode.
+' Provider ordering can change as account add-ons sync, so identity is the
+' address rather than the old provider index. Reuse the old stream position
+' when possible; otherwise the provider's first result is its best-ranked one.
+' No cross-provider guess is made: an empty/failed preferred provider leaves the
+' ordinary picker on screen.
+sub MaybeAutoPlayProvider(providerIndex as integer)
+    if m.autoPlay = invalid or m.providers = invalid then return
+    if providerIndex < 0 or providerIndex >= m.providers.Count() then return
+    provider = m.providers[providerIndex]
+    if provider.address <> m.autoPlay.providerAddress then return
+
+    auto = m.autoPlay
+    m.autoPlay = invalid
+    if provider.streams = invalid or provider.streams.Count() = 0 then return
+
+    m.activeIndex = providerIndex
+    index = 0
+    if auto.streamIndex <> invalid and auto.streamIndex >= 0 and auto.streamIndex < provider.streams.Count()
+        index = auto.streamIndex
+    end if
+    m.streams = provider.streams
+    mode = auto.directPlayMode
+    if mode <> "on" and mode <> "off" then mode = DirectPlayMode()
+    print "[next] provider=" ; provider.name ; " stream=" ; index ; " — autoplay"
+    PushPlayer(index, mode)
 end sub
 
 ' Fresh push: point the header at the first provider (known synchronously from
@@ -528,6 +559,8 @@ sub onEpisodeMetaLoaded()
 
     if result = invalid or not result.ok or result.meta = invalid then return
     if m.params = invalid then return
+
+    if m.stores <> invalid then m.stores.episodes.callFunc("EpisodesCacheFullMeta", result.meta)
 
     episode = EpisodeInMeta(result.meta, m.params.season, m.params.episode)
     if episode = invalid then return
@@ -877,6 +910,10 @@ sub PushPlayer(index as integer, playMode as string)
             poster: m.params.poster
             posterShape: m.params.posterShape
             logo: m.params.logo
+            background: m.params.background
+            addonAddress: m.params.addonAddress
+            providerAddress: m.providers[m.activeIndex].address
+            streamIndex: index
         }
     }
 end sub
@@ -961,6 +998,7 @@ function OnExit() as void
     m.activeIndex = -1
     m.listFilled = false
     m.params = invalid
+    m.autoPlay = invalid
     m.status.text = ""
     m.streamsPlaceholder.visible = false
     EmptyStreamsList()

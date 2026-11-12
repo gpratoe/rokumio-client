@@ -196,6 +196,37 @@ class EpisodesStore
         return ids
     end function
 
+    ' The regular episode immediately following currentVideoId in the same
+    ' display order used by EpisodesScreen and the watched bitfield. Specials
+    ' are deliberately excluded: season 0 is displayed after the regular run,
+    ' but autoplaying from a finale into an unrelated special is surprising.
+    '
+    ' Returns the original episode metadata plus the canonical stream videoId,
+    ' or invalid when the current episode is unknown or already the final one.
+    function NextEpisode(seriesId as string, currentVideoId as string, meta as object) as dynamic
+        if seriesId = "" or currentVideoId = "" or meta = invalid then return invalid
+        data = m.SeriesData(seriesId, meta)
+        foundCurrent = false
+        for each seasonRun in data.runs
+            if seasonRun = invalid or seasonRun.season = invalid or seasonRun.season = 0 then continue for
+            for each episode in seasonRun.episodes
+                if episode = invalid or episode.episode = invalid then continue for
+                videoId = m.ResolveVideoId(seriesId, seasonRun.season, episode.episode)
+                if foundCurrent
+                    return {
+                        videoId: videoId
+                        season: seasonRun.season
+                        episode: episode.episode
+                        name: episode.name
+                        overview: episode.overview
+                    }
+                end if
+                if videoId = currentVideoId then foundCurrent = true
+            end for
+        end for
+        return invalid
+    end function
+
     ' Whether a meta handed in from a list screen is too sparse to render a hero:
     ' catalog/search rows usually carry only { id, type, name, poster }, so the
     ' Detail description, rating line and background are blank. Returns false for

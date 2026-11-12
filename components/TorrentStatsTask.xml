@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="TorrentStatsTask" extends="Task">
+    <interface>
+        <field id="serverAddress" type="string" value="" />
+        <field id="infoHash" type="string" value="" />
+        <!-- A streaming field rather than a one-shot result: the player keeps
+             this task alive only while its loading overlay is visible. -->
+        <field id="stats" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/source/stores/Transport.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/AddonJson.brs" />
+    <script type="text/brightscript" uri="pkg:/components/TorrentStatsTask.brs" />
+</component>

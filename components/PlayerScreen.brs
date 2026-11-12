@@ -15,11 +15,10 @@
 ' field; playback state is surfaced through the status label so a broken stream
 ' is a message, not a black screen.
 '
-' Transport is the platform's: the Video runs with enableUI and enableTrickPlay
-' on, so OK/play-pause show the native pause screen, Left/Right and FF/RW use
-' the native seek/trick-play UI, and "*" opens Roku's Options overlay with its
-' certification-mandated captions dialog. The screen only owns the resolve
-' (pre-video) phase and teardown; Back records the position and pops.
+' Transport is the platform's, but the built-in trick-play UI is disabled: a
+' focused Video consumes OK to reveal that UI before the parent OnKeyEvent ever
+' sees it. The screen owns pause/resume and its paused action row so one center
+' press really pauses. Back records the position and pops.
 '
 ' Subtitle captions are fetched off-thread (SubtitleLoaderTask) from an add-on
 ' advertising the "subtitles" resource (OpenSubtitles v3 is the built-in, an
@@ -59,9 +58,33 @@ sub init()
     m.logoBack = m.top.FindNode("logoBack")
     m.logoFront = m.top.FindNode("logoFront")
     m.preVideoPulse = m.top.FindNode("preVideoPulse")
+    m.torrentStatsGroup = m.top.FindNode("torrentStatsGroup")
+    m.torrentStatsText = m.top.FindNode("torrentStatsText")
+    m.torrentStatsTask = invalid
+    m.pauseActionsGroup = m.top.FindNode("pauseActionsGroup")
+    m.pauseResumeBg = m.top.FindNode("pauseResumeBg")
+    m.pauseNextBg = m.top.FindNode("pauseNextBg")
+    m.pauseCaptionsBg = m.top.FindNode("pauseCaptionsBg")
+    m.pauseCaptionsText = m.top.FindNode("pauseCaptionsText")
+    m.pauseTitle = m.top.FindNode("pauseTitle")
+    m.seekFocus = m.top.FindNode("seekFocus")
+    m.seekFill = m.top.FindNode("seekFill")
+    m.seekKnob = m.top.FindNode("seekKnob")
+    m.seekElapsed = m.top.FindNode("seekElapsed")
+    m.seekDuration = m.top.FindNode("seekDuration")
+    m.pauseActionIndex = 0
+    m.pauseHasNext = false
+    m.playNextWhenReady = false
     t = Theme()
     m.top.FindNode("playerBg").color = t.playerBg
     m.status.color = t.textPrimary
+    if m.torrentStatsText <> invalid then m.torrentStatsText.color = t.textPrimary
+    if m.pauseTitle <> invalid then m.pauseTitle.color = t.textPrimary
+    if m.pauseCaptionsText <> invalid then m.pauseCaptionsText.color = t.textPrimary
+    if m.seekElapsed <> invalid then m.seekElapsed.color = t.textSecondary
+    if m.seekDuration <> invalid then m.seekDuration.color = t.textSecondary
+    m.playerUiTick = m.top.FindNode("playerUiTick")
+    if m.playerUiTick <> invalid then m.playerUiTick.ObserveField("fire", "onPlayerUiTick")
 
     ' Observed here rather than in CreateVideo: this screen is a static child
     ' that survives every pop, so CreateVideo runs once per play and observing
@@ -76,6 +99,7 @@ sub init()
     m.subtitleCursor = 0
     m.subtitleTracks = invalid
     m.subtitleIndex = -1
+    m.captionSelection = ""
     m.subtitleNodesApplied = false
     m.subtitleAsked = ""
     m.subtitleReached = 0
@@ -108,6 +132,14 @@ sub init()
     if m.stallWatch <> invalid then m.stallWatch.ObserveField("fire", "onStallWatch")
     m.recoverKick = m.top.FindNode("recoverKick")
     if m.recoverKick <> invalid then m.recoverKick.ObserveField("fire", "onRecoverKick")
+    m.nextStreamTask = invalid
+    m.nextResolveTask = invalid
+    m.nextPrefetch = invalid
+    m.nextPrepared = invalid
+    m.pendingPreparedNext = invalid
+    m.nextPrefetchStarted = false
+    m.nextWaitTimeout = m.top.FindNode("nextWaitTimeout")
+    if m.nextWaitTimeout <> invalid then m.nextWaitTimeout.ObserveField("fire", "onNextWaitTimeout")
     ResetRecovery()
 end sub
 
@@ -121,6 +153,10 @@ function OnEnter(params as object) as void
     m.playParams = params
     m.saved = false
     m.hasPlayed = false
+    m.nextRequested = false
+    m.playNextWhenReady = false
+    HidePausedControls()
+    CancelNextPrefetch()
     ' The per-play flags reset at the real per-play boundary. m.playStarted in
     ' particular: LaunchSubtitleFetch refuses a fetch while it stands, so a flag
     ' left over from the previous play silently kills every play after the
@@ -160,8 +196,289 @@ function OnEnter(params as object) as void
     if params.directPlayMode = "on" or params.directPlayMode = "off" then playMode = params.directPlayMode
     m.playMode = playMode
     StartResolve(params.stream, params.serverAddress, ResolveOrdinal(params.season), ResolveOrdinal(params.episode))
+    StartTorrentStats()
     StartSubtitles(params)
 end function
+
+' Start a live Stremio torrent-statistics subscription for the loading card.
+' A URL stream wins over an infoHash just as PlaybackStore.IsTorrent does, so
+' direct/debrid streams never display invented peer data.
+sub StartTorrentStats()
+    if m.torrentStatsTask <> invalid or m.playParams = invalid then return
+    params = m.playParams
+    if params.stream = invalid or params.serverAddress = invalid or params.serverAddress = "" then return
+    stream = params.stream
+    ' Lookup + type guard deliberately mirrors PlaybackStore.AsText. url and
+    ' infoHash are not normalized at the add-on boundary because coercing a
+    ' numeric value would manufacture a URL/hash that should not exist.
+    streamUrl = stream.Lookup("url")
+    if streamUrl <> invalid and Type(streamUrl) = "roString" and streamUrl.Trim() <> "" then return
+    hash = ""
+    hashValue = stream.Lookup("infoHash")
+    if hashValue <> invalid and Type(hashValue) = "roString" then hash = hashValue.Trim()
+    if hash = "" then return
+
+    task = CreateObject("roSGNode", "TorrentStatsTask")
+    task.id = "torrentStats"
+    m.top.AppendChild(task)
+    task.serverAddress = params.serverAddress
+    task.infoHash = hash
+    task.ObserveField("stats", "onTorrentStats")
+    m.torrentStatsTask = task
+    if m.torrentStatsGroup <> invalid then m.torrentStatsGroup.visible = true
+    if m.torrentStatsText <> invalid
+        m.torrentStatsText.text = Fill(Lang("player", "torrentStats"), {
+            peers: "0"
+            download: TorrentRateText(0)
+        })
+    end if
+    task.control = "RUN"
+end sub
+
+sub onTorrentStats()
+    if m.torrentStatsTask = invalid or m.torrentStatsText = invalid then return
+    value = m.torrentStatsTask.stats
+    if value = invalid then return
+    peers = 0
+    if value.peers <> invalid then peers = Int(value.peers)
+    m.torrentStatsText.text = Fill(Lang("player", "torrentStats"), {
+        peers: peers.ToStr()
+        download: TorrentRateText(value.downloadSpeed)
+    })
+    if m.torrentStatsGroup <> invalid then m.torrentStatsGroup.visible = true
+end sub
+
+sub StopTorrentStats()
+    if m.torrentStatsTask <> invalid
+        task = m.torrentStatsTask
+        m.torrentStatsTask = invalid
+        task.UnobserveField("stats")
+        task.control = "STOP"
+        if task.GetParent() <> invalid then m.top.RemoveChild(task)
+    end if
+    if m.torrentStatsGroup <> invalid then m.torrentStatsGroup.visible = false
+end sub
+
+' Human-sized byte rates matching Stremio's statistics display. One decimal is
+' retained for MB/s and KB/s; zero remains explicit so a stalled swarm is clear.
+function TorrentRateText(value as dynamic) as string
+    if value = invalid or value <= 0 then return "0 B/s"
+    if value >= 1048576
+        tenths = Int(value * 10 / 1048576)
+        return Int(tenths / 10).ToStr() + "." + (tenths mod 10).ToStr() + " MB/s"
+    end if
+    if value >= 1024
+        tenths = Int(value * 10 / 1024)
+        return Int(tenths / 10).ToStr() + "." + (tenths mod 10).ToStr() + " KB/s"
+    end if
+    return Int(value).ToStr() + " B/s"
+end function
+
+sub ShowPausedControls()
+    m.pauseActionIndex = 0
+    m.pauseHasNext = NextEpisodeParams() <> invalid
+    if m.pauseTitle <> invalid
+        title = ""
+        if m.playParams <> invalid and m.playParams.name <> invalid then title = m.playParams.name
+        m.pauseTitle.text = title
+    end if
+    if m.pauseActionsGroup <> invalid then m.pauseActionsGroup.visible = true
+    UpdateSeekDisplay()
+    if m.playerUiTick <> invalid
+        m.playerUiTick.control = "stop"
+        m.playerUiTick.control = "start"
+    end if
+    StartTorrentStats()
+    UpdatePausedControlFocus()
+end sub
+
+sub HidePausedControls()
+    if m.pauseActionsGroup <> invalid then m.pauseActionsGroup.visible = false
+    if m.playerUiTick <> invalid then m.playerUiTick.control = "stop"
+end sub
+
+sub UpdatePausedControlFocus()
+    t = Theme()
+    idle = "0x242136F2"
+    disabled = "0x181620B8"
+    if m.seekFocus <> invalid
+        if m.pauseActionIndex = 0 then m.seekFocus.color = "0xFFFFFF18" else m.seekFocus.color = "0x00000000"
+    end if
+    if m.pauseResumeBg <> invalid
+        if m.pauseActionIndex = 1 then m.pauseResumeBg.color = t.accent else m.pauseResumeBg.color = idle
+    end if
+    if m.pauseNextBg <> invalid
+        if not m.pauseHasNext
+            m.pauseNextBg.color = disabled
+        else if m.pauseActionIndex = 2
+            m.pauseNextBg.color = t.accent
+        else
+            m.pauseNextBg.color = idle
+        end if
+    end if
+    if m.pauseCaptionsBg <> invalid
+        if m.pauseActionIndex = 3 then m.pauseCaptionsBg.color = t.accent else m.pauseCaptionsBg.color = idle
+    end if
+    if m.pauseCaptionsText <> invalid
+        if CaptionIsOn() then m.pauseCaptionsText.text = "CC " + Chr(10003) else m.pauseCaptionsText.text = "CC"
+    end if
+end sub
+
+function CaptionIsOn() as boolean
+    if m.video = invalid or not m.video.HasField("globalCaptionMode") then return false
+    mode = m.video.globalCaptionMode
+    return mode <> invalid and LCase(mode) <> "off"
+end function
+
+function CurrentCaptionTrack() as string
+    if m.video = invalid then return ""
+    if m.captionSelection <> invalid and m.captionSelection <> "" then return m.captionSelection
+    if m.video.HasField("currentSubtitleTrack")
+        current = m.video.currentSubtitleTrack
+        if current <> invalid and Type(current) = "roString" and current <> "" then return current
+    end if
+    if m.video.HasField("subtitleTrack")
+        selected = m.video.subtitleTrack
+        if selected <> invalid and Type(selected) = "roString" then return selected
+    end if
+    return ""
+end function
+
+' Caption selection lives in the player chrome as well as Roku's * dialog. The
+' list comes from Video.availableSubtitleTracks, so it includes both add-on SRT/
+' TTML tracks and embedded tracks discovered after playback begins.
+sub ShowCaptionChoice()
+    if m.video = invalid then return
+    tracks = []
+    if m.video.HasField("availableSubtitleTracks") and m.video.availableSubtitleTracks <> invalid
+        tracks = m.video.availableSubtitleTracks
+    end if
+    captionOn = CaptionIsOn()
+    selectedTrack = CurrentCaptionTrack()
+    mark = Chr(10003) + "  "
+    offLabel = Lang("player", "captionsOff")
+    selectedButton = 0
+    if not captionOn then offLabel = mark + offLabel
+    buttons = [offLabel]
+    m.captionDialogTracks = []
+    for each track in tracks
+        trackName = StringOf(track.Lookup("TrackName"))
+        if trackName = "" then trackName = StringOf(track.Lookup("trackName"))
+        if trackName <> ""
+            description = StringOf(track.Lookup("Description"))
+            if description = "" then description = Lang("player", "captionsFallback")
+            if captionOn and trackName = selectedTrack
+                description = mark + description
+                selectedButton = buttons.Count()
+            end if
+            buttons.Push(description)
+            m.captionDialogTracks.Push(trackName)
+        end if
+    next
+    buttons.Push(Lang("common", "cancel"))
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = Lang("player", "captions")
+    dialog.buttons = buttons
+    dialog.ObserveField("buttonSelected", "onCaptionChoice")
+    m.top.GetScene().dialog = dialog
+    if dialog.HasField("focusButton") then dialog.focusButton = selectedButton
+end sub
+
+sub onCaptionChoice()
+    scene = m.top.GetScene()
+    if scene = invalid or scene.dialog = invalid then return
+    index = scene.dialog.buttonSelected
+    scene.dialog = invalid
+    if index = 0
+        if m.video.HasField("globalCaptionMode") then m.video.globalCaptionMode = "Off"
+        UpdatePausedControlFocus()
+        return
+    end if
+    trackIndex = index - 1
+    if m.captionDialogTracks = invalid or trackIndex < 0 or trackIndex >= m.captionDialogTracks.Count() then return
+    m.captionSelection = m.captionDialogTracks[trackIndex]
+    if m.video.HasField("subtitleTrack") then m.video.subtitleTrack = m.captionDialogTracks[trackIndex]
+    if m.video.HasField("globalCaptionMode") then m.video.globalCaptionMode = "On"
+    UpdatePausedControlFocus()
+end sub
+
+sub onPlayerUiTick()
+    UpdateSeekDisplay()
+end sub
+
+' Keep the timeline independent of Roku's native trick-play chrome. The Video
+' node still reports position/duration while paused, so the bar remains exact
+' after a seek and on resumed Continue Watching playback.
+sub UpdateSeekDisplay()
+    if m.video = invalid then return
+    position = m.video.position
+    duration = m.video.duration
+    if position = invalid or position < 0 then position = 0
+    if duration = invalid or duration < 0 then duration = 0
+    fraction = 0
+    if duration > 0 then fraction = position / duration
+    if fraction < 0 then fraction = 0
+    if fraction > 1 then fraction = 1
+    width = Int(1560 * fraction)
+    if m.seekFill <> invalid then m.seekFill.width = width
+    if m.seekKnob <> invalid then m.seekKnob.translation = [width - 8, 1]
+    if m.seekElapsed <> invalid then m.seekElapsed.text = PlaybackTime(position)
+    if m.seekDuration <> invalid then m.seekDuration.text = PlaybackTime(duration)
+end sub
+
+function PlaybackTime(value as dynamic) as string
+    if value = invalid or value < 0 then value = 0
+    total = Int(value)
+    hours = Int(total / 3600)
+    minutes = Int((total mod 3600) / 60)
+    seconds = total mod 60
+    minuteText = minutes.ToStr()
+    if hours > 0 and minutes < 10 then minuteText = "0" + minuteText
+    secondText = seconds.ToStr()
+    if seconds < 10 then secondText = "0" + secondText
+    if hours > 0 then return hours.ToStr() + ":" + minuteText + ":" + secondText
+    return minuteText + ":" + secondText
+end function
+
+sub SeekPausedBy(delta as integer)
+    if m.video = invalid then return
+    if not m.video.HasField("seek") then return
+    position = m.video.position
+    duration = m.video.duration
+    if position = invalid then position = 0
+    target = Int(position) + delta
+    if target < 0 then target = 0
+    if duration <> invalid and duration > 0 and target > duration - 1 then target = Int(duration - 1)
+    m.video.seek = target
+    if m.seekElapsed <> invalid then m.seekElapsed.text = PlaybackTime(target)
+end sub
+
+' Stremio's explicit NextVideo action adapted to the Roku remote. A warm result
+' swaps immediately. If the viewer is early and nothing is warm yet, hold the
+' current frame and finish the same-provider prefetch before swapping.
+sub PlayNextFromPause()
+    if not m.pauseHasNext then return
+    HidePausedControls()
+    StopTorrentStats()
+    if m.nextPrepared <> invalid
+        StartNextEpisode()
+        return
+    end if
+
+    m.playNextWhenReady = true
+    m.status.text = Lang("player", "preparingNextEpisode")
+    if m.nextWaitTimeout <> invalid
+        m.nextWaitTimeout.control = "stop"
+        m.nextWaitTimeout.control = "start"
+    end if
+    if m.nextPrefetchStarted then return
+    nextParams = NextEpisodeParams()
+    if nextParams = invalid
+        m.playNextWhenReady = false
+        return
+    end if
+    LaunchNextPrefetch(nextParams, -1)
+end sub
 
 ' Kick stream resolution off the render thread. The task frees the UI while the
 ' torrent engine warms or an ambiguous direct URL gets a short format probe.
@@ -925,6 +1242,7 @@ sub ApplySubtitleIndex(content as object)
     end if
 
     content.subtitleConfig = { TrackName: selected }
+    m.captionSelection = selected
     SelectSubtitleTrack(selected)
     ' Force captions on only now, once a track with a real URL is confirmed
     ' selected. Turning captions on over a list the platform cannot load is how
@@ -1026,6 +1344,12 @@ end function
 sub CustomizeVideoNode()
     if m.video = invalid then return
 
+    ApplyCaptionStyle()
+    ' Seeking from our paused timeline should remain paused. Roku OS 15.1+
+    ' exposes this alongside the write-only seek field; older firmware simply
+    ' keeps its default behavior and the guarded seek path becomes a no-op.
+    if m.video.HasField("autoplayAfterSeek") then m.video.autoplayAfterSeek = false
+
     ' Before the trick-play tint and independent of it: the native buffering
     ' suppression has to be armed BEFORE playback so the initial retrieving bar is
     ' already opted out when it would otherwise appear. It does not depend on
@@ -1056,6 +1380,24 @@ sub CustomizeVideoNode()
     end try
 end sub
 
+' Stremio-style readable captions without the opaque black box. captionStyle is
+' a Video field (Roku OS 9.4+); keys omitted here continue to use the viewer's
+' system defaults. TTML/DFXP positioning remains owned by Roku's renderer.
+sub ApplyCaptionStyle()
+    if m.video = invalid or not m.video.HasField("captionStyle") then return
+    try
+        m.video.captionStyle = {
+            "Text/Color": "White"
+            "Text/Opacity": "100%"
+            "Text/Effect": "Drop shadow (right)"
+            "Background/Opacity": "Off"
+            "Window/Opacity": "Off"
+        }
+    catch e
+        print "[captions] caption style unavailable on this Roku OS: " ; e.message
+    end try
+end sub
+
 ' The platform's buffering feedback is NOT one widget — it is three internal
 ' nodes, and the app-owned logo reveal is meant to be the only one on screen:
 '
@@ -1064,10 +1406,9 @@ end sub
 '   - bufferingBar (documented READ_WRITE field, an internal ProgressBar): the
 '     bottom bar + percentage shown on a re-buffer.
 '
-' The only OFFICIAL way to kill all of them at once is enableUI = false, but that
-' also removes trick play, the pause screen, and BIF navigation — the whole native
-' chrome this screen depends on. So this suppresses the three internals directly
-' instead, leaving enableUI on.
+' The app now owns the pause controls and disables built-in UI so center presses
+' reach OnKeyEvent. These guards remain for firmware that still instantiates or
+' flashes the internal bars during the handoff.
 '
 ' Why it has to be re-run, not done once: the OS re-shows the bars and the wheel
 ' on EVERY buffer event. A single hide at play start is undone by the first
@@ -1168,6 +1509,9 @@ sub StartPlayback(url as string, streamFormat = "" as string, requestHeaders = i
 
     content = CreateObject("roSGNode", "ContentNode")
     content.url = url
+    ' Belt-and-braces with Video.enableUI=false in XML: content can carry its
+    ' own playback-UI preference, and it must not re-enable the native OK menu.
+    if content.HasField("VideoDisableUI") then content.VideoDisableUI = true
     params = m.playParams
     title = params.name
     if title = invalid then title = ""
@@ -1296,6 +1640,8 @@ sub onVideoStateChanged()
     if state = "playing"
         m.hasPlayed = true
         m.status.text = ""
+        HidePausedControls()
+        StopTorrentStats()
         HideBuffering()
     else if state = "error" and m.hasPlayed = true and not NotPlayableOnDevice() and m.recoverCount < STALL_MAX_RECOVERIES()
         ' Mid-play failure of a stream that was already playing: almost always
@@ -1308,6 +1654,7 @@ sub onVideoStateChanged()
         ' of the file. Treat it like a drop, not a real ending.
         TryRecover("early-finish")
     else if state = "error"
+        HidePausedControls()
         ' Show the platform's error code on the status line; the diagnosis itself
         ' (category/errcode/dbgmsg) is printed by LogVideoError below. The status
         ' line alone cannot tell a network drop from a format the device refuses,
@@ -1322,6 +1669,7 @@ sub onVideoStateChanged()
         end if
         if code <> 0 then message = Fill(Lang("player", "playbackFailedCode"), { message: message, code: Str(code).Trim() })
         m.status.text = message
+        StopTorrentStats()
         HideBuffering()
         LogVideoError()
     else if state = "buffering"
@@ -1332,14 +1680,268 @@ sub onVideoStateChanged()
         ' By the time a play can reach buffering, the drain is over or has been
         ' reaped — nothing is still being waited on.
         StopPreVideoPulse()
+        HidePausedControls()
         m.status.text = ""
+        StartTorrentStats()
         SuppressNativeBufferingUi()
         if HasLogo() then m.bufferingGroup.visible = true
     else if state = "paused"
+        ShowPausedControls()
         PublishWatchState()
-    else if state = "finished" or state = "stopped"
+    else if state = "finished"
+        HidePausedControls()
+        StopTorrentStats()
+        HideBuffering()
+        StartNextEpisode()
+    else if state = "stopped"
+        if m.pendingPreparedNext <> invalid
+            BeginPreparedNext()
+            return
+        end if
+        HidePausedControls()
+        StopTorrentStats()
         HideBuffering()
     end if
+end sub
+
+' Publish the next regular episode after a genuine end. EndedEarly() is handled
+' by the earlier branch in onVideoStateChanged, so a dropped connection can
+' never advance the series. The full series meta is cached by EpisodesScreen or
+' StreamsScreen; without it there is no safe episode order to infer, and the
+' completed player remains where it is.
+sub StartNextEpisode()
+    if m.nextRequested or m.playParams = invalid or m.stores = invalid then return
+    params = m.playParams
+    if params.metaType <> "series" then return
+    if params.metaId = invalid or params.videoId = invalid then return
+
+    m.nextRequested = true
+    if m.nextPrepared <> invalid
+        PlayPreparedNext()
+        return
+    end if
+
+    nextParams = NextEpisodeParams()
+    if nextParams = invalid then return
+    SavePosition()
+    print "[next] prefetch unavailable — opening provider load for " ; nextParams.videoId
+    m.top.playbackAction = {
+        action: "nextEpisode"
+        params: nextParams
+    }
+end sub
+
+' Pure next-play description shared by background prefetch and the visible
+' fallback. It never starts work and never changes playback state.
+function NextEpisodeParams() as dynamic
+    if m.playParams = invalid or m.stores = invalid then return invalid
+    params = m.playParams
+    if params.metaType <> "series" or params.metaId = invalid or params.videoId = invalid then return invalid
+    meta = m.stores.episodes.callFunc("EpisodesFullMeta", params.metaType, params.metaId)
+    if meta = invalid then return invalid
+    nextEpisode = m.stores.episodes.callFunc("EpisodesNextEpisode", params.metaId, params.videoId, meta)
+    if nextEpisode = invalid then return invalid
+    return {
+        addonAddress: params.addonAddress
+        metaType: "series"
+        metaId: params.metaId
+        videoId: nextEpisode.videoId
+        season: nextEpisode.season
+        episode: nextEpisode.episode
+        position: 0
+        name: params.name
+        poster: params.poster
+        posterShape: params.posterShape
+        logo: params.logo
+        background: params.background
+        episodeName: nextEpisode.name
+        episodeOverview: nextEpisode.overview
+        ' Keep these at the top level too: a prepared episode bypasses
+        ' StreamsScreen, so its params become the source for the following
+        ' episode's prefetch. Without them autoplay is seamless only once.
+        providerAddress: params.providerAddress
+        streamIndex: params.streamIndex
+        directPlayMode: params.directPlayMode
+        autoPlay: {
+            providerAddress: params.providerAddress
+            streamIndex: params.streamIndex
+            directPlayMode: params.directPlayMode
+        }
+    }
+end function
+
+' Begin fetching and warming the next episode while the current episode still
+' has enough time left to hide a cold torrent engine. Only the same provider is
+' asked; failure is silent and leaves StartNextEpisode's existing picker
+' fallback intact.
+sub MaybePrefetchNext(position as dynamic, duration as dynamic)
+    if m.nextPrefetchStarted or m.nextPrepared <> invalid then return
+    if position = invalid or duration = invalid or duration <= 0 then return
+    remaining = duration - position
+    if remaining <= 0 or remaining > 120 then return
+    nextParams = NextEpisodeParams()
+    if nextParams = invalid or nextParams.autoPlay = invalid then return
+    LaunchNextPrefetch(nextParams, remaining)
+end sub
+
+sub LaunchNextPrefetch(nextParams as object, remaining as dynamic)
+    if m.nextPrefetchStarted or nextParams = invalid or nextParams.autoPlay = invalid then return
+    providerAddress = nextParams.autoPlay.providerAddress
+    if providerAddress = invalid or providerAddress = "" then return
+
+    m.nextPrefetchStarted = true
+    m.nextPrefetch = nextParams
+    if remaining <> invalid and remaining >= 0
+        print "[next] prefetch streams for " ; nextParams.videoId ; " at " ; Int(remaining) ; "s remaining"
+    else
+        print "[next] prefetch streams for explicit Next action -> " ; nextParams.videoId
+    end if
+    m.nextStreamTask = AsyncTask_Launch(m.top, "StreamsLoaderTask", "onNextStreamsLoaded", {
+        metaType: "series"
+        videoId: nextParams.videoId
+        addonAddress: providerAddress
+        providerIndex: 0
+        providerName: "next"
+        loadToken: nextParams.videoId
+    }, "nextStreams")
+end sub
+
+sub onNextStreamsLoaded()
+    if m.nextStreamTask = invalid then return
+    task = m.nextStreamTask
+    result = task.result
+    if result = invalid then return
+    m.nextStreamTask = invalid
+    AsyncTask_Reap(task, m.top, false)
+    if m.nextPrefetch = invalid or result.streams = invalid or result.streams.Count() = 0
+        NextPrefetchFailed()
+        return
+    end if
+
+    index = 0
+    wanted = m.nextPrefetch.autoPlay.streamIndex
+    if wanted <> invalid and wanted >= 0 and wanted < result.streams.Count() then index = wanted
+    m.nextPrefetch.stream = result.streams[index]
+    m.nextPrefetch.directPlayMode = m.nextPrefetch.autoPlay.directPlayMode
+    m.nextPrefetch.serverAddress = m.playParams.serverAddress
+    print "[next] prefetch resolve stream " ; index
+    m.nextResolveTask = AsyncTask_Launch(m.top, "StreamResolveTask", "onNextResolveResult", {
+        stream: m.nextPrefetch.stream
+        serverAddress: m.nextPrefetch.serverAddress
+        season: ResolveOrdinal(m.nextPrefetch.season)
+        episode: ResolveOrdinal(m.nextPrefetch.episode)
+        audioPassthrough: AudioPassthroughEnabled()
+        audioTransmux: AudioTransmuxEnabled()
+        directPlayMode: m.nextPrefetch.directPlayMode
+    }, "nextResolve")
+end sub
+
+sub onNextResolveResult()
+    if m.nextResolveTask = invalid then return
+    task = m.nextResolveTask
+    result = task.result
+    if result = invalid then return
+    m.nextResolveTask = invalid
+    AsyncTask_Reap(task, m.top, false)
+    if m.nextPrefetch = invalid or not result.ok or result.url = invalid or result.url = ""
+        NextPrefetchFailed()
+        return
+    end if
+    m.nextPrefetch.resolvedUrl = result.url
+    m.nextPrefetch.streamFormat = result.streamFormat
+    m.nextPrefetch.requestHeaders = result.requestHeaders
+    m.nextPrepared = m.nextPrefetch
+    m.nextPrefetch = invalid
+    print "[next] prefetched and ready " ; m.nextPrepared.videoId
+    if m.playNextWhenReady then PlayPreparedNext()
+end sub
+
+sub NextPrefetchFailed()
+    if m.nextWaitTimeout <> invalid then m.nextWaitTimeout.control = "stop"
+    m.nextPrefetch = invalid
+    m.nextPrefetchStarted = false
+    if m.playNextWhenReady
+        m.playNextWhenReady = false
+        StartNextEpisode()
+    end if
+end sub
+
+' A manual Next must never imprison the player behind a slow provider. After a
+' bounded wait, cancel the warm-up and use the ordinary next-episode route.
+sub onNextWaitTimeout()
+    if not m.playNextWhenReady then return
+    print "[next] explicit warm-up timed out — falling back to stream selection"
+    CancelNextPrefetch()
+    m.nextRequested = false
+    StartNextEpisode()
+end sub
+
+' Swap the existing Video node directly. No Streams screen is exposed and no
+' title/logo preparation banner is shown; the already-resolved URL is assigned
+' on the same player and starts on the normal deferred play tick.
+sub PlayPreparedNext()
+    prepared = m.nextPrepared
+    m.nextPrepared = invalid
+    if prepared = invalid then return
+    if m.nextWaitTimeout <> invalid then m.nextWaitTimeout.control = "stop"
+    SavePosition()
+    CancelResolve()
+    CancelSubtitles()
+    m.pendingPreparedNext = prepared
+    ' Video.stop is asynchronous. Wait for the stopped state before replacing
+    ' content, otherwise the old and new media players race during the swap.
+    if m.video <> invalid
+        m.video.control = "stop"
+    else
+        BeginPreparedNext()
+    end if
+end sub
+
+sub BeginPreparedNext()
+    prepared = m.pendingPreparedNext
+    m.pendingPreparedNext = invalid
+    if prepared = invalid then return
+    if m.video <> invalid
+        m.video.content = invalid
+        ClearSubtitleTrack()
+    end if
+    if m.stallWatch <> invalid then m.stallWatch.control = "stop"
+    if m.recoverKick <> invalid then m.recoverKick.control = "stop"
+    ResetRecovery()
+
+    m.playParams = prepared
+    m.saved = false
+    m.hasPlayed = false
+    m.nextRequested = false
+    m.playStarted = false
+    m.nextPrefetchStarted = false
+    m.playNextWhenReady = false
+    m.nextPrefetch = invalid
+    m.status.text = ""
+    m.bufferingGroup.visible = false
+    m.playMode = prepared.directPlayMode
+    ClearSubtitles()
+    print "[next] direct player swap -> " ; prepared.videoId
+    StartPlayback(prepared.resolvedUrl, prepared.streamFormat, prepared.requestHeaders)
+end sub
+
+sub CancelNextPrefetch()
+    if m.nextWaitTimeout <> invalid then m.nextWaitTimeout.control = "stop"
+    if m.nextStreamTask <> invalid
+        task = m.nextStreamTask
+        m.nextStreamTask = invalid
+        AsyncTask_Reap(task, m.top, true)
+    end if
+    if m.nextResolveTask <> invalid
+        task = m.nextResolveTask
+        m.nextResolveTask = invalid
+        AsyncTask_Reap(task, m.top, true)
+    end if
+    m.nextPrefetch = invalid
+    m.nextPrepared = invalid
+    m.pendingPreparedNext = invalid
+    m.nextPrefetchStarted = false
+    m.playNextWhenReady = false
 end sub
 
 ' True when the failure is this device's capability, not the network: the
@@ -1385,16 +1987,85 @@ sub LogVideoError()
     end if
 end sub
 
-' Native playback owns every remote key once a Video exists: the platform's
-' pause screen, seek/trick-play, and Options (captions) dialog all handle their
-' own keys when this handler lets them through, so nothing is intercepted and
-' every key except Back falls through to the focused Video node.
+' Center/OK is handled explicitly so its behavior is stable across Roku OS
+' versions: it pauses a playing video and activates the selected paused action.
+' Both halves are consumed so the Video node cannot toggle it again underneath.
 '
 ' Before the stream resolves (or after a failure) there is no video: Back still
 ' pops (OnBackPressed returns false) and every other key is swallowed so a
 ' press routes nowhere else. Everything else falls through (Back reaches the
 ' stack → stop + save + pop).
 function OnKeyEvent(key as string, press as boolean) as boolean
+    if m.playNextWhenReady
+        ' Back still reaches ScreenStack and cancels the request in OnExit.
+        if key = "back" then return false
+        return true
+    end if
+    currentVideoState = ""
+    if m.video <> invalid then currentVideoState = m.video.state
+    if currentVideoState = "paused"
+        if not press then return true
+        if key = "rewind"
+            SeekPausedBy(-30)
+            return true
+        else if key = "fastforward"
+            SeekPausedBy(30)
+            return true
+        else if key = "up"
+            m.pauseActionIndex = 0
+            UpdatePausedControlFocus()
+            return true
+        else if key = "down"
+            if m.pauseActionIndex = 0 then m.pauseActionIndex = 1
+            UpdatePausedControlFocus()
+            return true
+        else if key = "left"
+            if m.pauseActionIndex = 0
+                SeekPausedBy(-10)
+            else
+                if m.pauseActionIndex = 3 and m.pauseHasNext then
+                    m.pauseActionIndex = 2
+                else
+                    m.pauseActionIndex = 1
+                end if
+                UpdatePausedControlFocus()
+            end if
+            return true
+        else if key = "right"
+            if m.pauseActionIndex = 0
+                SeekPausedBy(10)
+            else if m.pauseActionIndex = 1 and m.pauseHasNext
+                m.pauseActionIndex = 2
+                UpdatePausedControlFocus()
+            else
+                m.pauseActionIndex = 3
+                UpdatePausedControlFocus()
+            end if
+            return true
+        else if key = "OK"
+            if m.pauseActionIndex = 2 and m.pauseHasNext
+                PlayNextFromPause()
+            else if m.pauseActionIndex = 3
+                ShowCaptionChoice()
+            else
+                m.video.control = "resume"
+            end if
+            return true
+        end if
+    end if
+    if key = "OK"
+        if not press then return true
+        if m.video = invalid then return true
+        videoState = m.video.state
+        if videoState = "playing"
+            m.video.control = "pause"
+            return true
+        else if videoState = "paused"
+            m.video.control = "resume"
+            return true
+        end if
+        return true
+    end if
     if not press then return false
     if m.video = invalid
         if key = "back" then return false
@@ -1445,6 +2116,9 @@ end function
 ' node. Nothing is reaped: this screen and its node are static children of the
 ' Scene and survive the pop, so the next play re-arms them in CreateVideo.
 function OnExit() as void
+    HidePausedControls()
+    StopTorrentStats()
+    CancelNextPrefetch()
     CancelResolve()
     CancelSubtitles()
     SavePosition()
@@ -1553,7 +2227,17 @@ sub SavePosition()
     posterShape = ""
     if params.posterShape <> invalid then posterShape = params.posterShape
 
+    playback = invalid
+    if params.providerAddress <> invalid and params.providerAddress <> "" and params.streamIndex <> invalid and params.stream <> invalid
+        playback = {
+            providerAddress: params.providerAddress
+            streamIndex: params.streamIndex
+            directPlayMode: params.directPlayMode
+            streamKey: StreamIdentity(params.stream)
+        }
+    end if
     m.stores.library.callFunc("LibrarySetPosition", params.videoId, params.metaId, params.metaType, season, episode, name, poster, Int(position), Int(duration), posterShape)
+    if playback <> invalid then m.stores.library.callFunc("LibraryRememberPlayback", params.videoId, params.metaId, playback)
     mid = ""
     if params.metaId <> invalid then mid = params.metaId
     m.stores.library.callFunc("LibraryMarkWatchedIfFinished", mid, params.videoId, Int(position), Int(duration))
@@ -1703,6 +2387,8 @@ sub onStallWatch()
         m.lastProgressAt = now
         if state = "playing" then m.lastGoodPos = curPos
     end if
+
+    MaybePrefetchNext(curPos, m.video.duration)
 
     if state = "paused" or state = "stopped" or state = "finished" or state = "error"
         ' A viewer pause is not a stall; neither is a terminal state (those are

@@ -185,6 +185,34 @@ sub Test_Library_PersistsViaRegistry()
     Harness_Equal(second.ContinueWatching()[0].videoId, "tt9999999", "new write lands on top")
 end sub
 
+sub Test_Library_RemembersPlaybackChoice()
+    Harness_Suite("continue watching persists and preserves the selected stream")
+    registry = MockRegistry()
+    playback = {
+        providerAddress: "https://provider.example/manifest.json"
+        streamIndex: 3
+        directPlayMode: "off"
+        streamKey: "torrent:abcdef:2"
+    }
+    first = LibraryStore(registry)
+    first.SetPosition("ttSRC:1:2", "ttSRC", "series", 1, 2, "Episode Two", "poster.png", 500, 1000, "landscape")
+    first.RememberPlayback("ttSRC:1:2", "ttSRC", playback)
+
+    second = LibraryStore(registry)
+    resumed = second.ResumeFor("ttSRC")
+    Harness_Ok(resumed <> invalid and resumed.playback <> invalid, "playback choice survives a relaunch")
+    Harness_Equal(resumed.playback.providerAddress, playback.providerAddress, "provider address persists")
+    Harness_Equal(resumed.playback.streamIndex, 3, "stream index persists")
+    Harness_Equal(resumed.playback.streamKey, "torrent:abcdef:2", "stable torrent identity persists")
+
+    ' Mid-play checkpoints do not carry a playback argument. They must update
+    ' progress without erasing the choice made when the player was opened.
+    second.SetPosition("ttSRC:1:2", "ttSRC", "series", 1, 2, "Episode Two", "poster.png", 650, 1000, "landscape")
+    resumed = second.ResumeFor("ttSRC")
+    Harness_Equal(resumed.position, 650, "checkpoint updates progress")
+    Harness_Equal(resumed.playback.streamKey, "torrent:abcdef:2", "checkpoint preserves stream identity")
+end sub
+
 sub Test_Library_OldRecordsWithoutPosterShape()
     Harness_Suite("records persisted before posterShape existed still load and size safely")
     registry = MockRegistry()
