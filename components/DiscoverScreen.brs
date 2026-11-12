@@ -82,6 +82,20 @@ end sub
 function OnEnter(params as object) as void
     RefreshTexts()
     if m.filterBar.callFunc("IsMenuOpen") then m.filterBar.callFunc("HideMenu")
+
+    ' Return from a child screen (ScreenStack pop passes invalid params): restore
+    ' results/filters/position instead of resetting.
+    if params = invalid and (m.loaded or m.sources.Count() > 0 or m.selectedCatalog <> invalid)
+        if m.grid <> invalid and m.metas.Count() > 0
+            m.grid.SetFocus(true)
+            RefreshDiscoverHeroFromFocus()
+        else if m.filterBar <> invalid
+            m.filterBar.callFunc("FocusChips")
+        end if
+        UpdateFiltersHint()
+        return
+    end if
+
     CancelLoad()
     CancelSources()
     if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
