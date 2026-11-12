@@ -3373,34 +3373,20 @@ function checkSettingsSectionsContract() {
         err('PrefRow.brs does not watch the content node\'s description — a value written into the node would never reach the screen');
     }
 
-    // The list is a ChevronList, not a plain RowList: the settings are going
-    // to grow, and the chevrons are how a screen says "there is more above or
-    // below" instead of letting the rows scroll away silently. The focusRow
-    // field is what keeps the cursor on the row the user is working on when
-    // the list is rebuilt under it.
-    if (!/<ChevronList/.test(xml)) {
-        err('SettingsScreen.xml does not use the ChevronList — the list is going to grow, and a plain RowList scrolls the extra rows away with nothing to say so');
+    // The options are custom rows (no RowList/ChevronList): overflow is shown
+    // with chevron indicators and a windowed layout, and the focused row/index
+    // is preserved across rebuilds so the cursor does not jump.
+    if (!/id="chevronUp"/.test(xml) || !/id="chevronDown"/.test(xml) || !/id="optionsClip"/.test(xml)) {
+        err('SettingsScreen.xml is missing the options container/chevrons — overflowed options would scroll away with nothing to indicate more content');
     }
-    if (!/<field\s+id="focusRow"/.test(read('components/ChevronList.xml'))) {
-        err('ChevronList.xml has no focusRow field — a rebuild under the cursor would throw it back to the top');
-    }
-    if (!/m\.list\.focusRow\s*=/.test(brs)) {
-        err('SettingsScreen.brs does not set the list focusRow — a rebuild under the cursor would throw it back to the top');
+    if (!/m\.focusedRow/.test(brs) || !/EnsureOptionsRowVisible/.test(brs)) {
+        err('SettingsScreen.brs does not track/keep the focused option visible — a rebuild or navigation would lose the cursor/overflow context');
     }
 
-    // The focus travel between the chips and the list. The list is a GROUP
-    // now (a ChevronList), and a Group does not answer for the RowList inside
-    // it: asking the group whether it has the focus always says no, so the
-    // "up" from the list never reached the chips and the section switch
-    // became unreachable. The list has to be asked through its own function.
-    if (!/<function\s+name="HasListFocus"/.test(read('components/ChevronList.xml'))) {
-        err('ChevronList.xml does not declare HasListFocus() — a screen that owns a second focusable node cannot tell whether the list has the focus');
-    }
-    if (!/m\.rowList\.HasFocus\(\)/.test(read('components/ChevronList.brs'))) {
-        err('ChevronList.brs HasListFocus() does not ask the RowList — the group itself cannot answer for the list inside it');
-    }
-    if (!/callFunc\("HasListFocus"\)/.test(brs)) {
-        err('SettingsScreen.brs does not ask the list whether it has the focus — Up from the list would never reach the chips, and the section switch becomes unreachable');
+    // Focus travel between the chips and options. Up from options reaches chips;
+    // Down from chips enters options.
+    if (!/m\.optionsListFocused/.test(brs) || !/m\.chips\.callFunc\("HoldingFocus"\)/.test(brs)) {
+        err('SettingsScreen.brs does not track options/chips focus — Up from options would never reach the chips, and section switching becomes unreachable');
     }
 
     // The device is asked ONCE per visit to the screen. Asking again when a

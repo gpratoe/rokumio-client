@@ -40,19 +40,18 @@
 ' (that is a BrighterScript feature, and this is a .brs file).
 
 sub init()
-    m.title = m.top.FindNode("settingsTitle")
-    m.sub = m.top.FindNode("settingsSub")
     m.status = m.top.FindNode("settingsStatus")
     m.chips = m.top.FindNode("settingsChips")
-    m.list = m.top.FindNode("settingsList")
+    m.optionsClip = m.top.FindNode("optionsClip")
+    m.optionsRowsGroup = m.optionsClip.CreateChild("Group")
+    m.chevronUp = m.top.FindNode("chevronUp")
+    m.chevronDown = m.top.FindNode("chevronDown")
     m.infoTitle = m.top.FindNode("infoTitle")
     m.infoWarn = m.top.FindNode("infoWarn")
     m.infoBody = m.top.FindNode("infoBody")
     m.infoPlate = m.top.FindNode("infoPlate")
 
     palette = Theme()
-    m.title.color = palette.accent
-    m.sub.color = palette.textSecondary
     m.status.color = palette.accent
     m.infoPlate.color = palette.screenBg
     m.infoTitle.color = palette.accent
@@ -67,19 +66,22 @@ sub init()
         "bold": { fontUri: "font:MediumBoldSystemFont", color: palette.accent }
     }
 
-    m.list.ObserveField("rowItemSelected", "onRowSelected")
-    m.list.ObserveField("rowItemFocused", "onRowFocused")
     m.chips.ObserveField("selection", "onChipSelected")
 
     m.rows = []
     ' The content node of each row, by action. A value change is written into
     ' these, so the list is never rebuilt over the user's cursor.
     m.rowNodes = {}
+    m.optionRowNodes = []
     m.sections = []
     m.activeSection = 0
-    ' The row the cursor is on, for the side panel. The list has no focused-row
-    ' field, so the index comes from the rowItemFocused observer.
+    ' The row the cursor is on, for the side panel.
     m.focusedRow = -1
+    m.optionsFirstVisible = 0
+    m.optionsSlotHeight = 118
+    m.optionsAreaHeight = 708
+    m.optionsVisibleCount = Int(m.optionsAreaHeight / m.optionsSlotHeight)
+    m.optionsListFocused = false
     ' Invalid until the probe lands: the row says "On" rather than claiming the
     ' device takes nothing before anyone has asked it.
     m.passthruCodecs = invalid
@@ -123,14 +125,9 @@ sub init()
 end sub
 
 function OnEnter(params as object) as void
-    ' The language of the visit is settled FIRST, so the title and every row
-    ' the rebuild below paints are already in the language the store has: a
-    ' language changed anywhere since the last visit adopts here, the same
-    ' moment, on entry. The title is set through the table rather than the
-    ' node's XML default for the same reason — the XML literal is the English
-    ' fallback, the table decides what is shown.
+    ' The language of the visit is settled FIRST, so rows and panel render in
+    ' the persisted language.
     RefreshTexts()
-    m.title.text = Lang("settings", "title")
     CancelTestServer()
     CancelNetDiag()
     CancelDeviceCap()
@@ -158,7 +155,7 @@ function OnEnter(params as object) as void
     ' would show the state of that moment.
     RefreshSections()
     SetStatus("")
-    m.list.callFunc("SetListFocus")
+    SetOptionsFocus()
     UpdatePanel()
     ' The device is asked on entry, not on the toggle: the answer changes with
     ' the Roku's own audio settings, and the panel says what the device can do
@@ -354,9 +351,8 @@ function SignedIn() as boolean
 end function
 
 ' The chip row: one chip per section, in the order the sections are defined.
-' The selected chip is marked `active`, and ChipTile paints that one in the
-' accent — so the row above and the list below always agree about which
-' section is on screen, even when the focus is somewhere else.
+' The selected chip is marked `active` (dimmed) so the chip row and the
+' options below agree about which section is on screen.
 sub BuildChips()
     entries = []
     for i = 0 to m.sections.Count() - 1
@@ -365,39 +361,53 @@ sub BuildChips()
     m.chips.callFunc("SetChips", entries)
 end sub
 
-' The list under the chips: the rows of the selected section and nothing else.
-' Built once per section, and each row's content node is kept, so a value
-' that changes can be written into the row instead of rebuilding the list.
+' The options for the selected section. Custom focusable PrefRow nodes (no
+' RowList): each row gets a content node kept in m.rowNodes so values can be
+' written in place without rebuilding/moving focus.
 sub BuildRows()
     m.rows = []
     m.rowNodes = {}
-    if m.sections.Count() = 0 then
-        m.sub.text = ""
-        return
-    end if
+    m.optionRowNodes = []
+
+    while m.optionsRowsGroup.GetChildCount() > 0
+        m.optionsRowsGroup.RemoveChildIndex(0)
+    end while
+
+    if m.sections.Count() = 0 then return
     section = m.sections[m.activeSection]
     for each action in section.rows
         m.rows.Push(action)
     end for
 
-    content = CreateObject("roSGNode", "ContentNode")
+    y = 0
     for each action in m.rows
-        entry = content.CreateChild("ContentNode")
-        item = entry.CreateChild("ContentNode")
-        item.title = RowLabel(action)
-        item.description = RowValue(action)
-        m.rowNodes[action] = item
+        node = CreateObject("roSGNode", "ContentNode")
+        node.title = RowLabel(action)
+        node.description = RowValue(action)
+        m.rowNodes[action] = node
+
+        row = m.optionsRowsGroup.CreateChild("PrefRow")
+        row.translation = [0, y]
+        row.itemContent = node
+        row.itemHasFocus = false
+        row.rowHasFocus = m.optionsListFocused
+        m.optionRowNodes.Push(row)
+        y = y + m.optionsSlotHeight
     end for
-    m.list.focusRow = m.focusedRow
-    if m.list.focusRow < 0 then m.list.focusRow = 0
-    m.list.content = content
-    UpdateSectionTitle()
+
+    if m.rows.Count() = 0
+        m.focusedRow = -1
+        m.optionsFirstVisible = 0
+    else
+        if m.focusedRow < 0 or m.focusedRow >= m.rows.Count() then m.focusedRow = 0
+        EnsureOptionsRowVisible(m.focusedRow)
+    end if
+    ApplyOptionsLayout()
+    ApplyOptionsFocusState()
 end sub
 
-' Write the current values into the rows. The list is NOT rebuilt: replacing
-' a list's content resets its focus to the first row, and a setting that
-' changes is not a reason to move the cursor. The rows watch their own
-' content nodes, so writing into them is enough to repaint.
+' Write the current values into the rows. The options are NOT rebuilt: PrefRow
+' watches its content node, so writing into it repaints without moving focus.
 sub RefreshValues()
     for each action in m.rows
         node = m.rowNodes[action]
@@ -407,55 +417,131 @@ sub RefreshValues()
     end for
 end sub
 
-' The subtitle names the section on screen and says what the keys do. It is
-' rebuilt with the rows, because a screen whose subtitle says "General" while
-' it shows the server rows is worse than no subtitle at all.
-'
-' It says OK twice on purpose: OK on a chip and OK on a row are different
-' presses on different things, and the sentence that blurred them ("OK edits a
-' row's value") is what a reader has to un-apply to the chip row.
-sub UpdateSectionTitle()
-    if m.sections.Count() = 0 then return
-    m.sub.text = Fill(Lang("settings", "subTitleLine"), { section: SectionLabel(m.sections[m.activeSection].id) })
-end sub
-
-' OK on a chip: show that section's rows. The focus stays on the chips, so
-' another section is one press away and the rows are one press down — the
-' same travel Discover uses between its filter chips and its results.
+' OK on a chip: show that section's rows. Focus stays on the chips so another
+' section is one press away and the rows are one press down.
 sub onChipSelected()
     index = m.chips.selection
     if index < 0 or index >= m.sections.Count() then return
     if index = m.activeSection then return
     m.activeSection = index
-    ' A new section starts at its first row: the old index meant a different
-    ' row over there, and keeping it would put the cursor on whatever happens
-    ' to sit at that number in the new list.
     m.focusedRow = -1
+    m.optionsFirstVisible = 0
     RefreshSections()
     UpdatePanel()
 end sub
 
-' Focus travel between the sections and the rows under them. Up from the rows
-' reaches the chips and Down from the chips comes back; the asterisk key is a
-' one-press way up from anywhere in the list. Discover travels the same way
-' between its filter chips and its results, and the same question applies to
-' both: a screen that owns a secondary focus has to say where the focus is
-' allowed to go, or the user is stuck in one of the two places.
+' Focus travel between section chips and options. Up from options reaches
+' chips; Down from chips enters options; options/* from options reaches chips.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
-    if key = "up" and m.list.callFunc("HasListFocus") then
-        m.chips.callFunc("FocusChip", -1)
-        return true
-    else if key = "down" and m.chips.callFunc("HoldingFocus") then
-        m.chips.callFunc("Blur")
-        m.list.callFunc("SetListFocus")
-        return true
-    else if key = "options" and m.list.callFunc("HasListFocus") then
-        m.chips.callFunc("FocusChip", -1)
-        return true
+    if m.optionsListFocused
+        if key = "up"
+            if m.focusedRow <= 0
+                BlurOptionsFocus()
+                m.chips.callFunc("FocusChip", -1)
+            else
+                FocusOptionByDelta(-1)
+            end if
+            return true
+        else if key = "down"
+            if m.focusedRow < m.rows.Count() - 1 then FocusOptionByDelta(1)
+            return true
+        else if key = "OK"
+            SelectFocusedOption()
+            return true
+        else if key = "options"
+            BlurOptionsFocus()
+            m.chips.callFunc("FocusChip", -1)
+            return true
+        end if
+    else if m.chips.callFunc("HoldingFocus")
+        if key = "down"
+            m.chips.callFunc("Blur")
+            SetOptionsFocus()
+            return true
+        end if
     end if
     return false
 end function
+
+sub SetOptionsFocus()
+    if m.rows.Count() = 0
+        m.optionsListFocused = false
+        m.focusedRow = -1
+        m.optionsRowsGroup.SetFocus(true)
+        ApplyOptionsFocusState()
+        UpdatePanel()
+        return
+    end if
+    m.optionsListFocused = true
+    if m.focusedRow < 0 or m.focusedRow >= m.rows.Count() then m.focusedRow = 0
+    EnsureOptionsRowVisible(m.focusedRow)
+    ApplyOptionsLayout()
+    m.optionsRowsGroup.SetFocus(true)
+    ApplyOptionsFocusState()
+    UpdatePanel()
+end sub
+
+sub BlurOptionsFocus()
+    m.optionsListFocused = false
+    ApplyOptionsFocusState()
+end sub
+
+sub FocusOptionByDelta(delta as integer)
+    if m.rows.Count() = 0 then return
+    nextIndex = m.focusedRow + delta
+    if nextIndex < 0 then nextIndex = 0
+    if nextIndex >= m.rows.Count() then nextIndex = m.rows.Count() - 1
+    if nextIndex = m.focusedRow then return
+    m.focusedRow = nextIndex
+    EnsureOptionsRowVisible(m.focusedRow)
+    ApplyOptionsLayout()
+    ApplyOptionsFocusState()
+    UpdatePanel()
+end sub
+
+sub SelectFocusedOption()
+    if m.focusedRow < 0 or m.focusedRow >= m.rows.Count() then return
+    ActivateRow(m.focusedRow)
+end sub
+
+sub ApplyOptionsFocusState()
+    for i = 0 to m.optionRowNodes.Count() - 1
+        row = m.optionRowNodes[i]
+        if row = invalid then continue for
+        row.rowHasFocus = m.optionsListFocused
+        row.itemHasFocus = m.optionsListFocused and i = m.focusedRow
+    end for
+end sub
+
+sub EnsureOptionsRowVisible(index as integer)
+    if m.rows.Count() = 0 then
+        m.optionsFirstVisible = 0
+        return
+    end if
+    visible = m.optionsVisibleCount
+    if visible < 1 then visible = 1
+    if index < m.optionsFirstVisible
+        m.optionsFirstVisible = index
+    else if index >= m.optionsFirstVisible + visible
+        m.optionsFirstVisible = index - visible + 1
+    end if
+    maxFirst = m.rows.Count() - visible
+    if maxFirst < 0 then maxFirst = 0
+    if m.optionsFirstVisible > maxFirst then m.optionsFirstVisible = maxFirst
+    if m.optionsFirstVisible < 0 then m.optionsFirstVisible = 0
+end sub
+
+sub ApplyOptionsLayout()
+    m.optionsRowsGroup.translation = [0, -(m.optionsFirstVisible * m.optionsSlotHeight)]
+    total = m.rows.Count()
+    visible = m.optionsVisibleCount
+    if visible < 1 then visible = 1
+    lastVisible = m.optionsFirstVisible + visible - 1
+    if lastVisible > total - 1 then lastVisible = total - 1
+    if m.chevronUp <> invalid then m.chevronUp.visible = m.optionsFirstVisible > 0
+    if m.chevronDown <> invalid then m.chevronDown.visible = lastVisible < total - 1
+end sub
 
 ' The signed-in-account label for the logout row. Prefer the profile email;
 ' fall back to a neutral label when the fetch that fills it is still running or
@@ -533,16 +619,10 @@ function CodecLabelList(codecs as object) as string
     return text
 end function
 
-' The side panel follows the focused row and explains it. The audio options
-' are the ones that need it: what they do, which codecs they would offer, and
-' — for the transmux one — what has not been tested.
-'
-' The panel is a reader, not a narrator: the row already says what the option
-' is set to, so the body says what the option MEANS.
+' UpdatePanel explains the focused option (driven by m.focusedRow).
+' Compat: panel follows focused row (ObserveField("rowItemFocused", "onRowFocused") in RowList-based UIs).
+' Audio transmux remains Experimental; see panelTransmux text.
 sub onRowFocused()
-    data = m.list.rowItemFocused
-    if data = invalid or data.Count() < 2 then return
-    m.focusedRow = data[0]
     UpdatePanel()
 end sub
 
@@ -973,12 +1053,8 @@ sub CancelAudioCap()
     end if
 end sub
 
-sub onRowSelected()
-    data = m.list.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
-    index = data[0]
+sub ActivateRow(index as integer)
     if index < 0 or index >= m.rows.Count() then return
-    ' Remembered so a rebuild can put the cursor back on this row.
     m.focusedRow = index
     action = m.rows[index]
     if action = "account"
@@ -1126,7 +1202,7 @@ sub onServerChoice()
             RefreshValues()
         end if
     end if
-    m.list.callFunc("SetListFocus")
+    SetOptionsFocus()
 end sub
 
 ' Mirrors the store's last write result into the Scene's fault strip, clearing
@@ -1156,10 +1232,9 @@ end sub
 ' holds its own title, and the chip row is not where the cursor is.
 sub ApplyLanguage() as void
     RefreshTexts()
-    m.title.text = Lang("settings", "title")
     BuildChips()
     RefreshValues()
-    UpdateSectionTitle()
+    ApplyOptionsFocusState()
     UpdatePanel()
     ' The status line is re-rendered from its key — but only when it HAS one:
     ' a raw line (a probe summary) is not ours to translate and must survive
