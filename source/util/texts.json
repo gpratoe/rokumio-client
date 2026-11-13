@@ -192,7 +192,17 @@
             "statusRemoveFailed": "Could not uninstall {name}.",
             "companionTitle": "Add add-ons faster",
             "companionCaption": "Use our Android app to add add-ons faster.",
-            "setupHint": "Or install from your browser:"
+            "setupHint": "Or install from your browser:",
+            "addDialogTitle": "Add add-on",
+            "addDialogIntro": "Install an add-on by entering its manifest URL.",
+            "addDialogBrowserHint": "You can also install from your browser using the address shown here.",
+            "addDialogManualHint": "Enter the add-on's manifest URL to install it.",
+            "browserInstallCaption": "Install from your browser:",
+            "enterUrlButton": "Enter URL",
+            "setupHeader": "Browser install: {url}",
+            "browserInstallPrefix": "Browser install: ",
+            "manualInstallButton": "Manual install",
+            "manualInstallOnly": "Manual install"
         },
         "library": {
             "title": "Library",
@@ -495,7 +505,17 @@
             "statusRemoveFailed": "No se pudo desinstalar {name}.",
             "companionTitle": "Añade add-ons más rápido",
             "companionCaption": "Usa nuestra app de Android para añadir add-ons más rápido.",
-            "setupHint": "O instálalo desde tu navegador:"
+            "setupHint": "O instálalo desde tu navegador:",
+            "addDialogTitle": "Añadir add-on",
+            "addDialogIntro": "Instala un add-on introduciendo la URL de su manifest.",
+            "addDialogBrowserHint": "También puedes instalar desde tu navegador usando la dirección que se muestra aquí.",
+            "addDialogManualHint": "Introduce la URL del manifest del add-on para instalarlo.",
+            "browserInstallCaption": "Instalar desde tu navegador:",
+            "enterUrlButton": "Introducir URL",
+            "setupHeader": "Instalar desde el navegador: {url}",
+            "browserInstallPrefix": "Instalar desde el navegador: ",
+            "manualInstallButton": "Instalación manual",
+            "manualInstallOnly": "Instalación manual"
         },
         "library": {
             "title": "Biblioteca",

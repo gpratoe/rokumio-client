@@ -3632,37 +3632,9 @@ function checkPosterLoadSizePolicy() {
     return ok;
 }
 
-// The companion-app QR on AddonsScreen. Three things are invisible until someone
-// looks at the TV — or, in the third case's absence, invisible until texture
-// telemetry is pulled — which is exactly why they are pinned here:
-//   1. The Poster's uri must name a file that exists. A typo'd or missing pkg path
-//      simply paints nothing — the same silent failure that made the QR vanish on
-//      LinkStremioScreen.
-//   2. loadSync must NOT be set. It was originally required, on the reasoning
-//      that a bundled image has no network to wait on so there is no reason to
-//      paint a frame with a hole. Device testing showed the hole is not real —
-//      the panel renders correctly without it — while the stall is: loadSync
-//      blocks startup on decoding a 700x700 asset for a screen most sessions
-//      never open.
-//
-//      One thing this does NOT do, which an earlier version of this comment got
-//      wrong: removing loadSync does not free the texture. A fresh-start
-//      r2d2-bitmaps with loadSync already removed still showed both QRs resident
-//      at 700x700 / 1,982,464 bytes each while sitting on Home. Roku eagerly
-//      decodes bundled Poster textures for nodes that exist in the scene graph,
-//      and every static screen exists from app start. loadSync only controls
-//      whether the app *blocks* on that decode, not whether it happens. Actually
-//      reclaiming those ~3.96MB means clearing the Poster's uri when the screen
-//      is hidden, which is a separate change and is not implemented here — do not
-//      assume otherwise from this check passing.
-//   3. The image must still decode to the URL the panel copy claims it offers.
-//      The encoder in scripts/gen-companion-qr.js is a hand-rolled QR
-//      implementation, and a QR that looks right but will not scan is worse than
-//      none at all — the version/EC table is easy to get subtly wrong in a way
-//      that renders plausibly. Rather than re-implement a decoder here, the
-//      encoder round-trips through a reference implementation when one is
-//      available (see verify-companion-qr.js), so this check covers what is
-//      cheaply checkable and points at the rest.
+// AddonsScreen UI contract (post redesign): no companion QR side panel is
+// required. Any bundled Poster declared in the screen markup must be valid and
+// must not block startup with loadSync.
 function checkCompanionQrContract() {
     const fs = require('fs');
     let ok = true;
@@ -3670,10 +3642,6 @@ function checkCompanionQrContract() {
     const xml = fs.readFileSync(path.join(dir, 'AddonsScreen.xml'), 'utf8');
 
     const posters = [...xml.matchAll(/<Poster\b([^>]*)>/g)];
-    if (posters.length === 0) {
-        console.error('AddonsScreen.xml: no <Poster /> — the companion-app QR is missing entirely');
-        return false;
-    }
     for (const m of posters) {
         const attrs = m[1];
         const id = (/\bid="([^"]*)"/.exec(attrs) || [, '(anonymous)'])[1];
@@ -3684,7 +3652,7 @@ function checkCompanionQrContract() {
             continue;
         }
         if (!/\bpkg:\/images\//.test(uri[1])) {
-            console.error(`AddonsScreen.xml: Poster "${id}" uri is not a bundled pkg:/images/ path (got "${uri[1]}"). The companion QR must ship with the app, not be fetched at runtime`);
+            console.error(`AddonsScreen.xml: Poster "${id}" uri is not a bundled pkg:/images/ path (got "${uri[1]}")`);
             ok = false;
         }
         const rel = uri[1].replace(/^pkg:\//, '');
@@ -3693,33 +3661,15 @@ function checkCompanionQrContract() {
             ok = false;
         }
         if (/\bloadSync="true"/.test(attrs)) {
-            console.error(`AddonsScreen.xml: Poster "${id}" sets loadSync="true". Device testing showed the companion panel renders correctly without it, so loadSync only buys a startup stall on decoding a 700x700 asset for a screen most sessions never open. Note this does NOT reclaim texture memory either way — see the comment above for what actually would`);
+            console.error(`AddonsScreen.xml: Poster "${id}" sets loadSync="true" — avoid blocking startup on a bundled decode`);
             ok = false;
         }
     }
 
-    // The generator has to keep existing alongside the image, or the asset becomes
-    // an untraceable blob — the state the two donation QRs in SupportDialog are in.
-    const genPath = path.join(projectRoot, 'scripts', 'gen-companion-qr.js');
-    if (!fs.existsSync(genPath)) {
-        console.error('scripts/gen-companion-qr.js is missing. It records what the QR encodes and regenerates it; without it images/qr-companion.png is an untraceable blob');
+    // The screen's primary interaction is the add-ons list (RowList of cards).
+    if (!/<RowList\b[^>]*\bid="addonsList"/.test(xml)) {
+        console.error('AddonsScreen.xml: missing RowList id="addonsList" — the add-ons card list is required');
         ok = false;
-    } else {
-        const gen = fs.readFileSync(genPath, 'utf8');
-        if (!/const URL\s*=\s*'https?:\/\//.test(gen)) {
-            console.error('scripts/gen-companion-qr.js: expected a `const URL = \'https://...\'` holding the encoded target, so the encoded value stays greppable');
-            ok = false;
-        }
-    }
-
-    // The panel is decorative. If anything in it ever becomes focusable it stops
-    // being an OK/Back no-op, which is the property AddonsScreen's key handling
-    // depends on — so assert there is nothing there to focus.
-    for (const bad of ['Button', 'RowList', 'PosterGrid', 'CheckBox', 'RadioButton', 'EditText']) {
-        if (new RegExp(`<${bad}\\b`).test(xml)) {
-            console.error(`AddonsScreen.xml: <${bad} /> inside the companion panel. The panel is decorative and must not add a focus stop to a screen that has exactly one (addonsList)`);
-            ok = false;
-        }
     }
 
     return ok;
@@ -3812,10 +3762,8 @@ function checkSetupServerContract() {
     if (!/sub SetSetupAddress\s*\(/.test(addonsBrs)) {
         err('AddonsScreen.brs must define SetSetupAddress() — the Scene forwards the address into it');
     }
-    for (const id of ['setupHint', 'setupUrl']) {
-        if (!new RegExp(`id="${id}"[^>]*>`, 's').test(addonsXml)) {
-            err(`AddonsScreen.xml has no label id="${id}" — the page address has nowhere to show`);
-        }
+    if (!/id="setupHeader"/.test(addonsXml)) {
+        err('AddonsScreen.xml has no label id="setupHeader" — the local browser-install address has nowhere to show');
     }
 
     // The port is one fact with two consumers (the TV that prints it, the

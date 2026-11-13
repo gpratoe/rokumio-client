@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="AddAddonDialog" extends="StandardDialog" initialFocus="buttonArea">
+    <interface>
+        <function name="Configure" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/AddAddonDialog.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+
+    <children>
+        <StdDlgTitleArea id="titleArea" primaryTitle="Add add-on" />
+        <StdDlgContentArea id="contentArea">
+            <StdDlgTextItem id="contentText" text="" />
+        </StdDlgContentArea>
+        <StdDlgButtonArea id="buttonArea">
+            <StdDlgButton id="manualButton" text="Manual install" />
+            <StdDlgButton id="closeButton" text="Close" />
+        </StdDlgButtonArea>
+    </children>
+</component>

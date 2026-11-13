@@ -1,23 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="AddonsScreen" extends="Screen">
-    <!-- Installed add-on manager. An "Add add-on" row installs by fetching a
-         manifest URL (system KeyboardDialog), and every installed add-on below
-         it can be removed through a confirmation dialog (shipped built-ins too).
-         The list is rebuilt from AddonsStore on every entry and after each
-         install/remove; every row is an AddonTile. -->
+    <!-- Installed add-on manager. "Add add-on" chip on top; installed add-ons
+         shown as rich cards below. Hybrid install: local setup URL shown in
+         header and in the add dialog; manual manifest entry via keyboard dialog.
+         Metadata, install, and remove behaviors preserved. -->
     <interface>
         <function name="OnEnter" />
         <function name="OnExit" />
         <function name="OnBackPressed" />
-        <!-- main() starts the local setup page before this screen ever opens;
-             the address lands here through the Scene's ShowSetupAddress. -->
         <function name="SetSetupAddress" />
-        <!-- Two-way addon sync report channels. addonRemoved fires for every
-             non-built-in removal (the seeds are a device-only removal, so
-             they never write the account); addonInstalled carries the fresh
-             descriptor after a successful install. MainScene mutates the
-             account mirror and pumps one collection put; the screen knows
-             nothing about the account. -->
         <field id="addonRemoved" type="assocarray" />
         <field id="addonInstalled" type="assocarray" />
     </interface>
@@ -28,135 +19,44 @@
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
 
     <children>
-        <Rectangle id="addonsBg" width="1920" height="1080" color="0x0" />
+        <Rectangle id="addonsBg" width="1920" height="1080" color="0x000000FF" />
 
         <Label
             id="addonsTitle"
             translation="[80, 48]"
-            width="1760"
+            width="900"
             height="60"
             font="font:LargeBoldSystemFont" />
 
-        <ChevronList
+        <MultiStyleLabel
+            id="setupHeader"
+            translation="[900, 56]"
+            width="940"
+            height="44"
+            horizAlign="right"
+            vertAlign="center"
+            visible="false" />
+
+        <ChipsRow id="addChipRow" translation="[160, 150]" />
+
+        <RowList
             id="addonsList"
-            translation="[80, 150]"
-            numRows="4"
-            itemWidth="1000"
-            rowHeight="160"
-            rowComponent="AddonTile" />
-
-       <Group id="infoPanel" translation="[1140, 150]">
-            <Rectangle id="infoPlate" width="700" height="750" />
-
-            <!-- Add add-on: install options (companion/QR + local setup URL). -->
-            <Group id="addPanel" visible="false">
-                <Label
-                    id="companionTitle"
-                    translation="[40, 36]"
-                    width="620"
-                    height="80"
-                    text="Add add-ons faster"
-                    horizAlign="center"
-                    font="font:MediumBoldSystemFont" />
-                <Poster
-                    id="companionQr"
-                    translation="[185, 140]"
-                    width="330"
-                    height="330"
-                    uri="pkg:/images/qr-companion.png" />
-                <Label
-                    id="companionCaption"
-                    translation="[40, 478]"
-                    width="620"
-                    height="140"
-                    horizAlign="center"
-                    wrap="true"
-                    text="Use our Android app to add add-ons faster — no need to type a manifest URL by hand."
-                    font="font:SmallSystemFont" />
-                <Label
-                    id="setupHint"
-                    translation="[40, 636]"
-                    width="620"
-                    height="30"
-                    horizAlign="center"
-                    visible="false"
-                    text="Or install from your browser:"
-                    font="font:SmallSystemFont" />
-                <Label
-                    id="setupUrl"
-                    translation="[40, 672]"
-                    width="620"
-                    height="44"
-                    horizAlign="center"
-                    visible="false"
-                    font="font:MediumBoldSystemFont" />
-            </Group>
-
-            <!-- Installed add-on: contextual details. -->
-            <Group id="detailPanel" visible="false">
-                <Poster
-                    id="detailLogoBg"
-                    uri="pkg:/images/chip.9.png"
-                    width="136"
-                    height="136"
-                    translation="[282, 36]" />
-                <Poster
-                    id="detailLogo"
-                    translation="[290, 44]"
-                    width="120"
-                    height="120"
-                    loadWidth="120"
-                    loadHeight="120"
-                    loadDisplayMode="scaleToFit"
-                    uri="pkg:/images/puzzle.png"
-                    failedBitmapUri="pkg:/images/puzzle.png" />
-                <Label
-                    id="detailName"
-                    translation="[40, 196]"
-                    width="620"
-                    height="48"
-                    horizAlign="center"
-                    font="font:MediumBoldSystemFont" />
-                <Label
-                    id="detailMeta"
-                    translation="[40, 248]"
-                    width="620"
-                    height="36"
-                    horizAlign="center"
-                    font="font:SmallBoldSystemFont" />
-                <Label
-                    id="detailDescription"
-                    translation="[50, 304]"
-                    width="600"
-                    height="260"
-                    horizAlign="center"
-                    vertAlign="top"
-                    wrap="true"
-                    font="font:SmallSystemFont" />
-                <Label
-                    id="detailAddress"
-                    translation="[40, 584]"
-                    width="620"
-                    height="70"
-                    horizAlign="center"
-                    vertAlign="top"
-                    wrap="true"
-                    font="font:SmallSystemFont" />
-                <Label
-                    id="detailAction"
-                    translation="[40, 672]"
-                    width="620"
-                    height="40"
-                    horizAlign="center"
-                    font="font:MediumBoldSystemFont" />
-            </Group>
-        </Group>
+            translation="[160, 250]"
+            numRows="1"
+            itemSize="[1600, 332]"
+            itemSpacing="[0, 12]"
+            rowItemSize="[[1600, 320]]"
+            rowItemSpacing="[[0, 0]]"
+            showRowLabel="false"
+            drawFocusFeedback="false"
+            itemComponentName="AddonCard" />
 
         <Label
             id="addonsStatus"
-            translation="[80, 1000]"
+            translation="[80, 1012]"
             width="1760"
             height="40"
+            horizAlign="center"
             font="font:SmallSystemFont" />
     </children>
 </component>
