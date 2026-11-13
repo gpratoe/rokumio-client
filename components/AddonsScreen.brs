@@ -1,86 +1,70 @@
-' AddonsScreen — installed add-on manager.
+' AddonsScreen — installed add-on manager (Streams-style rich cards).
 '
-' One AddonTile per add-on: logo, name, dimmed version, the add-on's scope and
-' its description. The action on the right is part of the row model, not the
-' markup, so the same tile can become a search result later (Uninstall here,
-' Install there). The "Add add-on" entry uses the same tile and installs by
-' fetching a manifest URL through a system KeyboardDialog.
-'
-' Removing any add-on — including a shipped built-in — requires a confirmation
-' dialog; the builtin flag is passed to AddonsStore.Uninstall so a same-id
-' mirror and its shipped seed are told apart. The list is rebuilt after every
-' install/remove so it always reflects the store.
-'
-' Display metadata (description and logo) is retained by AddonsStore. Records
-' stored before that existed are refreshed off the render thread by
-' AddonMetadataTask while their tiles show a placeholder; successful results
-' are persisted back through the store. Built-ins are virtual, so their fetched
-' metadata lives in this screen's session cache.
-'
-' The manifest fetch happens on AddonsInstallTask (off the render thread — the
-' request can park up to the 15s default timeout). The task validates against a
-' registry-less store and returns the installed record; on success the real
-' store adopts it through AddonsStore.Register, which applies the same duplicate
-' rule and persists. "Installing…" sits on the status line while it runs; a
-' stale result that lands after exit/cancel is dropped by the m.installTask
-' guard.
+' A full-width RowList of AddonCards: "Add add-on" first, then each installed
+' add-on. Hybrid install: local browser setup URL shown in the header and in
+' the add-options dialog; manual manifest entry uses the keyboard dialog.
+' Metadata/install/remove flows and account-sync signals are preserved.
 
 sub init()
+    m.bg = m.top.FindNode("addonsBg")
     m.title = m.top.FindNode("addonsTitle")
-    m.sub = m.top.FindNode("addonsSub")
+    m.setupHeader = m.top.FindNode("setupHeader")
     m.status = m.top.FindNode("addonsStatus")
     m.list = m.top.FindNode("addonsList")
-
-    ' Decorative companion-app panel (see the XML comment). Coloured here rather
-    ' than in markup so it follows Theme() like every other screen does.
-    m.companionPlate = m.top.FindNode("companionPlate")
-    m.companionTitle = m.top.FindNode("companionTitle")
-    m.companionCaption = m.top.FindNode("companionCaption")
-    m.setupHint = m.top.FindNode("setupHint")
-    m.setupUrl = m.top.FindNode("setupUrl")
+    m.addChipRow = m.top.FindNode("addChipRow")
 
     t = Theme()
-    m.title.color = t.accent
-    m.sub.color = t.textSecondary
+    m.bg.color = "0x000000FF"
+    m.title.color = t.textPrimary
     m.status.color = t.accent
-    m.companionPlate.color = t.screenBg
-    m.companionTitle.color = t.accent
-    m.companionCaption.color = t.textSecondary
-    m.setupHint.color = t.textSecondary
-    m.setupUrl.color = t.accent
+    if m.setupHeader <> invalid
+        m.setupHeader.drawingStyles = {
+            "default": { "fontUri": "font:SmallSystemFont", "color": t.textSecondary }
+            "url": { "fontUri": "font:SmallSystemFont", "color": t.accent }
+        }
+    end if
 
     m.list.ObserveField("rowItemSelected", "onRowSelected")
+    m.addChipRow.ObserveField("selection", "onAddChipSelected")
 
     m.rows = []
-    m.rowNodes = []
     m.metadataCache = {}
     m.metadataTask = invalid
     m.metadataFailures = 0
     m.installTask = invalid
+    m.setupAddress = ""
+    m.addOptionsDialog = invalid
 end sub
 
-' Address of the local setup page, forwarded from the Scene at launch. The two
-' labels are born hidden so this screen never flashes an address that has not
-' been published yet.
 sub SetSetupAddress(url as dynamic)
     if url = invalid then return
     if url = "" then return
-    m.setupUrl.text = url
-    m.setupHint.visible = true
-    m.setupUrl.visible = true
+    m.setupAddress = url
+    UpdateSetupHeader()
+end sub
+
+sub UpdateSetupHeader()
+    if m.setupHeader = invalid then return
+    hasSetup = m.setupAddress <> invalid and m.setupAddress <> ""
+    m.setupHeader.visible = hasSetup
+    if hasSetup
+        prefix = Lang("addons", "browserInstallPrefix")
+        m.setupHeader.text = prefix + "<url>" + m.setupAddress + "</url>"
+    else
+        m.setupHeader.text = ""
+    end if
 end sub
 
 function OnEnter(params as object) as void
     RefreshTexts()
     m.title.text = Lang("addons", "title")
-    m.companionTitle.text = Lang("addons", "companionTitle")
-    m.companionCaption.text = Lang("addons", "companionCaption")
-    m.setupHint.text = Lang("addons", "setupHint")
+    UpdateSetupHeader()
+    BuildAddChip()
     CancelInstall()
     CancelMetadata()
     m.status.text = ""
-    BuildRows()
-    m.list.callFunc("SetListFocus")
+    BuildRows(false)
+    if m.addChipRow <> invalid then m.addChipRow.callFunc("FocusChip", 0)
     StartMetadataRefresh()
 end function
 
@@ -93,35 +77,38 @@ function OnBackPressed() as boolean
     return false
 end function
 
-sub BlurFocus()
+sub BuildAddChip()
+    if m.addChipRow = invalid then return
+    m.addChipRow.callFunc("SetChips", [{
+        title: Lang("addons", "addRow")
+        icon: "pkg:/images/add.png"
+        active: false
+    }])
 end sub
 
-' Rebuild the list: the add row first, then every installed add-on. Focus is
-' restored to the row the user was on because installing, removing or adopting
-' a result is not a reason to throw the cursor back to the top.
-sub BuildRows()
+sub RestoreFocus()
+    if m.addChipRow <> invalid
+        m.addChipRow.callFunc("FocusChip", 0)
+    else if m.rows.Count() > 0 and m.list <> invalid
+        m.list.SetFocus(true)
+    end if
+end sub
+
+sub EmptyList()
+    content = CreateObject("roSGNode", "ContentNode")
+    m.list.content = content
+    m.list.numRows = 0
+end sub
+
+sub BuildRows(preserveFocus = true as boolean)
     focusRow = 0
-    if m.list.rowItemFocused <> invalid and m.list.rowItemFocused.Count() > 0 then focusRow = m.list.rowItemFocused[0]
+    if preserveFocus and m.list.rowItemFocused <> invalid and m.list.rowItemFocused.Count() > 0
+        focusRow = m.list.rowItemFocused[0]
+    end if
 
     m.rows = []
-    m.rows.Push({
-        actionKey: "add"
-        id: ""
-        name: ""
-        title: Lang("addons", "addRow")
-        description: Lang("addons", "addRowValue")
-        logo: "pkg:/images/puzzle.png"
-        version: ""
-        scope: ""
-        actionLabel: Lang("addons", "addAction")
-        address: ""
-        builtin: false
-        metadataPending: false
-    })
     if m.stores <> invalid
         for each addon in m.stores.addons.callFunc("AddonsGetAll")
-            ' Add-on records come from manifests an add-on supplied, so every
-            ' displayed value is coerced rather than trusted to be a string.
             row = {
                 actionKey: "uninstall"
                 id: StringOf(addon.id)
@@ -147,57 +134,83 @@ sub BuildRows()
     end if
 
     content = CreateObject("roSGNode", "ContentNode")
-    m.rowNodes = []
     for each row in m.rows
-        entry = content.CreateChild("ContentNode")
-        item = entry.CreateChild("AddonTileContent")
+        rowNode = content.CreateChild("ContentNode")
+        item = rowNode.CreateChild("TileContent")
         PaintRowNode(item, row)
-        m.rowNodes.Push(item)
     end for
+
+    if m.rows.Count() = 0
+        EmptyList()
+        return
+    end if
 
     if focusRow >= m.rows.Count() then focusRow = m.rows.Count() - 1
     if focusRow < 0 then focusRow = 0
-    m.list.focusRow = focusRow
-    m.list.content = content
 
-    installed = m.rows.Count() - 1
-    if installed < 0 then installed = 0
-    quantity = Fill(Lang("addons", "countMany"), { count: installed.ToStr() })
-    if installed = 1 then quantity = Lang("addons", "countOne")
-    m.sub.text = Fill(Lang("addons", "subtitle"), { count: quantity })
+    m.list.content = content
+    m.list.numRows = m.rows.Count()
+    m.list.jumpToRowItem = [focusRow, 0]
+    if m.top.screenActive and preserveFocus and not ChipHoldingFocus() then m.list.SetFocus(true)
 end sub
 
-' Copy one row model into its AddonTileContent node. The tile watches those
-' fields, so a metadata result repaints a row without rebuilding the list.
 sub PaintRowNode(item as object, row as object)
-    item.title = row.title
-    item.description = row.description
-    item.addonLogo = row.logo
-    item.addonVersion = row.version
-    item.addonScope = row.scope
-    item.actionKey = row.actionKey
-    item.actionLabel = row.actionLabel
+    item.title = StringOf(row.title)
+    item.description = StringOf(row.description)
+    item.addonLogo = StringOf(row.logo)
+    item.addonVersion = StringOf(row.version)
+    item.addonScope = StringOf(row.scope)
+    item.actionKey = StringOf(row.actionKey)
+    item.actionLabel = StringOf(row.actionLabel)
+end sub
+
+function GetFocusedIndex() as integer
+    if m.list.rowItemFocused <> invalid and m.list.rowItemFocused.Count() > 0
+        return m.list.rowItemFocused[0]
+    end if
+    return 0
+end function
+
+function ChipHoldingFocus() as boolean
+    if m.addChipRow = invalid then return false
+    return m.addChipRow.callFunc("HoldingFocus") = true
+end function
+
+sub onAddChipSelected()
+    ShowAddOptionsDialog()
 end sub
 
 sub onRowSelected()
     data = m.list.rowItemSelected
-    if data = invalid or data.Count() < 2 then return
+    if data = invalid or data.Count() < 1 then return
     index = data[0]
     if index < 0 or index >= m.rows.Count() then return
     row = m.rows[index]
-    ' The action is data, not the row's identity: a future add-on search can
-    ' hand the same tile an "install" action without touching the screen.
-    if row.actionKey = "add"
-        ShowAddDialog()
-    else if row.actionKey = "uninstall"
+    if row.actionKey = "uninstall"
         ShowRemoveConfirm(row)
     end if
 end sub
 
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if key = "down" and ChipHoldingFocus()
+        if m.rows.Count() > 0
+            m.addChipRow.callFunc("Blur")
+            m.list.SetFocus(true)
+            return true
+        end if
+    else if key = "up" and m.list.hasFocus()
+        idx = GetFocusedIndex()
+        if idx <= 0 and m.addChipRow <> invalid
+            m.addChipRow.callFunc("FocusChip", 0)
+            return true
+        end if
+    end if
+    return false
+end function
+
 ' --- metadata refresh ------------------------------------------------------
 
-' A logo that is an SVG cannot be rendered by Roku's Poster, so it needs an
-' off-thread PNG candidate resolution even when its other metadata is cached.
 function LogoNeedsResolution(logo as dynamic) as boolean
     url = StringOf(logo).Trim()
     if url = "" then return false
@@ -208,8 +221,6 @@ function LogoNeedsResolution(logo as dynamic) as boolean
     return LCase(path.Right(4)) = ".svg"
 end function
 
-' True when this row has no display metadata yet. A cached success is final for
-' this screen session; an unreachable manifest is retried on the next entry.
 function MetadataNeeded(addon as object) as boolean
     address = StringOf(addon.address)
     if address = "" then return false
@@ -281,6 +292,7 @@ end sub
 
 sub ApplyMetadataToRows(address as string)
     cached = m.metadataCache[address]
+    content = m.list.content
     for i = 0 to m.rows.Count() - 1
         row = m.rows[i]
         if row.address <> address then continue for
@@ -295,7 +307,7 @@ sub ApplyMetadataToRows(address as string)
         end if
         if row.description = "" then row.description = Lang("addons", "noDescription")
         if row.logo = "" then row.logo = "pkg:/images/puzzle.png"
-        PaintRowNode(m.rowNodes[i], row)
+        PaintRowByIndex(i, row)
     end for
 end sub
 
@@ -308,13 +320,10 @@ sub MarkMetadataFailed(address as string)
             row.description = Lang("addons", "noDescription")
         end if
         if row.logo = "" then row.logo = "pkg:/images/puzzle.png"
-        PaintRowNode(m.rowNodes[i], row)
+        PaintRowByIndex(i, row)
     end for
 end sub
 
-' The worker has ended. Any row still pending lost its result (or the task was
-' cancelled); leave it on the no-description fallback rather than a spinner-like
-' "loading" line that will never change. Failures land as a toast.
 sub FinishMetadataRefresh()
     for i = 0 to m.rows.Count() - 1
         row = m.rows[i]
@@ -323,11 +332,23 @@ sub FinishMetadataRefresh()
         if row.description = "" or row.description = Lang("addons", "loadingMetadata")
             row.description = Lang("addons", "noDescription")
         end if
-        PaintRowNode(m.rowNodes[i], row)
+        PaintRowByIndex(i, row)
     end for
     if m.metadataFailures > 0
         Notify(Lang("addons", "metadataUnavailable"), "error")
     end if
+end sub
+
+sub PaintRowByIndex(index as integer, row as object)
+    content = m.list.content
+    if content = invalid then return
+    if index < 0 or index >= content.getChildCount() then return
+    rowNode = content.getChild(index)
+    if rowNode = invalid then return
+    item = invalid
+    if rowNode.getChildCount() > 0 then item = rowNode.getChild(0)
+    if item = invalid then return
+    PaintRowNode(item, row)
 end sub
 
 sub CancelMetadata()
@@ -338,8 +359,6 @@ sub CancelMetadata()
     end if
 end sub
 
-' A manifest may declare any type name; the known ones use the app's own
-' vocabulary and anything else is title-cased as the manifest wrote it.
 function AddonScopeLabel(types as dynamic) as string
     if types = invalid or Type(types) <> "roArray" then return Lang("addons", "scopeOther")
     labels = []
@@ -364,52 +383,54 @@ function AddonTypeLabel(metaType as string) as string
     return UCase(metaType.Left(1)) + metaType.Mid(1)
 end function
 
-' --- install / remove ------------------------------------------------------
+' --- install (hybrid) ------------------------------------------------------
 
-' Install flow: a KeyboardDialog whose OK kicks AddonsInstallTask.
-sub ShowAddDialog()
+sub ShowAddOptionsDialog()
+    dialog = CreateObject("roSGNode", "AddAddonDialog")
+    texts = {
+        title: Lang("addons", "addDialogTitle")
+        browserInstallPrefix: Lang("addons", "browserInstallPrefix")
+        manualButton: Lang("addons", "manualInstallButton")
+        closeButton: Lang("common", "cancel")
+        manualInstallOnly: Lang("addons", "manualInstallOnly")
+    }
+    dialog.callFunc("Configure", m.setupAddress, texts)
+    dialog.observeField("buttonSelected", "onAddOptionsChoice")
+    m.addOptionsDialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onAddOptionsChoice()
+    dialog = m.addOptionsDialog
+    if dialog = invalid then dialog = m.top.getScene().dialog
+    index = -1
+    if dialog <> invalid then index = dialog.buttonSelected
+    m.addOptionsDialog = invalid
+    if index = 0
+        if m.top.getScene().dialog <> invalid then m.top.getScene().dialog = invalid
+        ShowManualAddDialog()
+    else
+        if m.top.getScene().dialog <> invalid then m.top.getScene().dialog = invalid
+        RestoreFocus()
+    end if
+end sub
+
+sub ShowManualAddDialog()
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-    ' Palette and the array-shaped message are the two things that differ from
-    ' the legacy node. See the same block in SettingsScreen for why each one
-    ' fails quietly rather than loudly.
     dialog.title = Lang("addons", "addRow")
     dialog.message = [Lang("addons", "addDialogHelp")]
     dialog.text = ""
     dialog.buttons = [Lang("common", "ok"), Lang("common", "cancel")]
     dialog.observeField("buttonSelected", "onAddChoice")
-    ' Full word dictation, and the caret the dialog does not place for itself.
-    ' Before the dialog is shown: the internal edit box is built at CreateObject
-    ' time, so this is the earliest the setting can land. See ApplyAddKeyboard.
     ApplyAddKeyboard(dialog)
     m.top.getScene().dialog = dialog
 end sub
 
-' Configures the dialog's internal VoiceTextEditBox, which StandardKeyboardDialog
-' builds for itself and which is therefore reached through the dialog rather than
-' owned here. The box exists as soon as the node is created — confirmed on
-' device — so this is called inline and needs nothing to wait for.
-'
-' No try, deliberately. A throw here prints the offending field and line to the
-' device console, and the console is where this is read. The previous version
-' swallowed the error, which is how a caret fix that never took became
-' indistinguishable from one that did.
 sub ApplyAddKeyboard(dialog as object) as void
     if dialog = invalid then return
     editor = dialog.textEditBox
     if editor = invalid then return
-
-    ' Dictation mode, and the reason voice came out one letter at a time.
-    ' DynamicKeyboard builds its internal edit box with voiceEntryType
-    ' "alphanumeric" — letter-by-letter, meant for street addresses — which
-    ' beats the node class default of "generic". The dialog's own
-    ' keyboardDomain defaults to "generic" too but does not reach this field.
-    ' "generic" is full word input, which is what a text prompt wants. First, so
-    ' it lands even if the caret write below is the thing being rejected.
     editor.voiceEntryType = "generic"
-    ' Caret after the text rather than at 0, so backspace and the left arrow have
-    ' something to act on: a caret parked at 0 makes both of them no-ops by
-    ' definition while typing still appends, which from the outside is
-    ' indistinguishable from a dead keyboard.
     editor.cursorPosition = Len(dialog.text)
 end sub
 
@@ -418,15 +439,12 @@ sub onAddChoice()
     if dialog <> invalid
         index = dialog.buttonSelected
         address = dialog.text
-        ' StandardDialog's own dismissal, and the one the exit confirm already
-        ' uses: setting close makes the scene drop the node from the dialog slot
-        ' by itself. Both values are read above before anything is torn down.
         dialog.close = true
         if index = 0
             StartInstall(address.Trim())
         end if
     end if
-    m.list.callFunc("SetListFocus")
+    RestoreFocus()
 end sub
 
 sub Notify(text as string, kind = "info" as string)
@@ -434,9 +452,6 @@ sub Notify(text as string, kind = "info" as string)
     if scene <> invalid then scene.callFunc("Notify", text, kind)
 end sub
 
-' Kick the manifest fetch off the render thread. AddonsInstallTask runs
-' AddonsStore.Install against a registry-less store and returns the installed
-' record (or a validation/fetch error); the real store adopts it on success.
 sub StartInstall(address as string)
     if m.stores = invalid then return
     if m.installTask <> invalid then return
@@ -446,9 +461,6 @@ sub StartInstall(address as string)
     m.installTask = task
 end sub
 
-' The install finished. A stale result that landed after CancelInstall (or
-' exit) is dropped by the m.installTask guard. Success adopts the returned
-' record through the real store (duplicate rule enforced again there).
 sub onInstallResult()
     if m.installTask = invalid then return
     task = m.installTask
@@ -458,10 +470,6 @@ sub onInstallResult()
 
     if result <> invalid and result.ok and result.record <> invalid
         if m.stores <> invalid and m.stores.addons.callFunc("AddonsRegister", result.record)
-            ' The account learns about the install the same way it learns
-            ' about a removal (see onRemoveChoice): the descriptor rides to
-            ' MainScene, which mutates the mirror and pumps one collection
-            ' put. Nothing to sync from the screen's side.
             m.top.addonInstalled = { transportUrl: result.transportUrl, manifest: result.manifest }
             Notify(Fill(Lang("addons", "statusInstalled"), { id: result.id }))
         else
@@ -472,7 +480,9 @@ sub onInstallResult()
         if result <> invalid and result.error <> invalid then error = result.error
         Notify(Fill(Lang("addons", "statusInstallFailed"), { error: error }), "error")
     end if
-    BuildRows()
+    m.status.text = ""
+    BuildRows(true)
+    StartMetadataRefresh()
 end sub
 
 sub CancelInstall()
@@ -483,13 +493,11 @@ sub CancelInstall()
     end if
 end sub
 
-' Confirm removal of any add-on. Built-ins are shipped defaults, not sacred:
-' the device is the user's, so they get the same two-step confirmation and the
-' builtin flag disambiguates a shipped seed from a same-id installed mirror.
+' --- remove ----------------------------------------------------------------
+
 sub ShowRemoveConfirm(row as object)
     m.pendingRow = row
-    nodeType = "StandardMessageDialog"
-    dialog = CreateObject("roSGNode", nodeType)
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = Fill(Lang("addons", "removeDialogTitle"), { name: row.name })
     dialog.message = [Lang("addons", "removeDialogMessage")]
     dialog.buttons = [Lang("addons", "removeButton"), Lang("common", "cancel")]
@@ -505,19 +513,14 @@ sub onRemoveChoice()
         if index = 0 and m.pendingRow <> invalid
             removed = m.stores.addons.callFunc("AddonsUninstall", m.pendingRow.id, m.pendingRow.builtin)
             if removed
-                ' The account learns about the removal too — a device-only
-                ' removal would be resurrected by the next launch sync, which
-                ' is exactly why MainScene receives this rep. A removal that
-                ' lands without a put (guest session, mirror unknown, id the
-                ' account never had) is reported from MainScene on its fault
-                ' strip; the local state is final either way.
                 if m.pendingRow.builtin = false then m.top.addonRemoved = { id: m.pendingRow.id }
                 Notify(Fill(Lang("addons", "statusRemoved"), { name: m.pendingRow.name }))
             else
                 Notify(Fill(Lang("addons", "statusRemoveFailed"), { name: m.pendingRow.name }), "error")
             end if
-            BuildRows()
+            BuildRows(true)
+            StartMetadataRefresh()
         end if
     end if
-    m.list.callFunc("SetListFocus")
+    RestoreFocus()
 end sub

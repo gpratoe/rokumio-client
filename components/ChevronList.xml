@@ -1,26 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="ChevronList" extends="Group">
-    <!-- Single-column RowList with a fixed visible window plus chevron-up/down
-         markers above and below that appear when items sit hidden outside the
-         window. The window (numRows rows, floatingFocus scroll) is tracked as
-         state and only shifts when focus actually crosses an edge, so the
-         chevrons reflect hidden content rather than the focused row. Consumers
-         feed row content (ContentNode root with one child per row), pick the
-         geometry, and read the rowItemFocused/rowItemSelected pairs. -->
+    <!-- Single-column vertical list of custom row components with a fixed
+         visible window and chevron-up/down indicators when items are hidden.
+         Replaces the old RowList-based implementation while keeping a compatible
+         interface for existing screens. -->
     <interface>
         <field id="numRows" type="integer" value="5" />
         <field id="itemWidth" type="integer" value="1000" />
         <field id="rowHeight" type="integer" value="110" />
         <field id="rowComponent" type="string" value="PrefRow" />
         <field id="showChevrons" type="boolean" value="true" />
-        <!-- Which row the window should open on when the content is replaced.
-             Zero is the old behaviour (the top); a consumer that rebuilds the
-             list under the user's cursor sets it to the row that was focused
-             so the cursor stays where it was. -->
+        <!-- Which row should be focused when content is replaced. -->
         <field id="focusRow" type="integer" value="0" />
         <field id="content" type="node" />
         <field id="rowItemFocused" type="array" />
         <field id="rowItemSelected" type="array" />
+        <!-- When true, Up at the first row (or in an empty list) emits focusExit="up" and blurs. -->
+        <field id="exitUp" type="boolean" value="false" />
+        <!-- When true, the options (*) key emits focusExit="options" and blurs. -->
+        <field id="exitOptions" type="boolean" value="false" />
+        <!-- Emitted when the list hands focus back to the parent (alwaysNotify). -->
+        <field id="focusExit" type="string" alwaysNotify="true" />
         <function name="SetListFocus" />
         <function name="HasListFocus" />
     </interface>
@@ -29,23 +29,18 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
-        <RowList
-            id="rowList"
-            numRows="5"
-            itemSize="[1000, 118]"
-            itemSpacing="[0, 8]"
-            rowItemSize="[[1000, 110]]"
-            showRowLabel="[false]"
-            drawFocusFeedback="true"
-            itemComponentName="PrefRow"
-            vertFocusAnimationStyle="floatingFocus" />
+        <Group id="rowsClip" clippingRect="[0, 0, 1000, 590]" />
         <Poster
             id="chevronUp"
             uri="pkg:/images/chevron-up.png"
+            width="48"
+            height="48"
             visible="false" />
         <Poster
             id="chevronDown"
             uri="pkg:/images/chevron-down.png"
+            width="48"
+            height="48"
             visible="false" />
     </children>
 </component>

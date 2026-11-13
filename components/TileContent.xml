@@ -35,5 +35,11 @@
         <!-- StreamTile: when set, a torrent card shows this label instead of
              the compatibility glyphs (the always-remux mode). -->
         <field id="remuxLabel" type="string" />
+        <!-- AddonCard: rich add-on tile fields. -->
+        <field id="addonLogo" type="string" value="" />
+        <field id="addonVersion" type="string" value="" />
+        <field id="addonScope" type="string" value="" />
+        <field id="actionKey" type="string" value="" />
+        <field id="actionLabel" type="string" value="" />
     </interface>
 </component>

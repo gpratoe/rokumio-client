@@ -95,9 +95,9 @@ sub ApplyState()
         m.icon.blendColor = t.screenBg
         m.text.color = t.screenBg
     else if m.active
-        m.iconBg.blendColor = t.accentDim
-        m.icon.blendColor = t.textPrimary
-        m.text.color = t.accent
+        m.iconBg.blendColor = t.chipActiveBg
+        m.icon.blendColor = t.chipActiveText
+        m.text.color = t.chipActiveText
     else
         if m.top.flat = true
             m.iconBg.blendColor = "0x00000000"

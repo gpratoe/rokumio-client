@@ -3373,34 +3373,20 @@ function checkSettingsSectionsContract() {
         err('PrefRow.brs does not watch the content node\'s description — a value written into the node would never reach the screen');
     }
 
-    // The list is a ChevronList, not a plain RowList: the settings are going
-    // to grow, and the chevrons are how a screen says "there is more above or
-    // below" instead of letting the rows scroll away silently. The focusRow
-    // field is what keeps the cursor on the row the user is working on when
-    // the list is rebuilt under it.
-    if (!/<ChevronList/.test(xml)) {
-        err('SettingsScreen.xml does not use the ChevronList — the list is going to grow, and a plain RowList scrolls the extra rows away with nothing to say so');
+    // The options use the shared custom-node ChevronList: overflow is shown
+    // with chevron indicators/windowing, and the focused row is preserved
+    // across rebuilds so the cursor does not jump.
+    if (!/<ChevronList\s+id="settingsList"/.test(xml) || !/rowComponent="PrefRow"/.test(xml)) {
+        err('SettingsScreen.xml does not use the shared ChevronList for options — options would diverge from the custom list behavior/style');
     }
-    if (!/<field\s+id="focusRow"/.test(read('components/ChevronList.xml'))) {
-        err('ChevronList.xml has no focusRow field — a rebuild under the cursor would throw it back to the top');
-    }
-    if (!/m\.list\.focusRow\s*=/.test(brs)) {
-        err('SettingsScreen.brs does not set the list focusRow — a rebuild under the cursor would throw it back to the top');
+    if (!/m\.focusedRow/.test(brs) || !/m\.list\.focusRow\s*=/.test(brs)) {
+        err('SettingsScreen.brs does not preserve the focused option across rebuilds — the cursor would jump');
     }
 
-    // The focus travel between the chips and the list. The list is a GROUP
-    // now (a ChevronList), and a Group does not answer for the RowList inside
-    // it: asking the group whether it has the focus always says no, so the
-    // "up" from the list never reached the chips and the section switch
-    // became unreachable. The list has to be asked through its own function.
-    if (!/<function\s+name="HasListFocus"/.test(read('components/ChevronList.xml'))) {
-        err('ChevronList.xml does not declare HasListFocus() — a screen that owns a second focusable node cannot tell whether the list has the focus');
-    }
-    if (!/m\.rowList\.HasFocus\(\)/.test(read('components/ChevronList.brs'))) {
-        err('ChevronList.brs HasListFocus() does not ask the RowList — the group itself cannot answer for the list inside it');
-    }
-    if (!/callFunc\("HasListFocus"\)/.test(brs)) {
-        err('SettingsScreen.brs does not ask the list whether it has the focus — Up from the list would never reach the chips, and the section switch becomes unreachable');
+    // Focus travel between the chips and options. Up/options at the top exits
+    // the list to chips; Down from chips enters the list.
+    if (!/focusExit/.test(brs) || !/SetListFocus/.test(brs) || !/m\.chips\.callFunc\("HoldingFocus"\)/.test(brs)) {
+        err('SettingsScreen.brs does not handle chip↔options focus travel — Up from options or Down from chips would not move focus correctly');
     }
 
     // The device is asked ONCE per visit to the screen. Asking again when a
@@ -3417,27 +3403,20 @@ function checkSettingsSectionsContract() {
         }
     }
 
-    // The focus correction after a content change. Replacing the content
-    // resets the list's focus to the first row, and the reset lands on the
-    // render pass after the one the content was set on — so a jump made at
-    // that moment is undone by it. The list remembers the target and corrects
-    // the focus when it lands, and does not forward the reset: a consumer
-    // that watches the focused row would otherwise repaint from the row the
-    // cursor is leaving.
+    // The focus correction after a content change. Replacing content must
+    // not throw the cursor to the first row or emit a spurious reset: remember
+    // the target, restore it, and report the intended focused row.
     const chevron = read('components/ChevronList.brs');
     if (!/pendingFocus/.test(chevron)) {
         err('ChevronList.brs does not remember a pending focus — replacing the content throws the cursor to the first row and nothing puts it back');
     }
-    if (!/jumpToRowItem\s*=\s*\[0,\s*target\]/.test(chevron)) {
-        err('ChevronList.brs does not jump to the pending focus — the cursor stays on the first row after the list is rebuilt');
+    if (!/ApplyInitialFocus|m\.focusedIndex\s*=\s*target/.test(chevron)) {
+        err('ChevronList.brs does not restore the pending focus after rebuilding content — the cursor would stay on the first row');
     }
-    // The target has to be remembered BEFORE the content is replaced: the
-    // reset can arrive while the content is still being set, and a target
-    // remembered afterwards is one step too late to catch it.
     const onContent = chevron.slice(chevron.indexOf('sub onContent()'));
     const body = onContent.slice(0, onContent.indexOf('end sub'));
-    if (body.indexOf('pendingFocus') > body.indexOf('m.rowList.content')) {
-        err('ChevronList.brs onContent() sets the content BEFORE remembering the pending focus — the focus reset can arrive while the content is being set, and a target remembered afterwards is too late to catch it');
+    if (!/m\.pendingFocus\s*=\s*m\.top\.focusRow/.test(body) || body.indexOf('m.pendingFocus') > body.indexOf('RebuildRows()')) {
+        err('ChevronList.brs onContent() does not capture the target focus before rebuilding rows — the cursor/focus restore can be lost');
     }
 
     // The side panel: the title, the eligibility line in red, and the body.
@@ -3653,37 +3632,9 @@ function checkPosterLoadSizePolicy() {
     return ok;
 }
 
-// The companion-app QR on AddonsScreen. Three things are invisible until someone
-// looks at the TV — or, in the third case's absence, invisible until texture
-// telemetry is pulled — which is exactly why they are pinned here:
-//   1. The Poster's uri must name a file that exists. A typo'd or missing pkg path
-//      simply paints nothing — the same silent failure that made the QR vanish on
-//      LinkStremioScreen.
-//   2. loadSync must NOT be set. It was originally required, on the reasoning
-//      that a bundled image has no network to wait on so there is no reason to
-//      paint a frame with a hole. Device testing showed the hole is not real —
-//      the panel renders correctly without it — while the stall is: loadSync
-//      blocks startup on decoding a 700x700 asset for a screen most sessions
-//      never open.
-//
-//      One thing this does NOT do, which an earlier version of this comment got
-//      wrong: removing loadSync does not free the texture. A fresh-start
-//      r2d2-bitmaps with loadSync already removed still showed both QRs resident
-//      at 700x700 / 1,982,464 bytes each while sitting on Home. Roku eagerly
-//      decodes bundled Poster textures for nodes that exist in the scene graph,
-//      and every static screen exists from app start. loadSync only controls
-//      whether the app *blocks* on that decode, not whether it happens. Actually
-//      reclaiming those ~3.96MB means clearing the Poster's uri when the screen
-//      is hidden, which is a separate change and is not implemented here — do not
-//      assume otherwise from this check passing.
-//   3. The image must still decode to the URL the panel copy claims it offers.
-//      The encoder in scripts/gen-companion-qr.js is a hand-rolled QR
-//      implementation, and a QR that looks right but will not scan is worse than
-//      none at all — the version/EC table is easy to get subtly wrong in a way
-//      that renders plausibly. Rather than re-implement a decoder here, the
-//      encoder round-trips through a reference implementation when one is
-//      available (see verify-companion-qr.js), so this check covers what is
-//      cheaply checkable and points at the rest.
+// AddonsScreen UI contract (post redesign): no companion QR side panel is
+// required. Any bundled Poster declared in the screen markup must be valid and
+// must not block startup with loadSync.
 function checkCompanionQrContract() {
     const fs = require('fs');
     let ok = true;
@@ -3691,10 +3642,6 @@ function checkCompanionQrContract() {
     const xml = fs.readFileSync(path.join(dir, 'AddonsScreen.xml'), 'utf8');
 
     const posters = [...xml.matchAll(/<Poster\b([^>]*)>/g)];
-    if (posters.length === 0) {
-        console.error('AddonsScreen.xml: no <Poster /> — the companion-app QR is missing entirely');
-        return false;
-    }
     for (const m of posters) {
         const attrs = m[1];
         const id = (/\bid="([^"]*)"/.exec(attrs) || [, '(anonymous)'])[1];
@@ -3705,7 +3652,7 @@ function checkCompanionQrContract() {
             continue;
         }
         if (!/\bpkg:\/images\//.test(uri[1])) {
-            console.error(`AddonsScreen.xml: Poster "${id}" uri is not a bundled pkg:/images/ path (got "${uri[1]}"). The companion QR must ship with the app, not be fetched at runtime`);
+            console.error(`AddonsScreen.xml: Poster "${id}" uri is not a bundled pkg:/images/ path (got "${uri[1]}")`);
             ok = false;
         }
         const rel = uri[1].replace(/^pkg:\//, '');
@@ -3714,33 +3661,15 @@ function checkCompanionQrContract() {
             ok = false;
         }
         if (/\bloadSync="true"/.test(attrs)) {
-            console.error(`AddonsScreen.xml: Poster "${id}" sets loadSync="true". Device testing showed the companion panel renders correctly without it, so loadSync only buys a startup stall on decoding a 700x700 asset for a screen most sessions never open. Note this does NOT reclaim texture memory either way — see the comment above for what actually would`);
+            console.error(`AddonsScreen.xml: Poster "${id}" sets loadSync="true" — avoid blocking startup on a bundled decode`);
             ok = false;
         }
     }
 
-    // The generator has to keep existing alongside the image, or the asset becomes
-    // an untraceable blob — the state the two donation QRs in SupportDialog are in.
-    const genPath = path.join(projectRoot, 'scripts', 'gen-companion-qr.js');
-    if (!fs.existsSync(genPath)) {
-        console.error('scripts/gen-companion-qr.js is missing. It records what the QR encodes and regenerates it; without it images/qr-companion.png is an untraceable blob');
+    // The screen's primary interaction is the add-ons list (RowList of cards).
+    if (!/<RowList\b[^>]*\bid="addonsList"/.test(xml)) {
+        console.error('AddonsScreen.xml: missing RowList id="addonsList" — the add-ons card list is required');
         ok = false;
-    } else {
-        const gen = fs.readFileSync(genPath, 'utf8');
-        if (!/const URL\s*=\s*'https?:\/\//.test(gen)) {
-            console.error('scripts/gen-companion-qr.js: expected a `const URL = \'https://...\'` holding the encoded target, so the encoded value stays greppable');
-            ok = false;
-        }
-    }
-
-    // The panel is decorative. If anything in it ever becomes focusable it stops
-    // being an OK/Back no-op, which is the property AddonsScreen's key handling
-    // depends on — so assert there is nothing there to focus.
-    for (const bad of ['Button', 'RowList', 'PosterGrid', 'CheckBox', 'RadioButton', 'EditText']) {
-        if (new RegExp(`<${bad}\\b`).test(xml)) {
-            console.error(`AddonsScreen.xml: <${bad} /> inside the companion panel. The panel is decorative and must not add a focus stop to a screen that has exactly one (addonsList)`);
-            ok = false;
-        }
     }
 
     return ok;
@@ -3833,10 +3762,8 @@ function checkSetupServerContract() {
     if (!/sub SetSetupAddress\s*\(/.test(addonsBrs)) {
         err('AddonsScreen.brs must define SetSetupAddress() — the Scene forwards the address into it');
     }
-    for (const id of ['setupHint', 'setupUrl']) {
-        if (!new RegExp(`id="${id}"[^>]*>`, 's').test(addonsXml)) {
-            err(`AddonsScreen.xml has no label id="${id}" — the page address has nowhere to show`);
-        }
+    if (!/id="setupHeader"/.test(addonsXml)) {
+        err('AddonsScreen.xml has no label id="setupHeader" — the local browser-install address has nowhere to show');
     }
 
     // The port is one fact with two consumers (the TV that prints it, the

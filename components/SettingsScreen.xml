@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="SettingsScreen" extends="Screen">
     <!-- App preferences, grouped into sections: one chip per section along the
-         top, the rows of the selected section in the list below. Values are
-         persisted through SettingsStore. Editing the server address opens a
-         system KeyboardDialog; the language row cycles its options on OK. -->
+         top, the options of the selected section below. Values are persisted
+         through SettingsStore. Editing the server address opens a system
+         KeyboardDialog; the language row cycles its options on OK. -->
     <interface>
         <function name="OnEnter" />
         <function name="OnExit" />
@@ -25,41 +25,27 @@
             id="settingsTitle"
             translation="[80, 48]"
             width="1760"
-            height="70"
-            text="Settings"
+            height="60"
             font="font:LargeBoldSystemFont" />
-        <Label
-            id="settingsSub"
-            translation="[80, 126]"
-            width="1760"
-            height="36"
-            text="OK edits a row's value, Back returns to Home"
-            font="font:SmallSystemFont" />
 
-        <!-- The sections. One chip each, the selected one marked `active` so
-             ChipTile paints it in the accent: the chip row and the list
-             below then cannot disagree about which section is on screen.
-             A ChipsRow (the rail model) — the row owns Left/Right/OK. -->
-        <ChipsRow id="settingsChips" translation="[80, 176]" />
+        <!-- Section chips. The selected section is marked `active` (dimmed) so
+             the chip row and the options below agree on which section is shown. -->
+        <ChipsRow id="settingsChips" translation="[80, 150]" />
 
-        <!-- The rows of the selected section. A ChevronList rather than a plain
-             RowList: the list is going to grow, and the chevrons are how a
-             screen says "there is more above/below" without the rows silently
-             scrolling away. The up-chevron sits in the gap under the chips. -->
+        <!-- Options for the selected section (shared custom-node list). -->
         <ChevronList
             id="settingsList"
-            translation="[80, 280]"
+            translation="[80, 240]"
             numRows="5"
             itemWidth="1000"
-            rowHeight="110" />
+            rowHeight="110"
+            rowComponent="PrefRow"
+            exitUp="true"
+            exitOptions="true" />
 
-        <!-- The side panel, the Add-ons screen's pattern at the same geometry:
-             a plate on the right of the list that follows the focused row and
-             explains it. The eligibility line is separate and in red, because
-             "this option cannot do anything on this device" is a warning and
-             not a sentence to read inside a paragraph. -->
-        <Group id="infoPanel" translation="[1140, 280]">
-            <Rectangle id="infoPlate" width="700" height="690" />
+        <!-- Side panel: follows the focused row and explains it. -->
+        <Group id="infoPanel" translation="[1140, 240]">
+            <Rectangle id="infoPlate" width="700" height="700" />
             <Label
                 id="infoTitle"
                 translation="[40, 30]"
@@ -75,26 +61,22 @@
                 horizAlign="center"
                 visible="false"
                 font="font:SmallSystemFont" />
-            <!-- MultiStyleLabel so the codec names can be bold inside the
-                 sentence: the styles are set in code from the theme, because a
-                 colour literal in markup is a colour literal nobody can
-                 change. -->
+            <!-- MultiStyleLabel so codec names can be bold inside the sentence;
+                 styles are set in code from the theme. -->
             <MultiStyleLabel
                 id="infoBody"
                 translation="[40, 140]"
                 width="620"
-                height="510"
+                height="520"
                 horizAlign="center"
                 vertAlign="top"
                 wrap="true" />
         </Group>
 
-        <!-- The status line has a fixed home, so a section that grows does not
-             have to move it out of the way: the list above is a window of a
-             fixed height and the line sits below that window. -->
+        <!-- Status line below the options window. -->
         <Label
             id="settingsStatus"
-            translation="[80, 950]"
+            translation="[80, 940]"
             width="1760"
             height="40"
             font="font:SmallSystemFont" />

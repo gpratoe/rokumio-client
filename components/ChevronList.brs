@@ -1,154 +1,252 @@
-' ChevronList — a single-column RowList with a fixed visible window and
-' chevron-up/down markers that appear when items sit hidden above or below the
-' window.
+' ChevronList — a single-column vertical list of custom row components with a
+' fixed visible window and chevron indicators when items are hidden above/below.
 '
-' The window is "floatingFocus": the list does not scroll until focus passes
-' the last visible row, and then it scrolls by len so the focused row lands at
-' an edge. Only the visible bounds matter for the markers, so they are kept as
-' state and updated only when focus actually crosses an edge; movement inside
-' the window scrolls nothing and the chevrons stay put. Up shows whenever row 0
-' is hidden above; down whenever the last row is hidden below.
-'
-' Geometry (numRows, itemWidth, rowHeight) drives both the RowList config and
-' the chevron placement, so consumers only pick numbers. Replacing content
-' resets the window to the top. The focused/selected [row, col] pairs are
-' re-emitted on this component's own fields for consumers to observe.
+' Custom-node implementation (no RowList): rows are instantiated from
+' rowComponent and driven via itemContent/itemHasFocus/rowHasFocus. Navigation
+' and selection are handled here; consumers observe rowItemFocused/rowItemSelected
+' ([row, col]) and set content/focusRow as before.
 
 sub init()
-    m.rowList = m.top.FindNode("rowList")
+    m.rowsClip = m.top.FindNode("rowsClip")
+    m.rowsGroup = m.rowsClip.CreateChild("Group")
     m.chevronUp = m.top.FindNode("chevronUp")
     m.chevronDown = m.top.FindNode("chevronDown")
 
     m.chevronUp.width = 48
-    m.chevronUp.height = 28
+    m.chevronUp.height = 48
     m.chevronDown.width = 48
-    m.chevronDown.height = 28
+    m.chevronDown.height = 48
 
-    t = Theme()
-    m.rowlist.focusBitmapBlendColor = t.accentFocus
+    m.rowNodes = []
+    m.itemNodes = []
+    m.focusedIndex = -1
+    m.firstVisible = 0
+    m.hasFocus = false
+    m.pendingFocus = -1
+    m.suppressFocusEmit = false
+    m.rowSlot = 118
 
-    m.rowList.ObserveField("rowItemFocused", "onRowItemFocused")
-    m.rowList.ObserveField("rowItemSelected", "onRowItemSelected")
     m.top.ObserveField("content", "onContent")
     m.top.ObserveField("numRows", "onGeometry")
     m.top.ObserveField("itemWidth", "onGeometry")
     m.top.ObserveField("rowHeight", "onGeometry")
     m.top.ObserveField("rowComponent", "onGeometry")
+    m.top.ObserveField("showChevrons", "UpdateWindow")
+    m.top.ObserveField("focusedChild", "onFocusChildChanged")
 
-    m.firstVisible = 0
-    m.lastVisible = m.top.numRows - 1
-    m.pendingFocus = -1
     RecomputeGeometry()
-    UpdateWindow()
 end sub
 
-sub SetListFocus()
-    m.rowList.SetFocus(true)
-end sub
-
-' Whether the list holds the focus. The consumer cannot ask this node: the
-' focus is on the RowList inside it, and a Group does not answer for its
-' children — so the screen that owns a second focusable node (a row of chips
-' above the list) has to be told, the way FilterBar tells its screen about
-' its own chips.
 function HasListFocus() as boolean
-    return m.rowList.HasFocus()
+    return m.hasFocus or m.top.IsInFocusChain()
 end function
 
-sub onContent()
-    ' The target is set BEFORE the content: replacing the content resets the
-    ' list's focus to the first row, and that reset can arrive while the
-    ' content is still being set — a target remembered afterwards would be
-    ' one step too late to catch it, and the cursor would stay on the first
-    ' row with nothing to put it back.
-    m.pendingFocus = m.top.focusRow
-    m.rowList.content = m.top.content
-    m.firstVisible = 0
-    m.lastVisible = m.top.numRows - 1
-    UpdateWindow()
+sub SetListFocus()
+    m.hasFocus = true
+    m.top.SetFocus(true)
+    ApplyFocusState()
+end sub
+
+sub BlurListFocus()
+    m.hasFocus = false
+    ApplyFocusState()
+end sub
+
+sub onFocusChildChanged()
+    ' Track focus entering/leaving this component.
+    if m.top.IsInFocusChain()
+        m.hasFocus = true
+    else
+        m.hasFocus = false
+    end if
+    ApplyFocusState()
 end sub
 
 sub onGeometry()
     RecomputeGeometry()
+    RebuildRows()
+    EnsureVisible(m.focusedIndex)
+    ApplyLayout()
+    ApplyFocusState()
     UpdateWindow()
 end sub
 
-' Forward the focus pair and refresh the markers.
-'
-' A content change moves the focus to the first row, and the consumer wants
-' it back where it was. The correction is made here, when the focus actually
-' lands, and the reset itself is NOT forwarded: a consumer that watches the
-' focused row (to drive a panel, say) would otherwise see the row it is
-' about to leave and repaint from it.
-sub onRowItemFocused()
-    data = m.rowList.rowItemFocused
-    if m.pendingFocus >= 0 and data <> invalid and data.Count() > 0 then
-        if data[0] <> m.pendingFocus then
-            target = m.pendingFocus
-            m.pendingFocus = -1
-            m.rowList.jumpToRowItem = [0, target]
-            return
-        end if
-    end if
-    m.pendingFocus = -1
-    m.top.rowItemFocused = data
-    UpdateWindow()
-end sub
-
-sub onRowItemSelected()
-    m.top.rowItemSelected = m.rowList.rowItemSelected
-end sub
-
-' Apply geometry to the RowList and place the chevrons around the window.
 sub RecomputeGeometry()
     numVisible = m.top.numRows
     if numVisible < 1 then numVisible = 1
-    rowSlot = m.top.rowHeight + 8
-
-    m.rowList.numRows = numVisible
-    m.rowList.itemSize = [m.top.itemWidth, rowSlot]
-    m.rowList.itemSpacing = [0, 8]
-    m.rowList.rowItemSize = [[m.top.itemWidth, m.top.rowHeight]]
-    m.rowList.itemComponentName = m.top.rowComponent
-
-    listHeight = numVisible * rowSlot + (numVisible - 1) * 8
+    m.rowSlot = m.top.rowHeight + 8
+    clipH = numVisible * m.rowSlot - 8
+    if clipH < m.rowSlot then clipH = m.rowSlot
+    m.rowsClip.clippingRect = [0, 0, m.top.itemWidth, clipH]
+    listHeight = clipH
     cx = (m.top.itemWidth - 48) / 2
     if cx < 0 then cx = 0
-    m.chevronUp.translation = [cx, -28 - 8]
+    m.chevronUp.translation = [cx, -36]
     m.chevronDown.translation = [cx, listHeight + 8]
-
-    m.firstVisible = 0
-    m.lastVisible = numVisible - 1
 end sub
 
-' Shift the tracked window only when focus crosses an edge, then show the
-' chevrons whenever content is hidden on that side.
-sub UpdateWindow()
-    data = m.rowList.rowItemFocused
-    index = 0
-    if data <> invalid and data.Count() > 0 then index = data[0]
+sub onContent()
+    ' Remember target before rebuild/reset so focus can be restored without
+    ' forwarding a spurious reset to row 0.
+    m.pendingFocus = m.top.focusRow
+    if m.pendingFocus = invalid then m.pendingFocus = 0
+    RebuildRows()
+    ApplyInitialFocus()
+    EnsureVisible(m.focusedIndex)
+    ApplyLayout()
+    ApplyFocusState()
+    UpdateWindow()
+end sub
 
+sub RebuildRows()
+    while m.rowsGroup.GetChildCount() > 0
+        m.rowsGroup.RemoveChildIndex(0)
+    end while
+    m.rowNodes = []
+    m.itemNodes = []
+
+    root = m.top.content
     total = 0
-    node = m.rowList.content
-    if node <> invalid then total = node.GetChildCount()
-    if total < 1 then total = 1
+    if root <> invalid then total = root.GetChildCount()
 
-    numVisible = m.top.numRows
-    if index > m.lastVisible
-        m.firstVisible = index - (numVisible - 1)
-        m.lastVisible = index
-    else if index < m.firstVisible
-        m.firstVisible = index
-        m.lastVisible = index + (numVisible - 1)
-    end if
-    if m.firstVisible < 0 then m.firstVisible = 0
-    if m.lastVisible > total - 1 then m.lastVisible = total - 1
+    y = 0
+    for i = 0 to total - 1
+        rowContent = root.GetChild(i)
+        item = invalid
+        if rowContent <> invalid
+            if rowContent.GetChildCount() > 0
+                item = rowContent.GetChild(0)
+            else
+                item = rowContent
+            end if
+        end if
+        m.itemNodes.Push(item)
 
-    if not m.top.showChevrons
-        m.chevronUp.visible = false
-        m.chevronDown.visible = false
+        row = m.rowsGroup.CreateChild(m.top.rowComponent)
+        row.translation = [0, y]
+        if item <> invalid then row.itemContent = item
+        row.itemHasFocus = false
+        row.rowHasFocus = false
+        m.rowNodes.Push(row)
+        y = y + m.rowSlot
+    end for
+end sub
+
+sub ApplyInitialFocus()
+    total = m.rowNodes.Count()
+    if total = 0
+        m.focusedIndex = -1
+        m.firstVisible = 0
+        m.pendingFocus = -1
         return
     end if
-    m.chevronUp.visible = m.firstVisible > 0
-    m.chevronDown.visible = m.lastVisible < total - 1
+
+    target = m.pendingFocus
+    if target < 0 then target = 0
+    if target >= total then target = total - 1
+    m.pendingFocus = -1
+
+    ' Set focus state without emitting intermediate reset events.
+    m.suppressFocusEmit = true
+    m.focusedIndex = target
+    m.suppressFocusEmit = false
+    EmitFocused()
 end sub
+
+sub EnsureVisible(index as integer)
+    total = m.rowNodes.Count()
+    if total = 0 or index < 0
+        m.firstVisible = 0
+        return
+    end if
+    visible = m.top.numRows
+    if visible < 1 then visible = 1
+    if index < m.firstVisible
+        m.firstVisible = index
+    else if index >= m.firstVisible + visible
+        m.firstVisible = index - visible + 1
+    end if
+    maxFirst = total - visible
+    if maxFirst < 0 then maxFirst = 0
+    if m.firstVisible > maxFirst then m.firstVisible = maxFirst
+    if m.firstVisible < 0 then m.firstVisible = 0
+end sub
+
+sub ApplyLayout()
+    m.rowsGroup.translation = [0, -(m.firstVisible * m.rowSlot)]
+end sub
+
+sub ApplyFocusState()
+    focused = HasListFocus()
+    for i = 0 to m.rowNodes.Count() - 1
+        row = m.rowNodes[i]
+        if row = invalid then continue for
+        row.rowHasFocus = focused
+        row.itemHasFocus = focused and i = m.focusedIndex
+    end for
+end sub
+
+sub MoveFocus(delta as integer)
+    total = m.rowNodes.Count()
+    if total = 0 then return
+    nextIndex = m.focusedIndex + delta
+    if nextIndex < 0 then nextIndex = 0
+    if nextIndex >= total then nextIndex = total - 1
+    if nextIndex = m.focusedIndex then return
+    m.focusedIndex = nextIndex
+    EnsureVisible(m.focusedIndex)
+    ApplyLayout()
+    ApplyFocusState()
+    UpdateWindow()
+    EmitFocused()
+end sub
+
+sub EmitFocused()
+    if m.suppressFocusEmit then return
+    if m.focusedIndex < 0 then return
+    m.top.rowItemFocused = [m.focusedIndex, 0]
+end sub
+
+sub EmitSelected()
+    if m.focusedIndex < 0 then return
+    m.top.rowItemSelected = [m.focusedIndex, 0]
+end sub
+
+sub EmitFocusExit(direction as string)
+    BlurListFocus()
+    m.top.focusExit = direction
+end sub
+
+sub UpdateWindow()
+    total = m.rowNodes.Count()
+    visible = m.top.numRows
+    if visible < 1 then visible = 1
+    lastVisible = m.firstVisible + visible - 1
+    if lastVisible > total - 1 then lastVisible = total - 1
+    show = m.top.showChevrons = true and total > 0
+    if m.chevronUp <> invalid then m.chevronUp.visible = show and m.firstVisible > 0
+    if m.chevronDown <> invalid then m.chevronDown.visible = show and lastVisible < total - 1
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if not HasListFocus() then return false
+    if key = "up"
+        if m.top.exitUp and (m.focusedIndex <= 0 or m.rowNodes.Count() = 0)
+            EmitFocusExit("up")
+        else
+            MoveFocus(-1)
+        end if
+        return true
+    else if key = "down"
+        MoveFocus(1)
+        return true
+    else if key = "OK"
+        EmitSelected()
+        return true
+    else if key = "options" and m.top.exitOptions
+        EmitFocusExit("options")
+        return true
+    end if
+    return false
+end function
