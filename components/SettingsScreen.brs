@@ -151,6 +151,10 @@ function OnEnter(params as object) as void
     ' changes what it does — and a section built when the screen was opened
     ' would show the state of that moment.
     RefreshSections()
+    if not restoreState and m.chips <> invalid
+        m.chips.callFunc("FocusChip", 0)
+        m.chips.callFunc("Blur")
+    end if
     SetStatus("")
     SetOptionsFocus()
     UpdatePanel()
