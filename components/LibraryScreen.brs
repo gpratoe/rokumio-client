@@ -54,6 +54,9 @@ sub init()
     m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
 
     m.chunk = 6
+    ' Grid budget matches Discover: 6 standard poster tiles per row.
+    m.rowWidth = 1800
+    m.rowGap = 18
     m.typeFilter = "all"
     m.sort = "recent"
     m.items = []
@@ -212,8 +215,12 @@ sub BuildRows()
         m.items = m.stores.library.callFunc("LibraryLibraryView", m.typeFilter, m.sort)
     end if
 
+    ' Canonical cell size per type so tiles/decode targets stay consistent across screens.
+    size = TileCellSize(m.typeFilter)
+    m.chunk = TileColumns(m.rowWidth, size[0], m.rowGap)
+    if m.chunk < 1 then m.chunk = 1
+
     content = CreateObject("roSGNode", "ContentNode")
-    sizes = []
     for r = 0 to (m.items.Count() - 1) / m.chunk
         row = content.CreateChild("ContentNode")
         for c = 0 to m.chunk - 1
@@ -229,11 +236,11 @@ sub BuildRows()
             if item.metaType <> invalid and LCase(item.metaType) = "channel" then tile.watchedGlyph = ""
             TileWatchFields(tile, item.metaId, item.metaType)
         end for
-        sizes.Push(TileCellSize(m.typeFilter))
     end for
     m.grid.content = content
-    m.grid.rowItemSize = sizes
-    m.grid.rowHeights = TileRowHeights(sizes)
+    m.grid.itemSize = [m.rowWidth, size[1]]
+    m.grid.rowItemSize = [size]
+    m.grid.rowHeights = [size[1]]
     if m.items.Count() > 0
         m.grid.numRows = (m.items.Count() + m.chunk - 1) / m.chunk
     else

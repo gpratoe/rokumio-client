@@ -116,7 +116,7 @@
             vertAlign="top"
             font="font:SmallSystemFont" />
 
-        <!-- Saved items chunked into poster rows of 6 so the RowList
+        <!-- Saved items chunked into poster rows so the RowList
              clips/scrolls vertically. Same PosterTile contract as Home and
              Discover. -->
         <RowList

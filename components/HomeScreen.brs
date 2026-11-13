@@ -765,10 +765,9 @@ function RowCellSize(row as object) as object
         mt = row.metaType
         if row.posterShape <> invalid then ps = row.posterShape
     end if
-    ' Compact Home tiles and their row slots together, preserving each poster
-    ' shape while revealing more of the next row at the bottom of the screen.
-    size = TileCellSize(mt, ps)
-    return [Int(size[0] * 0.92), Int(size[1] * 0.92)]
+    ' Use the canonical cell size per shape/type so tiles and decode targets
+    ' stay consistent across Home, Discover, and Library.
+    return TileCellSize(mt, ps)
 end function
 
 ' Per-row item sizes, one vector2d per grid row, in grid order. Rebuilt with the

@@ -56,10 +56,8 @@ sub init()
     m.grid.ObserveField("rowItemFocused", "onGridItemFocused")
 
     m.chunk = 6
-    ' The grid's row budget: the RowList spans x 90..1890 (translation 90 + the
-    ' itemSize width 1800 in DiscoverScreen.xml), with an 18px gap between tiles
-    ' (rowItemSpacing). A row of cells must fit this or the RowList scrolls that
-    ' row horizontally — see UpdateGrid.
+    ' The grid's row budget: RowList translation x 90 + itemSize width 1800,
+    ' with 18px gaps (rowItemSpacing), fits 6 standard poster tiles per row.
     m.rowWidth = 1800
     m.rowGap = 18
     m.sources = []
@@ -907,11 +905,14 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
     ' The whole grid sizes to the catalog's posterShape (folded from its metas),
     ' the same rule Home rows use, so a 16:9 catalog gets wide tiles instead of
     ' letterboxed 2:3 cells; falls back to the content type when no shape ships.
+    ' Size to the catalog's posterShape (or type fallback) using canonical
+    ' cell sizes so tiles/decode targets stay consistent across screens.
     size = TileCellSize(mt, TilePosterShape(m.metas))
     ' A wide (16:9) cell places fewer tiles per row instead of overflowing the row
     ' into per-row horizontal scrolling (the "grid becomes a list of rows" break).
     ' All rows share one chunk so the flat index (row*chunk + col) stays honest.
     m.chunk = TileColumns(m.rowWidth, size[0], m.rowGap)
+    if m.chunk < 1 then m.chunk = 1
 
     content = CreateObject("roSGNode", "ContentNode")
     for r = 0 to (m.metas.Count() - 1) / m.chunk
@@ -934,6 +935,7 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
     m.grid.content = content
     m.grid.itemSize = [m.rowWidth, size[1]]
     m.grid.rowItemSize = [size]
+    m.grid.rowHeights = [size[1]]
     m.grid.numRows = (m.metas.Count() + m.chunk - 1) / m.chunk
     if rowToShow <> invalid and m.grid.numRows > 0
         m.grid.jumpToRowItem = rowToShow
