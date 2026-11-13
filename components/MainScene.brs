@@ -47,6 +47,7 @@ sub init()
     m.streamsScreen.ObserveField("pushRequest", "onStreamsAction")
     m.playerScreen = m.top.FindNode("playerScreen")
     m.playerScreen.ObserveField("watchStateUpdate", "onWatchStateUpdate")
+    m.playerScreen.ObserveField("playbackAction", "onPlayerPlaybackAction")
 
     ' SettingsScreen, AddonsScreen and SearchScreen are content-focused (no
     ' pushes of their own; Search pushes Details like the others). SearchScreen
@@ -193,6 +194,22 @@ sub onEpisodesAction()
     request = m.episodesScreen.pushRequest
     if request = invalid or request.screen = invalid then return
     m.stack.push(request.screen, request.params)
+end sub
+
+' Replace the completed episode's Player + Streams pair with a fresh Streams
+' visit for the next episode. StreamsScreen receives an autoplay preference and
+' pushes Player again as soon as the same provider answers. If that provider has
+' no stream, it simply remains visible as the normal picker.
+sub onPlayerPlaybackAction()
+    request = m.playerScreen.playbackAction
+    if request = invalid or request.action <> "nextEpisode" or request.params = invalid then return
+    top = m.stack.top()
+    if top = invalid or top.id <> "playerScreen" then return
+
+    m.stack.pop()
+    top = m.stack.top()
+    if top <> invalid and top.id = "streamsScreen" then m.stack.pop()
+    m.stack.push("streamsScreen", request.params)
 end sub
 
 ' SearchScreen's action channel; same one-action routing.

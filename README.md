@@ -30,6 +30,10 @@
   infinite scroll through the results
 - **Details & Streams** — full metadata and a picker for the streams your addons
   provide
+- **Next episode autoplay** — near the end of an episode, prefetch and warm the
+  next regular episode from the same stream provider, then switch it directly
+  in the player without exposing the streams/show screen; if prefetch fails,
+  fall back to the normal picker instead of guessing
 - **Streaming server connection** — the core feature: hook up a stremio-compatible streaming backend
   (server address) and play anything your addons index straight from
   the 10-foot UI

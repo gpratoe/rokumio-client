@@ -336,15 +336,17 @@ class LibraryStore
     ' capped stack, and pops anything beyond MAX_CONTINUE_WATCHING. Blank
     ' positions are ignored so a fresh screen never clears stored progress.
     ' Channel/tv playback records nothing — see IsChannelType.
-    sub SetPosition(videoId as string, metaId as string, metaType as string, season as integer, episode as integer, name as string, poster = "" as string, position = 0 as integer, duration = 0 as integer, posterShape = "" as string)
+    sub SetPosition(videoId as string, metaId as string, metaType as string, season as integer, episode as integer, name as string, poster = "" as string, position = 0 as integer, duration = 0 as integer, posterShape = "" as string, playback = invalid as dynamic)
         if videoId = "" or metaId = "" then return
         if m.IsChannelType(metaType) then return
+        rememberedPlayback = playback
         for i = m.positions.Count() - 1 to 0 step -1
             if m.positions[i].videoId = videoId or m.positions[i].metaId = metaId
+                if rememberedPlayback = invalid and m.positions[i].playback <> invalid then rememberedPlayback = m.positions[i].playback
                 m.positions.Delete(i)
             end if
         end for
-        m.positions.Unshift({
+        entry = {
             videoId: videoId
             metaId: metaId
             metaType: metaType
@@ -355,11 +357,26 @@ class LibraryStore
             posterShape: posterShape
             position: position
             duration: duration
-        })
+        }
+        if rememberedPlayback <> invalid and Type(rememberedPlayback) = "roAssociativeArray" then entry.playback = rememberedPlayback
+        m.positions.Unshift(entry)
         while m.positions.Count() > MAX_CONTINUE_WATCHING
             m.positions.Pop()
         end while
         m.Save()
+    end sub
+
+    ' SceneGraph callFunc accepts at most ten arguments. Playback provenance is
+    ' attached in a second call after SetPosition writes the progress record.
+    sub RememberPlayback(videoId as string, metaId as string, playback as dynamic)
+        if playback = invalid or Type(playback) <> "roAssociativeArray" then return
+        for each entry in m.positions
+            if entry.videoId = videoId or entry.metaId = metaId
+                entry.playback = playback
+                m.Save()
+                return
+            end if
+        next
     end sub
 
     function Position(videoId as string) as integer
@@ -871,6 +888,18 @@ class LibraryStore
         if m.sessionType <> "stremio" then return
         if items = invalid or Type(items) <> "roArray" then return
 
+        ' Stream choice is device-local and is not part of Stremio's account
+        ' library schema. Preserve it across the authoritative account rebuild
+        ' whenever the same video/meta survives the sync.
+        playbackByVideo = {}
+        playbackByMeta = {}
+        for each oldEntry in m.positions
+            if oldEntry.playback <> invalid
+                playbackByVideo[oldEntry.videoId] = oldEntry.playback
+                playbackByMeta[oldEntry.metaId] = oldEntry.playback
+            end if
+        end for
+
         m.stremioLibrary = items
         cw = []
         saved = {}
@@ -916,7 +945,7 @@ class LibraryStore
             if not m.HasKey(seenMeta, entry.metaId) and not m.HasKey(seenVideo, entry.videoId)
                 seenMeta[entry.metaId] = true
                 seenVideo[entry.videoId] = true
-                positions.Push({
+                positionEntry = {
                     videoId: entry.videoId
                     metaId: entry.metaId
                     metaType: entry.metaType
@@ -927,7 +956,11 @@ class LibraryStore
                     posterShape: entry.posterShape
                     position: entry.position
                     duration: entry.duration
-                })
+                }
+                rememberedPlayback = playbackByVideo[entry.videoId]
+                if rememberedPlayback = invalid then rememberedPlayback = playbackByMeta[entry.metaId]
+                if rememberedPlayback <> invalid then positionEntry.playback = rememberedPlayback
+                positions.Push(positionEntry)
             end if
         end for
         while positions.Count() > MAX_CONTINUE_WATCHING

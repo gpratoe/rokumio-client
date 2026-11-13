@@ -836,6 +836,7 @@ function LibraryRow() as dynamic
             season: entry.season
             episode: entry.episode
             position: entry.position
+            playback: entry.playback
             progress: m.stores.library.callFunc("LibraryProgressFraction", entry.metaId)
             watchedGlyph: m.stores.library.callFunc("LibraryWatchedGlyph", entry.metaId, entry.metaType)
         })
@@ -1200,6 +1201,81 @@ end sub
 ' navigation away cancels the pending open (CancelOpen); when the meta lands
 ' Details is pushed with the full hero, or the slim record on failure.
 sub OpenContinueWatching(item as object)
+    ' Continue Watching must remain a choice, not an automatic replay of the
+    ' last source. Open the stream list for the saved movie/episode and let the
+    ' viewer choose a provider and stream again. The library row is intentionally
+    ' slim, so recover the full meta first; otherwise this route sends logo: ""
+    ' and the player falls back to the rectangular poster during preparation.
+    CancelOpen()
+    CancelHeroMetaRequest()
+    address = MetaAddress()
+    key = HomeHeroMetaKey(item)
+    display = invalid
+    if m.heroMetaCache.DoesExist(key)
+        display = m.stores.episodes.callFunc("EpisodesMergeMeta", item, m.heroMetaCache[key])
+    else
+        cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", item.type, item.id)
+        if cachedFull <> invalid
+            full = m.stores.episodes.callFunc("EpisodesMergeMeta", item, cachedFull)
+            display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+            m.heroMetaCache[key] = display
+        end if
+    end if
+    if display <> invalid
+        PushContinueWatchingStreams(item, display, address)
+        return
+    end if
+
+    m.pendingOpen = {
+        route: "streams"
+        address: address
+        meta: item
+    }
+    ShowHomeBusy(true)
+    m.openTask = AsyncTask_Launch(m.top, "MetaLoaderTask", "onContinueWatchingLoaded", {
+        addonAddress: address
+        metaType: item.type
+        metaId: item.id
+    }, "continueWatchingLoader")
+end sub
+
+sub PushContinueWatchingStreams(item as object, meta as object, address as string)
+    if item = invalid then return
+    if meta = invalid then meta = item
+    name = StringOf(meta.name)
+    if name = "" then name = StringOf(item.name)
+    poster = StringOf(meta.poster)
+    if poster = "" then poster = StringOf(item.poster)
+    posterShape = StringOf(meta.posterShape)
+    if posterShape = "" then posterShape = StringOf(item.posterShape)
+    description = StringOf(meta.description)
+    if description = "" then description = StringOf(meta.overview)
+    m.top.pushRequest = {
+        screen: "streamsScreen"
+        params: {
+            addonAddress: address
+            metaType: item.type
+            metaId: item.id
+            videoId: item.videoId
+            season: item.season
+            episode: item.episode
+            position: item.position
+            name: name
+            poster: poster
+            posterShape: posterShape
+            logo: StringOf(meta.logo)
+            background: StringOf(meta.background)
+            description: description
+            runtime: meta.runtime
+        }
+    }
+end sub
+
+' Original Continue Watching route: fill the slim library record from the meta
+' provider and open Details. It is intentionally separate so a stale remembered
+' source can fall back here without immediately attempting that same source
+' again.
+sub OpenContinueWatchingDetails(item as object)
     address = MetaAddress()
     CancelOpen()
     CancelHeroMetaRequest()
@@ -1227,6 +1303,7 @@ sub OpenContinueWatching(item as object)
         return
     end if
     m.pendingOpen = {
+        route: "details"
         address: address
         meta: item
         resume: {
@@ -1244,6 +1321,81 @@ sub OpenContinueWatching(item as object)
         metaId: item.id
     }, "continueWatchingLoader")
     m.openTask = task
+end sub
+
+sub onRememberedStreamsLoaded()
+    if m.openTask = invalid then return
+    task = m.openTask
+    result = task.result
+    ' result is alwaysNotify and can notify once before the worker has supplied
+    ' a value. Keep the task alive for the real answer.
+    if result = invalid then return
+    m.openTask = invalid
+    AsyncTask_Reap(task, m.top, false)
+
+    pending = m.pendingOpen
+    m.pendingOpen = invalid
+    ShowHomeBusy(false)
+    if pending = invalid then return
+    if result.streams = invalid or result.streams.Count() = 0
+        OpenContinueWatchingDetails(pending.meta)
+        return
+    end if
+
+    playback = pending.playback
+    savedKey = StringOf(playback.Lookup("streamKey"))
+    streamIndex = -1
+    if savedKey <> ""
+        for i = 0 to result.streams.Count() - 1
+            if StreamIdentity(result.streams[i]) = savedKey
+                streamIndex = i
+                exit for
+            end if
+        next
+    else
+        savedIndex = playback.Lookup("streamIndex")
+        if savedIndex <> invalid
+            try
+                streamIndex = Int(savedIndex)
+            catch badIndex
+                streamIndex = -1
+            end try
+        end if
+    end if
+    if streamIndex < 0 or streamIndex >= result.streams.Count()
+        OpenContinueWatchingDetails(pending.meta)
+        return
+    end if
+
+    mode = StringOf(playback.Lookup("directPlayMode"))
+    if mode <> "on" and mode <> "off"
+        mode = m.stores.settings.callFunc("SettingsGetDirectPlayMode")
+        if mode <> "on" then mode = "off"
+    end if
+    item = pending.meta
+    serverAddress = m.stores.settings.callFunc("SettingsGetServerAddress")
+    m.top.pushRequest = {
+        screen: "playerScreen"
+        params: {
+            stream: result.streams[streamIndex]
+            directPlayMode: mode
+            serverAddress: serverAddress
+            metaType: item.type
+            metaId: item.id
+            videoId: item.videoId
+            season: item.season
+            episode: item.episode
+            position: item.position
+            name: item.name
+            poster: item.poster
+            posterShape: item.posterShape
+            logo: ""
+            background: ""
+            addonAddress: pending.address
+            providerAddress: StringOf(playback.Lookup("providerAddress"))
+            streamIndex: streamIndex
+        }
+    }
 end sub
 
 ' Stop a pending Continue-Watching open: tear down any in-flight task, clear the
@@ -1285,6 +1437,10 @@ sub onContinueWatchingLoaded()
         key = HomeHeroMetaKey(meta)
         if key <> "" then m.heroMetaCache[key] = display
         meta = display
+    end if
+    if pending.route = "streams"
+        PushContinueWatchingStreams(pending.meta, meta, pending.address)
+        return
     end if
     m.top.pushRequest = {
         screen: "detailsScreen"

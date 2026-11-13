@@ -244,6 +244,11 @@ function EpisodesOrderedVideoIds(seriesId as string, meta as object) as object
     return m.stores.episodes.OrderedVideoIds(seriesId, meta)
 end function
 
+' episodes.NextEpisode
+function EpisodesNextEpisode(seriesId as string, currentVideoId as string, meta as object) as dynamic
+    return m.stores.episodes.NextEpisode(seriesId, currentVideoId, meta)
+end function
+
 ' episodes.ResolveVideoId
 function EpisodesResolveVideoId(seriesId as string, season as integer, episode as integer) as string
     return m.stores.episodes.ResolveVideoId(seriesId, season, episode)
@@ -375,6 +380,10 @@ end function
 ' library.SetPosition
 function LibrarySetPosition(videoId as string, metaId as string, metaType as string, season as integer, episode as integer, name as string, poster = "" as string, position = 0 as integer, duration = 0 as integer, posterShape = "" as string) as void
     m.stores.library.SetPosition(videoId, metaId, metaType, season, episode, name, poster, position, duration, posterShape)
+end function
+
+function LibraryRememberPlayback(videoId as string, metaId as string, playback as dynamic) as void
+    m.stores.library.RememberPlayback(videoId, metaId, playback)
 end function
 
 ' library.SyncFromStremio

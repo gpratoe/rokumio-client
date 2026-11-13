@@ -121,6 +121,106 @@ function checkDeferredVideoPlayContract() {
     if (!/ObserveField\(\s*"fire"\s*,\s*"onPlayKickFire"\s*\)/.test(code)) {
         err('PlayerScreen.brs does not ObserveField("fire", "onPlayKickFire") on the playKick Timer — an unobserved Timer fires into nothing and the deferred play never happens');
     }
+    if (!/<Timer\s+id="seekRepeat"[^>]*repeat="true"/.test(xml) || !/ObserveField\(\s*"fire"\s*,\s*"onSeekRepeat"\s*\)/.test(code)) {
+        err('PlayerScreen has no repeating seek-hold timer wired to onSeekRepeat — held Left/Right would move the timeline only once');
+    }
+
+    const keyHandler = /function\s+OnKeyEvent\([^)]*\)[\s\S]*?end\s+function/i.exec(code);
+    if (!keyHandler || !/key\s*=\s*"OK"/.test(keyHandler[0])) {
+        err('PlayerScreen.OnKeyEvent does not handle the Roku center/OK key');
+    } else {
+        if (!/state\s*=\s*"playing"[\s\S]*?control\s*=\s*"pause"/i.test(keyHandler[0])) {
+            err('PlayerScreen center/OK does not pause a playing video');
+        }
+        if (!/state\s*=\s*"paused"[\s\S]*?control\s*=\s*"resume"/i.test(keyHandler[0])) {
+            err('PlayerScreen center/OK does not resume a paused video');
+        }
+        if (!/key\s*=\s*"left"[\s\S]*?StartSeekRepeat\(\s*-1/.test(keyHandler[0]) || !/key\s*=\s*"right"[\s\S]*?StartSeekRepeat\(\s*1/.test(keyHandler[0])) {
+            err('PlayerScreen paused timeline does not start held-key repeat for both Left and Right');
+        }
+        if (!/not\s+m\.controlsVisible[\s\S]*?key\s*=\s*"left"[\s\S]*?key\s*=\s*"right"[\s\S]*?ShowPlayingControls\(\)[\s\S]*?StartSeekRepeat\(/.test(keyHandler[0])) {
+            err('PlayerScreen hidden Left/Right does not reveal the timeline and immediately begin seeking');
+        }
+        if (!/not\s+m\.controlsVisible[\s\S]*?key\s*=\s*"up"[\s\S]*?key\s*=\s*"down"[\s\S]*?currentVideoState\s*=\s*"playing"[\s\S]*?ShowPlayingControls\(\)/.test(keyHandler[0])) {
+            err('PlayerScreen Up/Down does not reveal playing controls without pausing playback');
+        }
+        if (!/key\s*=\s*"up"[\s\S]*?m\.pauseActionIndex\s*=\s*1[\s\S]*?key\s*=\s*"down"[\s\S]*?m\.pauseActionIndex\s*=\s*0[\s\S]*?HidePausedControls\(\)/.test(keyHandler[0])) {
+            err('PlayerScreen vertical navigation does not move Up from timeline to buttons and dismiss Down from the timeline');
+        }
+    }
+    if (!/m\.seekRepeatTicks\s*=\s*m\.seekRepeatTicks\s*\+\s*1[\s\S]*?moves\s*=\s*8[\s\S]*?AdjustTimeline\(/.test(code)) {
+        err('PlayerScreen held seeking does not progressively accelerate toward distant timestamps');
+    }
+    if (!/<Label\s+id="pauseCaptionsText"[^>]*width="72"[^>]*text="CC"/.test(xml)) {
+        err('PlayerScreen compact caption action does not reserve enough width for the full CC label');
+    }
+    if (!/<Rectangle\s+translation="\[0, 825\]"\s+width="1920"\s+height="255"/.test(xml)) {
+        err('PlayerScreen compact control panel is not anchored to the bottom of the 1080p screen');
+    }
+    const overlayTitle = /function\s+PlayerOverlayTitle\(\)[\s\S]*?end\s+function/i.exec(code);
+    if (!overlayTitle || !/metaType\s*<>\s*"series"/i.test(overlayTitle[0]) || !/episodeMarker/.test(overlayTitle[0]) || !/m\.playParams\.season/.test(overlayTitle[0]) || !/m\.playParams\.episode/.test(overlayTitle[0])) {
+        err('PlayerScreen overlay title does not add the localized season/episode marker for series');
+    }
+    if (!/m\.pauseTitle\.text\s*=\s*PlayerOverlayTitle\(\)/.test(code)) {
+        err('PlayerScreen overlay does not render the series-aware player title');
+    }
+    if (!/<Label\s+id="pauseEpisodeTitle"[^>]*font="font:SmallSystemFont"/.test(xml)) {
+        err('PlayerScreen overlay has no smaller-font second line for the episode name');
+    }
+    if (!/m\.pauseEpisodeTitle\.text\s*=\s*PlayerOverlayEpisodeTitle\(\)/.test(code) || !/m\.playParams\.episodeName/.test(code)) {
+        err('PlayerScreen overlay does not render the current series episode name');
+    }
+    const streamsCode = fs.readFileSync(path.join(projectRoot, 'components', 'StreamsScreen.brs'), 'utf8');
+    if (!/screen:\s*"playerScreen"[\s\S]*?episodeName:\s*m\.params\.episodeName/.test(streamsCode)) {
+        err('StreamsScreen does not pass the episode name into the player overlay');
+    }
+    const homeCode = fs.readFileSync(path.join(projectRoot, 'components', 'HomeScreen.brs'), 'utf8');
+    const continueOpen = /sub\s+OpenContinueWatching\([^)]*\)[\s\S]*?end\s+sub/i.exec(homeCode);
+    if (!continueOpen || !/EpisodesFullMeta/.test(continueOpen[0]) || !/MetaLoaderTask/.test(continueOpen[0]) || !/PushContinueWatchingStreams/.test(continueOpen[0])) {
+        err('Home Continue Watching opens streams from a slim record without recovering the series logo');
+    }
+    const continuePush = /sub\s+PushContinueWatchingStreams\([^)]*\)[\s\S]*?end\s+sub/i.exec(homeCode);
+    if (!continuePush || !/logo:\s*StringOf\(meta\.logo\)/.test(continuePush[0]) || /logo:\s*""/.test(continuePush[0])) {
+        err('Home Continue Watching does not pass recovered logo artwork to StreamsScreen');
+    }
+    const nextSwap = /sub\s+BeginPreparedNext\(\)[\s\S]*?end\s+sub/i.exec(code);
+    if (!nextSwap || !/StartSubtitles\(prepared\)[\s\S]*?StartPlayback\(/.test(nextSwap[0])) {
+        err('PlayerScreen seamless next-episode swap does not start the new episode subtitle drain before playback');
+    }
+    const playPrepared = /sub\s+PlayPreparedNext\(\)[\s\S]*?end\s+sub/i.exec(code);
+    if (!playPrepared || !/oldState\s*=\s*"finished"[\s\S]*?oldState\s*=\s*"stopped"[\s\S]*?BeginPreparedNext\(\)/.test(playPrepared[0])) {
+        err('PlayerScreen autoplay waits for a stopped event after the old video is already finished, which leaves the prepared next episode on a black screen');
+    }
+    if (!/function\s+PreferredSubtitleIndex\([^)]*\)[\s\S]*?captionPreferenceOrdinal[\s\S]*?captionPreferenceLanguage[\s\S]*?end\s+function/i.test(code)) {
+        err('PlayerScreen does not rematch the selected caption language and ordinal for the next episode');
+    }
+    if (!/if\s+m\.captionPreferenceSet[\s\S]*?m\.subtitleIndex\s*=\s*PreferredSubtitleIndex\(\)/i.test(code)) {
+        err('PlayerScreen does not apply the saved caption preference to newly fetched episode tracks');
+    }
+    if (!/ObserveField\(\s*"availableSubtitleTracks"\s*,\s*"onAvailableSubtitleTracksChanged"\s*\)/.test(code)) {
+        err('PlayerScreen does not observe embedded subtitle tracks discovered after playback starts');
+    }
+    const embeddedHandler = /sub\s+onAvailableSubtitleTracksChanged\(\)[\s\S]*?end\s+sub/i.exec(code);
+    if (!embeddedHandler || !/PreferredEmbeddedSubtitleTrack\(/.test(embeddedHandler[0]) || !/subtitleTrack\s*=\s*trackName/.test(embeddedHandler[0]) || !/SetCaptionMode\(\s*"on"\s*\)/i.test(embeddedHandler[0])) {
+        err('PlayerScreen does not prefer and enable an embedded subtitle track after Roku discovers it');
+    }
+    if (!/function\s+IsEmbeddedSubtitleTrack\([^)]*\)[\s\S]*?Instr\([^\n]*http:\/\/[\s\S]*?Instr\([^\n]*https:\/\/[\s\S]*?end\s+function/i.test(code)) {
+        err('PlayerScreen cannot distinguish embedded track identifiers from side-loaded subtitle URLs');
+    }
+    const currentCaption = /function\s+CurrentCaptionTrack\(\)[\s\S]*?end\s+function/i.exec(code);
+    if (!currentCaption || currentCaption[0].indexOf('currentSubtitleTrack') > currentCaption[0].indexOf('m.captionSelection')) {
+        err('PlayerScreen caption menu trusts its cached request before Roku currentSubtitleTrack, so the actually rendered subtitle may not be marked');
+    }
+    const selectedCaption = /function\s+SelectedCaptionTrackFromList\([^)]*\)[\s\S]*?end\s+function/i.exec(code);
+    if (!selectedCaption || !/currentSubtitleTrack/.test(selectedCaption[0]) || !/m\.captionSelection/.test(selectedCaption[0]) || !/m\.video\.subtitleTrack/.test(selectedCaption[0]) || !/CaptionTrackFromList\(/.test(selectedCaption[0])) {
+        err('PlayerScreen cannot map an automatically rendered Roku subtitle back to exactly one track in the CC menu');
+    }
+    if (!/selectedTrack\s*=\s*SelectedCaptionTrackFromList\(tracks\)/.test(code) || !/Chr\(10003\)/.test(code)) {
+        err('PlayerScreen CC menu does not check the resolved active subtitle row');
+    }
+    if (!/Peers:\s*\{peers\}/.test(fs.readFileSync(path.join(projectRoot, 'source', 'util', 'texts.json'), 'utf8'))) {
+        err('Player torrent statistics use a peer glyph that is not visible on all Roku system fonts');
+    }
     const kick = new RegExp('^[ \\t]*sub\\s+onPlayKickFire\\s*\\(', 'm').exec(code);
     if (!kick) {
         err('PlayerScreen.brs has no onPlayKickFire() — the field observer names a handler that does not exist, which is a no-op, so the deferred play never happens');
@@ -3998,6 +4098,10 @@ function checkMetaFieldCoercionContract() {
     }
 
     const setLine = (player.match(/.*callFunc\("LibrarySetPosition".*/) || [''])[0];
+    const setArgs = setLine.match(/callFunc\((.*)\)/);
+    if (setArgs && (setArgs[1].match(/,/g) || []).length > 10) {
+        err('PlayerScreen.brs sends more than ten arguments through LibrarySetPosition callFunc — Roku rejects the component call before the store runs');
+    }
     if (setLine.includes('params.poster')) {
         err('PlayerScreen.brs passes params.poster/posterShape straight into LibrarySetPosition — normalize a missing field to "" first');
     }
@@ -4447,6 +4551,9 @@ const ENGLISH_BY_DECISION = [
     // recognises. Both are English by definition.
     'On',
     'Off',
+    'White',
+    '100%',
+    'Drop shadow (right)',
     'no playable tracks',
     'not supported',
     // The DirectPlay verdict state codes. Compared, never displayed: the
@@ -4545,7 +4652,9 @@ function checkNoUntranslatedLiterals() {
         // They are English by nature — a trace is a debugging tool, not copy.
         const printed = new Set();
         for (const line of src.split('\n')) {
-            if (!/\bprint\b/.test(line)) continue;
+            // BrightScript's `?` is the shorthand form of `print`; treat both
+            // as console-only diagnostics rather than untranslated UI copy.
+            if (!/\bprint\b/.test(line) && !/^\s*\?/.test(line)) continue;
             for (const m of line.matchAll(/"([^"]*)"/g)) printed.add(m[1]);
         }
         // A KEY PRESS name is the platform's, not ours: `if key = "OK"` names

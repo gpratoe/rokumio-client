@@ -99,6 +99,35 @@ sub Test_Episodes_ResolveVideoId()
     Harness_Equal(store.ResolveVideoId("tt1234567", 12, 4), "tt1234567:12:4", "double-digit season/episode")
 end sub
 
+sub Test_Episodes_NextEpisode()
+    Harness_Suite("EpisodesStore.NextEpisode follows regular episode display order")
+    store = EpisodesStore(ScriptedTransport([]))
+    nextEpisode = store.NextEpisode("tt1234567", "tt1234567:1:1", SeriesMetaFixture())
+
+    Harness_Ok(nextEpisode <> invalid, "next episode found")
+    Harness_Equal(nextEpisode.videoId, "tt1234567:1:2", "next id")
+    Harness_Equal(nextEpisode.season, 1, "same season")
+    Harness_Equal(nextEpisode.episode, 2, "next ordinal")
+end sub
+
+sub Test_Episodes_NextEpisodeCrossesSeason()
+    Harness_Suite("EpisodesStore.NextEpisode crosses a season boundary")
+    store = EpisodesStore(ScriptedTransport([]))
+    nextEpisode = store.NextEpisode("tt1234567", "tt1234567:1:2", SeriesMetaFixture())
+
+    Harness_Ok(nextEpisode <> invalid, "next season episode found")
+    Harness_Equal(nextEpisode.videoId, "tt1234567:2:1", "next season id")
+    Harness_Equal(nextEpisode.season, 2, "next season")
+end sub
+
+sub Test_Episodes_NextEpisodeStopsAtFinale()
+    Harness_Suite("EpisodesStore.NextEpisode stops at the final known episode")
+    store = EpisodesStore(ScriptedTransport([]))
+
+    Harness_Ok(store.NextEpisode("tt1234567", "tt1234567:2:1", SeriesMetaFixture()) = invalid, "finale has no next episode")
+    Harness_Ok(store.NextEpisode("tt1234567", "tt1234567:9:9", SeriesMetaFixture()) = invalid, "unknown current id has no next episode")
+end sub
+
 sub Test_Episodes_OrderedSeasons()
     Harness_Suite("EpisodesStore.OrderedSeasons keeps ascending seasons with specials last")
     store = EpisodesStore(ScriptedTransport([]))
