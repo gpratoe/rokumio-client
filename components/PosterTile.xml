@@ -21,6 +21,8 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
+        <Timer id="retryTimer" repeat="false" />
+        <Timer id="loadingTimer" repeat="false" />
         <!-- The artless unit: the face plus the title. Shown while there is no
              artwork, and HIDDEN the moment the poster reports it has painted, so
              the face genuinely stops rendering rather than sitting behind the

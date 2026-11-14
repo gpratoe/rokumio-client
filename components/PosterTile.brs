@@ -45,13 +45,80 @@ sub init()
     if m.seeMoreLabel <> invalid then m.seeMoreLabel.color = t.textSecondary
 
     m.lastReloadNonce = 0
+    m.retryCount = 0
+    m.retryUri = ""
+    m.retryTimer = m.top.FindNode("retryTimer")
+    m.loadingTimer = m.top.FindNode("loadingTimer")
+    if m.retryTimer <> invalid then m.retryTimer.ObserveField("fire", "onRetryTimer")
+    if m.loadingTimer <> invalid then m.loadingTimer.ObserveField("fire", "onLoadingTimeout")
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
     m.poster.ObserveField("loadStatus", "onPosterLoadStatus")
+    m.poster.ObserveField("loadStatus", "onPosterLoadStatusRetry")
 
     ApplyTileSize()
+end sub
+
+sub StopPosterRetry()
+    if m.retryTimer <> invalid then m.retryTimer.control = "stop"
+    if m.loadingTimer <> invalid then m.loadingTimer.control = "stop"
+end sub
+
+sub ResetPosterRetry(uri as string)
+    StopPosterRetry()
+    m.retryCount = 0
+    m.retryUri = uri
+end sub
+
+sub SchedulePosterRetry()
+    if m.poster = invalid then return
+    uri = m.poster.uri
+    if uri = invalid or uri = "" then return
+    if uri <> m.retryUri then return
+    if m.retryCount >= 3 then return
+    delay = 1.5
+    if m.retryCount = 1 then delay = 4.0
+    if m.retryCount >= 2 then delay = 8.0
+    m.retryCount = m.retryCount + 1
+    if m.retryTimer = invalid then return
+    m.retryTimer.duration = delay
+    m.retryTimer.control = "stop"
+    m.retryTimer.control = "start"
+end sub
+
+sub StartLoadingTimeout()
+    if m.loadingTimer = invalid then return
+    m.loadingTimer.duration = 12
+    m.loadingTimer.control = "stop"
+    m.loadingTimer.control = "start"
+end sub
+
+sub onRetryTimer()
+    if m.poster = invalid then return
+    if m.top.itemContent = invalid then return
+    uri = m.retryUri
+    if uri = invalid or uri = "" then return
+    ' Only retry if we're still supposed to show this URI.
+    if m.poster.uri <> uri and m.poster.uri <> "" then return
+    current = m.top.itemContent.hdPosterUrl
+    if current = invalid then current = ""
+    if current <> uri then return
+    m.poster.uri = ""
+    m.poster.uri = uri
+    ShowArtless()
+    StartLoadingTimeout()
+    ' A cached/immediate result may settle before observers fire.
+    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
+        onPosterLoadStatus()
+        onPosterLoadStatusRetry()
+    end if
+end sub
+
+sub onLoadingTimeout()
+    if m.poster = invalid then return
+    if m.poster.loadStatus = "loading" then SchedulePosterRetry()
 end sub
 
 ' RowList writes each item's cell size into the width/height interface fields,
@@ -154,6 +221,9 @@ end sub
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     if m.top.itemContent.seeMore = true
+        StopPosterRetry()
+        m.retryCount = 0
+        m.retryUri = ""
         m.poster.uri = ""
         m.artless.visible = false
         if m.progressTrack <> invalid then m.progressTrack.visible = false
@@ -170,6 +240,9 @@ sub onItemContentChanged()
 
     loading = m.top.itemContent.loadState = "loading"
     if loading
+        StopPosterRetry()
+        m.retryCount = 0
+        m.retryUri = ""
         m.poster.uri = ""
         m.titleText.text = m.top.itemContent.title
         ShowArtless()
@@ -199,21 +272,36 @@ sub onItemContentChanged()
     UpdateOverlays()
 
     if needsReload
+        if changed or forceReload or poster <> m.retryUri
+            ResetPosterRetry(poster)
+        else
+            ' Same URI reload (e.g. failed state/rebind): keep retry progress but
+            ' cancel any pending backoff timer since we're loading now.
+            StopPosterRetry()
+            m.retryUri = poster
+        end if
         ' Clear first so Roku treats this as a fresh load even when retrying the
         ' same URI (a failed/stale load, or an explicit refresh). Reset-to-empty
         ' then set forces the request while the tile shows artless.
         m.poster.uri = ""
         m.poster.uri = poster
+        if poster <> "" then StartLoadingTimeout()
         ' Forced rather than read back from loadStatus: the uri was just set, so
         ' this cell is artless whatever the status field still reports from the
         ' previous one.
         ShowArtless()
         ' A uri that resolves from cache can settle before the observer ever fires,
         ' so re-read the status now instead of trusting the callback alone.
-        if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed" then onPosterLoadStatus()
+        if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
+            onPosterLoadStatus()
+            onPosterLoadStatusRetry()
+        end if
     else
         ' Keep the already-ready poster; just ensure the artless face isn't shown.
         if m.poster.loadStatus = "ready"
+            StopPosterRetry()
+            m.retryCount = 0
+            m.retryUri = poster
             ShowPoster()
         else
             ShowArtless()
@@ -225,6 +313,21 @@ end sub
 
 sub onPosterLoadStatus()
     if m.poster.loadStatus = "ready" then ShowPoster() else ShowArtless()
+end sub
+
+sub onPosterLoadStatusRetry()
+    if m.poster = invalid then return
+    status = m.poster.loadStatus
+    if status = "ready"
+        StopPosterRetry()
+        m.retryCount = 0
+        if m.poster.uri <> invalid then m.retryUri = m.poster.uri else m.retryUri = ""
+    else if status = "failed"
+        if m.poster.uri <> invalid and m.poster.uri <> "" then m.retryUri = m.poster.uri
+        SchedulePosterRetry()
+    else if status = "loading"
+        ' loading timeout is managed by StartLoadingTimeout() on load start
+    end if
 end sub
 
 ' The artless unit: the face plus the title. The poster is left alone on purpose
