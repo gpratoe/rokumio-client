@@ -16,6 +16,8 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
 
     <children>
+        <Timer id="retryTimer" repeat="false" />
+        <Timer id="loadingTimer" repeat="false" />
         <Poster
             id="tileBorder"
             width="1760"

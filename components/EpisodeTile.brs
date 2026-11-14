@@ -34,10 +34,86 @@ sub init()
     m.epSynopsis.color = t.textSecondary
     m.watchedPlate.color = t.glyphPlate
 
+    m.retryCount = 0
+    m.retryUri = ""
+    m.retryTimer = m.top.FindNode("retryTimer")
+    m.loadingTimer = m.top.FindNode("loadingTimer")
+    if m.retryTimer <> invalid then m.retryTimer.ObserveField("fire", "onRetryTimer")
+    if m.loadingTimer <> invalid then m.loadingTimer.ObserveField("fire", "onLoadingTimeout")
+
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
     m.poster.ObserveField("loadStatus", "onPosterLoadStatus")
+    m.poster.ObserveField("loadStatus", "onPosterLoadStatusRetry")
+end sub
+
+sub StopPosterRetry()
+    if m.retryTimer <> invalid then m.retryTimer.control = "stop"
+    if m.loadingTimer <> invalid then m.loadingTimer.control = "stop"
+end sub
+
+sub ResetPosterRetry(uri as string)
+    StopPosterRetry()
+    m.retryCount = 0
+    m.retryUri = uri
+end sub
+
+sub SchedulePosterRetry()
+    if m.poster = invalid then return
+    uri = m.poster.uri
+    if uri = invalid or uri = "" then return
+    if uri <> m.retryUri then return
+    if m.retryCount >= 3
+        print "[EpisodeTile] retry: giving up after 3 attempts uri="; uri
+        return
+    end if
+    delay = 1.5
+    if m.retryCount = 1 then delay = 4.0
+    if m.retryCount >= 2 then delay = 8.0
+    m.retryCount = m.retryCount + 1
+    print "[EpisodeTile] retry: scheduling attempt "; m.retryCount; "/3 in "; delay; "s uri="; uri
+    if m.retryTimer = invalid then return
+    m.retryTimer.duration = delay
+    m.retryTimer.control = "stop"
+    m.retryTimer.control = "start"
+end sub
+
+sub StartLoadingTimeout()
+    if m.loadingTimer = invalid then return
+    m.loadingTimer.duration = 12
+    m.loadingTimer.control = "stop"
+    m.loadingTimer.control = "start"
+end sub
+
+sub onRetryTimer()
+    if m.poster = invalid then return
+    if m.top.itemContent = invalid then return
+    uri = m.retryUri
+    if uri = invalid or uri = "" then return
+    if m.poster.uri <> uri and m.poster.uri <> "" then return
+    current = m.top.itemContent.hdPosterUrl
+    if current = invalid then current = ""
+    if current <> uri then return
+    print "[EpisodeTile] retry: firing attempt "; m.retryCount; "/3 uri="; uri
+    m.poster.uri = ""
+    m.poster.uri = uri
+    ShowArtless()
+    StartLoadingTimeout()
+    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
+        onPosterLoadStatus()
+        onPosterLoadStatusRetry()
+    end if
+end sub
+
+sub onLoadingTimeout()
+    if m.poster = invalid then return
+    if m.poster.loadStatus = "loading"
+        uri = ""
+        if m.poster.uri <> invalid then uri = m.poster.uri
+        print "[EpisodeTile] retry: loading timeout (12s) uri="; uri
+        SchedulePosterRetry()
+    end if
 end sub
 
 ' Every focus observer re-applies the whole look from the tile's current field
@@ -65,7 +141,9 @@ sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
+    ResetPosterRetry(poster)
     m.poster.uri = poster
+    if poster <> "" then StartLoadingTimeout()
     label = m.top.itemContent.title
     if label = invalid then label = ""
     m.epTitle.text = label
@@ -94,7 +172,10 @@ sub onItemContentChanged()
     ShowArtless()
     ' A uri set to something already cached can settle before the observer ever
     ' fires, so re-read the status now instead of trusting the callback alone.
-    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed" then onPosterLoadStatus()
+    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
+        onPosterLoadStatus()
+        onPosterLoadStatusRetry()
+    end if
     UpdateLook()
 end sub
 
@@ -111,6 +192,25 @@ end sub
 
 sub onPosterLoadStatus()
     if m.poster.loadStatus = "ready" then ShowPoster() else ShowArtless()
+end sub
+
+sub onPosterLoadStatusRetry()
+    if m.poster = invalid then return
+    status = m.poster.loadStatus
+    if status = "ready"
+        hadRetry = m.retryCount > 0
+        uri = ""
+        if m.poster.uri <> invalid then uri = m.poster.uri
+        StopPosterRetry()
+        m.retryCount = 0
+        if m.poster.uri <> invalid then m.retryUri = m.poster.uri else m.retryUri = ""
+        if hadRetry then print "[EpisodeTile] retry: succeeded uri="; uri
+    else if status = "failed"
+        if m.poster.uri <> invalid and m.poster.uri <> "" then m.retryUri = m.poster.uri
+        SchedulePosterRetry()
+    else if status = "loading"
+        ' loading timeout is managed by StartLoadingTimeout() on load start
+    end if
 end sub
 
 ' The artless unit: the face plus the title. The poster is left alone on purpose
