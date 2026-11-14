@@ -869,6 +869,7 @@ sub onDiscoverLoaded()
         else
             m.allLoaded = not result.hasMore
             UpdateGrid(AppendRestorePosition())
+            RefreshDiscoverHeroFromFocus()
         end if
     end if
 end sub
