@@ -113,7 +113,7 @@
         <RowList
             id="epList"
             translation="[80, 560]"
-            numRows="0"
+            numRows="2"
             itemSize="[1760, 312]"
             itemSpacing="[0, 12]"
             rowItemSize="[[1760, 300]]"

@@ -32,50 +32,61 @@
         <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
         <Poster
             id="heroPoster"
-            translation="[0, 0]"
-            width="1920"
-            height="1080"
-            loadWidth="1920"
-            loadHeight="1080"
+            translation="[800, 0]"
+            width="1120"
+            height="630"
+            loadWidth="1120"
+            loadHeight="630"
             loadDisplayMode="scaleToZoom"
             opacity="1.0" />
+        <Poster
+            id="heroFadeLR"
+            translation="[800, 0]"
+            width="360"
+            height="630"
+            loadWidth="256"
+            loadHeight="1"
+            loadDisplayMode="scaleToFill"
+            uri="pkg:/images/hero_fade_lr.png" />
+        <Poster
+            id="heroFadeBT"
+            translation="[800, 420]"
+            width="1120"
+            height="210"
+            loadWidth="1"
+            loadHeight="256"
+            loadDisplayMode="scaleToFill"
+            uri="pkg:/images/hero_fade_bt.png" />
         <Rectangle
             id="heroScrim"
             translation="[0, 0]"
             width="1920"
             height="1080"
-            color="0x00000099" />
-        <Poster
-            id="heroMask"
-            translation="[0, 320]"
-            width="1920"
-            height="760"
-            loadDisplayMode="scaleToFill"
-            uri="pkg:/images/mask.png" />
+            color="0x00000000" />
         <Poster
             id="heroLogo"
-            translation="[162, 72]"
+            translation="[162, 48]"
             width="820"
             height="460"
             loadWidth="820"
             loadHeight="460"
-            loadDisplayMode="scaleToFit"
+            loadDisplayMode="limitSize"
             visible="false" />
 
         <Label
             id="heroTitle"
-            translation="[162, 112]"
+            translation="[162, 88]"
             width="680"
             height="90"
             wrap="true"
             font="font:LargeBoldSystemFont" />
         <Label
             id="heroMeta"
-            translation="[166, 216]"
+            translation="[166, 192]"
             width="900"
             height="30"
-            font="font:SmallSystemFont" />
-        <Group id="heroRating" translation="[166, 256]" visible="false">
+            font="font:SmallerSystemFont" />
+        <Group id="heroRating" translation="[166, 232]" visible="false">
             <Poster
                 id="heroImdbLogo"
                 width="64"
@@ -94,15 +105,15 @@
         </Group>
         <Label
             id="heroGenres"
-            translation="[166, 307]"
+            translation="[166, 283]"
             width="860"
             height="32"
-            font="font:SmallSystemFont" />
+            font="font:SmallerSystemFont" />
         <Label
             id="heroDescription"
-            translation="[166, 357]"
-            width="860"
-            height="145"
+            translation="[166, 333]"
+            width="620"
+            height="185"
             wrap="true"
             vertAlign="top"
             font="font:SmallSystemFont" />

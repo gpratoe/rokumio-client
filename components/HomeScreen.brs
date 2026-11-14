@@ -954,6 +954,7 @@ sub BlurFocus()
     CancelHeroPrefetch()
     if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
     if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+    HeroClear()
     CancelOpen()
 end sub
 

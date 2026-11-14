@@ -20,11 +20,30 @@
 
 sub HeroInitState()
     m.heroPosterPendingUri = ""
+    m.heroPosterSourceUri = ""
     m.heroLogoUri = ""
     m.heroLogoGraceUri = ""
     m.heroLogoFallbackUri = ""
     m.heroLayoutMode = "title"
     m.heroFocusKey = ""
+end sub
+
+sub HeroSetFillUri(uri as string)
+    if m.heroFill <> invalid and m.heroFill.uri <> uri then m.heroFill.uri = uri
+    if m.heroFill1 <> invalid and m.heroFill1.uri <> uri then m.heroFill1.uri = uri
+    if m.heroFill2 <> invalid and m.heroFill2.uri <> uri then m.heroFill2.uri = uri
+end sub
+
+function HeroRequestUri(source as dynamic) as string
+    src = StringOf(source)
+    if src = "" then return ""
+    return src
+end function
+
+sub HeroSetFillVisible(visible as boolean)
+    if m.heroFill <> invalid then m.heroFill.visible = visible
+    if m.heroFill1 <> invalid then m.heroFill1.visible = visible
+    if m.heroFill2 <> invalid then m.heroFill2.visible = visible
 end sub
 
 sub HeroClear()
@@ -35,11 +54,14 @@ sub HeroClear()
     if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
     if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
     m.heroPosterPendingUri = ""
+    m.heroPosterSourceUri = ""
     if m.heroPoster <> invalid
         m.heroPoster.uri = ""
         m.heroPoster.opacity = 1
         m.heroPoster.visible = false
     end if
+    HeroSetFillUri("")
+    HeroSetFillVisible(false)
     if m.heroLogo <> invalid and m.heroLogo.uri <> "" then m.heroLogo.uri = ""
     if m.heroTitle <> invalid then m.heroTitle.text = ""
     if m.heroMeta <> invalid then m.heroMeta.text = ""
@@ -85,7 +107,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
     end if
     genres = HeroGenresText(meta.genres)
     if title.Len() > 44 then title = Left(title, 41) + "..."
-    if description.Len() > 150 then description = Left(description, 147) + "..."
+    if description.Len() > 220 then description = Left(description, 217) + "..."
 
     logo = StringOf(meta.logo)
     background = StringOf(meta.background)
@@ -107,23 +129,37 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
     if m.heroDescription.visible <> descVisible then m.heroDescription.visible = descVisible
 
     if background = ""
+        m.heroPosterSourceUri = ""
         m.heroPosterPendingUri = ""
         if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
         m.heroPoster.opacity = 1
         if m.heroPoster.uri <> "" then m.heroPoster.uri = ""
         m.heroPoster.visible = false
-    else if m.heroPoster.uri <> background
-        m.heroPosterPendingUri = background
-        if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-        m.heroPoster.opacity = 0
-        m.heroPoster.uri = background
-        m.heroPoster.visible = true
+        HeroSetFillUri("")
+        HeroSetFillVisible(false)
     else
-        m.heroPosterPendingUri = background
-        m.heroPoster.visible = true
-        if m.heroPoster.loadStatus = "ready" or m.heroPoster.loadStatus = "failed"
+        if background <> m.heroPosterSourceUri
+            m.heroPosterSourceUri = background
+        end if
+        requestUri = HeroRequestUri(background)
+        if m.heroPoster.uri <> requestUri
+            m.heroPosterPendingUri = requestUri
             if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-            m.heroPoster.opacity = 1
+            m.heroPoster.opacity = 0
+            m.heroPoster.uri = ""
+            m.heroPoster.uri = requestUri
+            m.heroPoster.visible = true
+            HeroSetFillUri(requestUri)
+            HeroSetFillVisible(true)
+        else
+            m.heroPosterPendingUri = requestUri
+            m.heroPoster.visible = true
+            HeroSetFillUri(requestUri)
+            HeroSetFillVisible(true)
+            if m.heroPoster.loadStatus = "ready" or m.heroPoster.loadStatus = "failed"
+                if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+                m.heroPoster.opacity = 1
+            end if
         end if
     end if
 
@@ -234,15 +270,15 @@ sub HeroApplyLayout(mode as string, showTitle = true as boolean)
     m.heroLayoutMode = "title"
     m.heroLogo.visible = false
     m.heroTitle.visible = showTitle
-    m.heroLogo.translation = [162, 72]
+    m.heroLogo.translation = [162, 48]
     m.heroLogo.width = 820
     m.heroLogo.height = 460
-    m.heroMeta.translation = [166, 216]
-    m.heroRating.translation = [166, 256]
-    m.heroGenres.translation = [166, 307]
-    m.heroDescription.translation = [166, 357]
-    m.heroDescription.width = 860
-    m.heroDescription.height = 150
+    m.heroMeta.translation = [166, 192]
+    m.heroRating.translation = [166, 232]
+    m.heroGenres.translation = [166, 283]
+    m.heroDescription.translation = [166, 333]
+    m.heroDescription.width = 620
+    m.heroDescription.height = 185
 end sub
 
 sub HeroFitLogo()
@@ -253,26 +289,14 @@ sub HeroFitLogo()
 
     m.heroLogo.width = logoWidth
     m.heroLogo.height = logoHeight
-    if fit.tall
-        m.heroLayoutMode = "tall"
-        m.heroLogo.translation = [162, Int((540 - logoHeight) / 2)]
-        contentX = 162 + logoWidth + 48
-        m.heroMeta.translation = [contentX, 110]
-        m.heroRating.translation = [contentX, 158]
-        m.heroGenres.translation = [contentX, 206]
-        m.heroDescription.translation = [contentX, 256]
-        m.heroDescription.width = 1920 - contentX - 160
-        m.heroDescription.height = 260
-    else
-        m.heroLayoutMode = "wide"
-        m.heroLogo.translation = [162, 70 + Int((190 - logoHeight) / 2)]
-        m.heroMeta.translation = [166, 274]
-        m.heroRating.translation = [166, 316]
-        m.heroGenres.translation = [166, 360]
-        m.heroDescription.translation = [166, 402]
-        m.heroDescription.width = 1000
-        m.heroDescription.height = 138
-    end if
+    m.heroLayoutMode = "wide"
+    m.heroLogo.translation = [162, 46 + Int((190 - logoHeight) / 2)]
+    m.heroMeta.translation = [166, 250]
+    m.heroRating.translation = [166, 292]
+    m.heroGenres.translation = [166, 336]
+    m.heroDescription.translation = [166, 378]
+    m.heroDescription.width = 620
+    m.heroDescription.height = 175
     m.heroLogo.visible = true
     m.heroTitle.visible = false
 end sub
