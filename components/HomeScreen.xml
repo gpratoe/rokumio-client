@@ -61,9 +61,7 @@
             loadHeight="460"
             loadDisplayMode="scaleToFit"
             visible="false" />
-        <!-- Offscreen logo warmers: pre-decode neighbor logos after a stable dwell. -->
-        <Poster id="heroLogoWarm1" translation="[-2000, -2000]" width="820" height="460" loadWidth="820" loadHeight="460" loadDisplayMode="scaleToFit" visible="false" />
-        <Poster id="heroLogoWarm2" translation="[-2000, -2000]" width="820" height="460" loadWidth="820" loadHeight="460" loadDisplayMode="scaleToFit" visible="false" />
+
         <Label
             id="heroTitle"
             translation="[162, 112]"

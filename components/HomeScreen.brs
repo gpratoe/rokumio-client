@@ -49,7 +49,6 @@ sub init()
     m.heroPrefetchDelay = m.top.FindNode("heroPrefetchDelay")
     m.heroPrefetchDelay.ObserveField("fire", "onHeroPrefetchDelayFire")
     m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
-    m.heroLogoWarmers = [m.top.FindNode("heroLogoWarm1"), m.top.FindNode("heroLogoWarm2")]
     m.heroPrefetchTasks = []
     m.heroPrefetchKeys = {}
     m.heroMetaCache = {}
@@ -469,14 +468,6 @@ sub CancelHeroPrefetch()
     end if
     m.heroPrefetchTasks = []
     m.heroPrefetchKeys = {}
-    ClearHeroLogoWarmers()
-end sub
-
-sub ClearHeroLogoWarmers()
-    if m.heroLogoWarmers = invalid then return
-    for each warmer in m.heroLogoWarmers
-        if warmer <> invalid then warmer.uri = ""
-    end for
 end sub
 
 sub onHeroPrefetchDelayFire()
@@ -488,9 +479,7 @@ sub onHeroPrefetchDelayFire()
     if HomeHeroMetaKeyAt(rowIndex, itemIndex) <> m.heroFocusKey then return
 
     candidates = HeroPrefetchCandidates(rowIndex, itemIndex)
-    WarmNeighborLogos(candidates)
     PrefetchNeighborHeroMeta(candidates)
-    WarmNeighborLogos(HeroPrefetchCandidates(rowIndex, itemIndex))
 end sub
 
 function HomeHeroMetaKeyAt(rowIndex as integer, itemIndex as integer) as string
@@ -525,32 +514,6 @@ function HeroPrefetchCandidates(rowIndex as integer, itemIndex as integer) as ob
         end if
     end for
     return candidates
-end function
-
-sub WarmNeighborLogos(candidates as object)
-    ClearHeroLogoWarmers()
-    if m.heroLogoWarmers = invalid or candidates = invalid then return
-    slot = 0
-    for each candidate in candidates
-        if slot >= m.heroLogoWarmers.Count() then exit for
-        logo = HeroCandidateLogo(candidate)
-        if logo <> ""
-            warmer = m.heroLogoWarmers[slot]
-            if warmer <> invalid then warmer.uri = logo
-            slot = slot + 1
-        end if
-    end for
-end sub
-
-function HeroCandidateLogo(candidate as object) as string
-    if candidate = invalid then return ""
-    key = candidate.key
-    if key <> "" and m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(key)
-        cached = m.heroMetaCache[key]
-        if cached <> invalid then return StringOf(cached.logo)
-    end if
-    if candidate.meta <> invalid then return StringOf(candidate.meta.logo)
-    return ""
 end function
 
 sub PrefetchNeighborHeroMeta(candidates as object)
@@ -657,10 +620,6 @@ sub onHeroPrefetchLoaded(event as object)
         RenderHomeHero(display)
     end if
 
-    position = m.catalog.rowItemFocused
-    if position <> invalid and position.Count() >= 2 and HomeHeroMetaKeyAt(position[0], position[1]) = m.heroFocusKey
-        WarmNeighborLogos(HeroPrefetchCandidates(position[0], position[1]))
-    end if
 end sub
 
 
