@@ -33,6 +33,9 @@
              logo zone with it (Home's heroMask does the same job). -->
         <Poster id="bgMask" translation="[0, 320]" width="1920" height="760" loadDisplayMode="scaleToFill" uri="pkg:/images/mask.png" />
 
+        <PosterLoader id="bgLoader" />
+        <PosterLoader id="logoLoader" />
+
         <!-- Hero: series name and logo only (no meta, no synopsis — the cards
              carry the episode words). Same logo choreography as Details: the
              logo takes the slot when it loads, the fallback title steps back

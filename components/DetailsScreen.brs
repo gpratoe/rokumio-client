@@ -18,11 +18,20 @@ sub init()
     m.bgPosterFadeAnim = m.top.FindNode("bgPosterFadeAnim")
     m.bgFullFadeAnim = m.top.FindNode("bgFullFadeAnim")
     m.heroLogo = m.top.FindNode("heroLogo")
-    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
-    m.bgPoster.ObserveField("loadStatus", "onBgPosterStatus")
-    m.bgPosterFull.ObserveField("loadStatus", "onBgFullStatus")
-    m.heroLogoUri = ""
+    m.bgPosterLoader = m.top.FindNode("bgPosterLoader")
+    m.bgFullLoader = m.top.FindNode("bgFullLoader")
+    m.logoLoader = m.top.FindNode("logoLoader")
+    m.bgPosterLoader.target = m.bgPoster
+    m.bgFullLoader.target = m.bgPosterFull
+    m.logoLoader.target = m.heroLogo
+    m.bgPosterLoader.ObserveField("ready", "onBgPosterReady")
+    m.bgPosterLoader.ObserveField("status", "onBgPosterReady")
+    m.bgFullLoader.ObserveField("ready", "onBgFullReady")
+    m.bgFullLoader.ObserveField("status", "onBgFullReady")
+    m.logoLoader.ObserveField("ready", "onLogoStateChanged")
+    m.logoLoader.ObserveField("status", "onLogoStateChanged")
     m.bgUri = ""
+    m.bgMode = ""
     m.preferHeroTexture = false
     m.detailName = m.top.FindNode("detailName")
     m.detailType = m.top.FindNode("detailType")
@@ -77,6 +86,8 @@ function OnEnter(params as object) as void
                 ShowMovie()
             end if
         end if
+        ' Re-entry (pop back): recover hero assets only if current state is not satisfied.
+        if m.meta <> invalid then RenderHero(m.meta)
         RestoreFocus()
         return
     end if
@@ -118,36 +129,128 @@ sub RenderHero(meta as object)
     if meta = invalid then return
 
     bg = StringOf(meta.background)
-    if bg <> m.bgUri
-        m.bgUri = bg
+    if bg = ""
+        m.bgUri = ""
+        m.bgMode = ""
         if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
         if m.bgFullFadeAnim <> invalid then m.bgFullFadeAnim.control = "stop"
+        m.bgPosterLoader.uri = ""
+        m.bgFullLoader.uri = ""
         m.bgPoster.opacity = 0
-        m.bgPoster.uri = ""
         m.bgPoster.visible = false
-        m.bgPosterFull.uri = ""
         m.bgPosterFull.opacity = 0
         m.bgPosterFull.visible = false
-        if bg <> ""
-            if m.preferHeroTexture = true
-                ' Reuse likely-cached hero texture (1120x630) for a snappy transition.
-                m.bgPoster.uri = bg
-                m.bgPoster.visible = true
-                m.bgPosterFull.visible = true
-                m.bgPosterFull.uri = bg
-            else
-                ' No preloaded hero texture: load high-res only to avoid extra decode.
-                m.bgPosterFull.visible = true
-                m.bgPosterFull.uri = bg
+    else
+        desiredHero = m.preferHeroTexture = true
+        desiredMode = "fullOnly"
+        if desiredHero then desiredMode = "heroThenFull"
+
+        bgChanged = bg <> m.bgUri
+        ' Don't downgrade a healthy/visible heroThenFull state just because
+        ' preferHeroTexture changed (e.g. meta refresh) for the same background.
+        if not bgChanged and m.bgMode = "heroThenFull" and desiredMode = "fullOnly"
+            if m.bgFullLoader.ready = true or m.bgPosterLoader.ready = true or m.bgPoster.opacity > 0 or m.bgPosterFull.opacity > 0
+                desiredMode = "heroThenFull"
             end if
         end if
-    else if bg = ""
-        if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
-        m.bgPoster.opacity = 0
-        m.bgPoster.uri = ""
-        m.bgPoster.visible = false
-        m.bgPosterFull.uri = ""
-        m.bgPosterFull.visible = false
+
+        sameConfig = (not bgChanged) and (m.bgMode = desiredMode)
+        needsRequest = not sameConfig
+        if sameConfig
+            if desiredMode = "heroThenFull"
+                if not (m.bgFullLoader.ready = true or m.bgPosterLoader.ready = true) then needsRequest = true
+            else
+                if not (m.bgFullLoader.ready = true) then needsRequest = true
+            end if
+        end if
+
+        bgVisualReady = false
+        if sameConfig and not needsRequest
+            if desiredMode = "heroThenFull"
+                if m.bgFullLoader.ready = true and m.bgPosterFull.visible = true and m.bgPosterFull.opacity >= 1
+                    bgVisualReady = true
+                else if not (m.bgFullLoader.ready = true) and m.bgPosterLoader.ready = true and m.bgPoster.visible = true and m.bgPoster.opacity >= 1
+                    bgVisualReady = true
+                end if
+            else
+                if m.bgFullLoader.ready = true and m.bgPosterFull.visible = true and m.bgPosterFull.opacity >= 1
+                    bgVisualReady = true
+                end if
+            end if
+        end if
+
+        m.bgUri = bg
+        m.bgMode = desiredMode
+
+        if not (sameConfig and not needsRequest and bgVisualReady)
+            if needsRequest
+                ' New/changed/unsatisfied background: request loads (loaders handle retry),
+                ' but if assets are already ready, show immediately without transitions.
+                print "[DetailsBg] request mode="; desiredMode; " bgChanged="; bgChanged; " sameConfig="; sameConfig; " heroReady="; m.bgPosterLoader.ready; " fullReady="; m.bgFullLoader.ready
+                if bgChanged or not sameConfig
+                    if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
+                    if m.bgFullFadeAnim <> invalid then m.bgFullFadeAnim.control = "stop"
+                end if
+
+                if desiredMode = "heroThenFull"
+                    ' Ensure correct loader requests without clearing already-ready targets.
+                    if m.bgPosterLoader.uri <> bg then m.bgPosterLoader.uri = bg
+                    if m.bgFullLoader.uri <> bg then m.bgFullLoader.uri = bg
+                    if m.bgFullLoader.ready = true
+                        m.bgPoster.opacity = 0
+                        m.bgPoster.visible = false
+                        m.bgPosterFull.visible = true
+                        m.bgPosterFull.opacity = 1
+                    else if m.bgPosterLoader.ready = true
+                        m.bgPoster.visible = true
+                        m.bgPoster.opacity = 1
+                        m.bgPosterFull.visible = true
+                        if m.bgPosterFull.opacity >= 1 then m.bgPosterFull.opacity = 0
+                    else
+                        if not (m.bgPoster.opacity >= 1) then m.bgPoster.opacity = 0
+                        m.bgPoster.visible = true
+                        m.bgPosterFull.visible = true
+                        if not (m.bgPosterFull.opacity >= 1) then m.bgPosterFull.opacity = 0
+                    end if
+                else
+                    if m.bgPosterLoader.uri <> "" then m.bgPosterLoader.uri = ""
+                    if m.bgFullLoader.uri <> bg then m.bgFullLoader.uri = bg
+                    m.bgPoster.opacity = 0
+                    m.bgPoster.visible = false
+                    if m.bgFullLoader.ready = true
+                        m.bgPosterFull.visible = true
+                        m.bgPosterFull.opacity = 1
+                    else
+                        m.bgPosterFull.visible = true
+                        if not (m.bgPosterFull.opacity >= 1) then m.bgPosterFull.opacity = 0
+                    end if
+                end if
+            else
+                ' Same config satisfied but visual state not fully settled: normalize without restart.
+                print "[DetailsBg] normalize mode="; desiredMode; " heroReady="; m.bgPosterLoader.ready; " fullReady="; m.bgFullLoader.ready
+                if m.bgFullLoader.ready = true
+                    if m.bgFullFadeAnim <> invalid and m.bgFullFadeAnim.state = "running"
+                        ' Let fade complete.
+                    else
+                        if m.bgFullFadeAnim <> invalid then m.bgFullFadeAnim.control = "stop"
+                        m.bgPosterFull.visible = true
+                        m.bgPosterFull.opacity = 1
+                    end if
+                else if desiredMode = "heroThenFull" and m.bgPosterLoader.ready = true
+                    if m.bgPosterFadeAnim <> invalid and m.bgPosterFadeAnim.state = "running"
+                        ' Let fade complete.
+                    else
+                        if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
+                        m.bgPoster.visible = true
+                        m.bgPoster.opacity = 1
+                        m.bgPosterFull.visible = true
+                        if m.bgPosterFull.opacity >= 1 then m.bgPosterFull.opacity = 0
+                    end if
+                end if
+            end if
+        else
+            print "[DetailsBg] satisfied no-op mode="; desiredMode
+        end if
     end if
 
     title = StringOf(meta.name)
@@ -166,11 +269,6 @@ sub RenderHero(meta as object)
     rating = StringOf(meta.imdbRating)
     genres = HeroGenresText(meta.genres)
     logo = StringOf(meta.logo)
-    previousLogoUri = m.heroLogo.uri
-    m.heroLogoUri = logo
-    ResetHeroLogoLayout()
-    m.heroLogo.visible = false
-    m.detailName.visible = true
     m.detailName.text = title
     m.detailType.text = kind
     m.detailRatingText.text = rating
@@ -179,8 +277,8 @@ sub RenderHero(meta as object)
     m.detailGenres.visible = genres <> ""
     m.detailDesc.text = description
     m.detailDesc.visible = description.Trim() <> ""
-    m.heroLogo.uri = logo
-    if logo <> "" and logo = previousLogoUri and m.heroLogo.loadStatus = "ready" then FitHeroLogo()
+    m.logoLoader.uri = logo
+    ApplyDetailsLogoPresentation()
 end sub
 
 ' Search and Discover hand over slim catalog metas ({ id, type, name }) whose
@@ -237,8 +335,9 @@ sub onMetaLoaded()
     m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
     m.meta = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.metaRefreshed = true
-    ' Refreshed meta can introduce a background that wasn't hero-preloaded.
-    m.preferHeroTexture = false
+    ' Only downgrade to full-only if refreshed meta introduces/changes background.
+    newBg = StringOf(m.meta.background)
+    if newBg = "" or newBg <> m.bgUri then m.preferHeroTexture = false
     RenderHero(m.meta)
 end sub
 
@@ -249,14 +348,73 @@ sub RestoreFocus()
     m.chipsRow.callFunc("FocusChip", -1)
 end sub
 
-sub onHeroLogoStatus()
-    if m.heroLogo.uri <> m.heroLogoUri then return
-    if m.heroLogo.loadStatus = "ready"
-        FitHeroLogo()
-    else if m.heroLogo.loadStatus = "failed"
+sub onLogoStateChanged()
+    ApplyDetailsLogoPresentation()
+end sub
+
+sub ApplyDetailsLogoPresentation()
+    logo = StringOf(m.logoLoader.uri)
+    if logo = ""
+        ResetHeroLogoLayout()
         m.heroLogo.visible = false
         m.detailName.visible = true
+        return
+    end if
+    if m.logoLoader.ready = true or m.logoLoader.status = "ready"
+        FitHeroLogo()
+    else
+        ' Show fallback while loading; loader retries on failure/stuck states.
         ResetHeroLogoLayout()
+        m.heroLogo.visible = false
+        m.detailName.visible = true
+    end if
+end sub
+
+sub onBgPosterReady()
+    if m.bgPosterLoader = invalid or m.bgPoster = invalid then return
+    if m.bgMode <> "heroThenFull" then return
+    if StringOf(m.bgPosterLoader.uri) <> m.bgUri or m.bgUri = "" then return
+    ' Details owns transition: fade in low-res only if it becomes the visible layer.
+    if m.bgPosterLoader.ready = true or m.bgPosterLoader.status = "ready"
+        if m.bgFullLoader <> invalid and m.bgFullLoader.ready = true then return
+        m.bgPoster.visible = true
+        if m.bgPoster.opacity >= 1 then return
+        if m.bgPosterFadeAnim <> invalid
+            if m.bgPosterFadeAnim.state = "running" then return
+            m.bgPosterFadeAnim.control = "stop"
+            m.bgPoster.opacity = 0
+            m.bgPosterFadeAnim.control = "start"
+            print "[DetailsBg] start poster fade state="; m.bgPosterFadeAnim.state
+        else
+            m.bgPoster.opacity = 1
+        end if
+    else if m.bgPosterLoader.status = "failed" and m.bgPosterLoader.retryCount >= m.bgPosterLoader.maxRetries
+        print "[DetailsBg] poster failed retries exhausted"
+        ' Retries exhausted: keep UI stable (full-res may still load/fade in).
+        m.bgPoster.visible = true
+        if m.bgPoster.opacity <= 0 then m.bgPoster.opacity = 1
+    end if
+end sub
+
+sub onBgFullReady()
+    if m.bgFullLoader = invalid or m.bgPosterFull = invalid then return
+    if StringOf(m.bgFullLoader.uri) <> m.bgUri or m.bgUri = "" then return
+    if m.bgFullLoader.ready = true or m.bgFullLoader.status = "ready"
+        m.bgPosterFull.visible = true
+        if m.bgPosterFull.opacity >= 1 then return
+        if m.bgFullFadeAnim <> invalid
+            if m.bgFullFadeAnim.state = "running" then return
+            m.bgFullFadeAnim.control = "stop"
+            m.bgPosterFull.opacity = 0
+            m.bgFullFadeAnim.control = "start"
+            print "[DetailsBg] start full fade state="; m.bgFullFadeAnim.state
+        else
+            m.bgPosterFull.opacity = 1
+        end if
+    else if m.bgFullLoader.status = "failed" and m.bgFullLoader.retryCount >= m.bgFullLoader.maxRetries
+        print "[DetailsBg] full failed retries exhausted"
+        ' If full-res cannot load and no low-res is available/shown, hide it.
+        if m.bgPosterLoader = invalid or not (m.bgPosterLoader.ready = true) then m.bgPosterFull.visible = false
     end if
 end sub
 
@@ -521,39 +679,3 @@ function LibraryIcon() as string
     if m.stores <> invalid and m.stores.library.callFunc("LibraryIsSaved", m.meta.id) then return "pkg:/images/library_add_check.png"
     return "pkg:/images/library_add.png"
 end function
-
-
-sub onBgPosterStatus()
-    if m.bgPoster = invalid then return
-    if m.bgPoster.uri <> m.bgUri then return
-    status = m.bgPoster.loadStatus
-    if status = "ready"
-        if m.bgPosterFadeAnim <> invalid
-            m.bgPosterFadeAnim.control = "stop"
-            m.bgPoster.opacity = 0
-            m.bgPosterFadeAnim.control = "start"
-        else
-            m.bgPoster.opacity = 1
-        end if
-    else if status = "failed"
-        if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
-        m.bgPoster.opacity = 1
-    end if
-end sub
-
-sub onBgFullStatus()
-    if m.bgPosterFull = invalid then return
-    if m.bgPosterFull.uri <> m.bgUri then return
-    status = m.bgPosterFull.loadStatus
-    if status = "ready"
-        if m.bgFullFadeAnim <> invalid
-            m.bgFullFadeAnim.control = "stop"
-            m.bgPosterFull.opacity = 0
-            m.bgFullFadeAnim.control = "start"
-        else
-            m.bgPosterFull.opacity = 1
-        end if
-    else if status = "failed"
-        m.bgPosterFull.visible = false
-    end if
-end sub

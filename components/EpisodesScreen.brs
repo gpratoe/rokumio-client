@@ -16,10 +16,14 @@
 
 sub init()
     m.heroLogo = m.top.FindNode("heroLogo")
-    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
-    m.heroLogoUri = ""
     m.epName = m.top.FindNode("epName")
     m.bgPoster = m.top.FindNode("bgPoster")
+    m.bgLoader = m.top.FindNode("bgLoader")
+    m.logoLoader = m.top.FindNode("logoLoader")
+    m.bgLoader.target = m.bgPoster
+    m.logoLoader.target = m.heroLogo
+    m.logoLoader.ObserveField("ready", "onLogoStateChanged")
+    m.logoLoader.ObserveField("status", "onLogoStateChanged")
     m.seasonName = m.top.FindNode("seasonName")
     m.seasonPill = m.top.FindNode("seasonPill")
     m.seasonLeft = m.top.FindNode("seasonLeft")
@@ -121,13 +125,10 @@ function OnEnter(params as object) as void
 
     bg = m.meta.background
     if bg = invalid then bg = ""
-    m.bgPoster.uri = bg
+    m.bgLoader.uri = bg
 
     logo = StringOf(m.meta.logo)
-    if logo <> m.heroLogoUri
-        m.heroLogoUri = logo
-        m.heroLogo.uri = logo
-    end if
+    m.logoLoader.uri = logo
     ApplyHeroLogo()
 
     LoadSeries()
@@ -210,20 +211,20 @@ end sub
 ' Logo artwork: a loaded logo takes the hero slot and the title steps aside;
 ' artwork that never loaded, or none offered at all, leaves the title up.
 sub ApplyHeroLogo()
-    if m.heroLogoUri = ""
+    logo = StringOf(m.logoLoader.uri)
+    if logo = ""
         m.heroLogo.visible = false
         m.epName.visible = true
         ResetHeroLogoLayout()
-    else
-        ready = m.heroLogo.loadStatus = "ready"
-        m.heroLogo.visible = ready
-        m.epName.visible = not ready
-        if ready then FitHeroLogo() else ResetHeroLogoLayout()
+        return
     end if
+    ready = m.logoLoader.ready = true or m.logoLoader.status = "ready" or m.heroLogo.loadStatus = "ready"
+    m.heroLogo.visible = ready
+    m.epName.visible = not ready
+    if ready then FitHeroLogo() else ResetHeroLogoLayout()
 end sub
 
-sub onHeroLogoStatus()
-    if m.heroLogo.uri <> m.heroLogoUri then return
+sub onLogoStateChanged()
     ApplyHeroLogo()
 end sub
 

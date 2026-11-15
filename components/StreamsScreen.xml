@@ -33,6 +33,10 @@
         <Poster id="bgPoster" width="1920" height="1080" loadWidth="1920" loadHeight="1080" loadDisplayMode="scaleToZoom" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
 
+        <!-- Reusable loaders: own uri assignment/retry, screens own presentation. -->
+        <PosterLoader id="bgLoader" />
+        <PosterLoader id="logoLoader" />
+
         <!-- Left: same hero language as Details/Home — the logo (fixed box,
              scaleToFit keeps one layout whatever the ratio), the fallback
              title when a stream has no logo, the action line, the resume

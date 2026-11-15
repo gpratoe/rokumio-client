@@ -31,6 +31,10 @@
         <Poster id="bgPosterFull" translation="[0, 0]" width="1920" height="1080" loadWidth="1920" loadHeight="1080" loadDisplayMode="scaleToZoom" opacity="0" visible="false" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
 
+        <PosterLoader id="bgPosterLoader" />
+        <PosterLoader id="bgFullLoader" />
+        <PosterLoader id="logoLoader" />
+
         <Animation id="bgPosterFadeAnim" duration="0.4" repeat="false" easeFunction="linear">
             <FloatFieldInterpolator id="bgPosterFadeInterp" fieldToInterp="bgPoster.opacity" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" />
         </Animation>

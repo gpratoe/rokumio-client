@@ -31,10 +31,14 @@ sub init()
     m.synopsis = m.top.FindNode("synopsis")
     m.status = m.top.FindNode("status")
     m.heroLogo = m.top.FindNode("heroLogo")
-    m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
-    m.heroLogoUri = ""
     m.resumeLine = m.top.FindNode("resumeLine")
     m.bgPoster = m.top.FindNode("bgPoster")
+    m.bgLoader = m.top.FindNode("bgLoader")
+    m.logoLoader = m.top.FindNode("logoLoader")
+    m.bgLoader.target = m.bgPoster
+    m.logoLoader.target = m.heroLogo
+    m.logoLoader.ObserveField("ready", "onLogoReadyChanged")
+    m.logoLoader.ObserveField("status", "onLogoReadyChanged")
     m.streamsList = m.top.FindNode("streamsList")
     m.arrowLeft = m.top.FindNode("arrowLeft")
     m.arrowRight = m.top.FindNode("arrowRight")
@@ -133,23 +137,13 @@ sub ApplyParamsChrome(params as object)
 
     bg = params.background
     if bg = invalid then bg = ""
-    m.bgPoster.uri = bg
+    m.bgLoader.uri = bg
 
     ' Logo artwork: a loaded logo takes the hero slot and the title steps
-    ' aside (slid back on load status, see onHeroLogoStatus); artwork that
-    ' never loaded, or none offered at all, leaves the title up.
+    ' aside once ready; artwork that never loads leaves the title up.
     logo = StringOf(params.logo)
-    if logo <> m.heroLogoUri
-        m.heroLogoUri = logo
-        m.heroLogo.uri = logo
-    end if
-    if logo = ""
-        m.heroLogo.visible = false
-        m.headTitle.visible = true
-    else
-        m.heroLogo.visible = m.heroLogo.loadStatus = "ready"
-        m.headTitle.visible = not m.heroLogo.visible
-    end if
+    m.logoLoader.uri = logo
+    ApplyLogoPresentation()
 
     action = ""
     synopsis = ""
@@ -191,16 +185,25 @@ sub ApplyParamsChrome(params as object)
     m.synopsis.text = synopsis
 end sub
 
-' Left pane, logo path: a ready logo has already been given the hero slot
-' and the fallback title steps aside; a failed load hands the title back.
-sub onHeroLogoStatus()
-    if m.heroLogo.uri <> m.heroLogoUri then return
-    if m.heroLogo.loadStatus = "ready"
-        m.heroLogo.visible = true
-        m.headTitle.visible = false
-    else if m.heroLogo.loadStatus = "failed"
-        m.heroLogo.visible = false
-        m.headTitle.visible = true
+sub onLogoReadyChanged()
+    ApplyLogoPresentation()
+end sub
+
+sub ApplyLogoPresentation()
+    logo = StringOf(m.logoLoader.uri)
+    if logo = ""
+        if m.heroLogo.visible <> false then m.heroLogo.visible = false
+        if m.headTitle.visible <> true then m.headTitle.visible = true
+        return
+    end if
+    ready = m.logoLoader.ready = true or m.logoLoader.status = "ready" or (m.heroLogo.uri = logo and m.heroLogo.loadStatus = "ready")
+    if ready
+        if m.heroLogo.visible <> true then m.heroLogo.visible = true
+        if m.headTitle.visible <> false then m.headTitle.visible = false
+    else
+        ' Keep title until ready; loader handles retry for failed/stuck loads.
+        if m.heroLogo.visible <> false then m.heroLogo.visible = false
+        if m.headTitle.visible <> true then m.headTitle.visible = true
     end if
 end sub
 

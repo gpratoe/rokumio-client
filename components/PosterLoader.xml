@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="PosterLoader" extends="Node">
+    <!-- Reusable image-load controller for a target Poster node.
+         Owns URI assignment, loadStatus observation, and retry-on-failure/stuck
+         behavior so screens don't duplicate fragile same-URI/flash/retry logic.
+         Presentation (visibility, fades, fit/layout, fallbacks) remains the
+         caller's responsibility via observed fields/callbacks. -->
+    <interface>
+        <!-- Target Poster node to load into. -->
+        <field id="target" type="node" onChange="onTargetChanged" />
+        <!-- Desired image URI. Setting this requests a load (with same-URI
+             ready no-op and failed/stuck recovery). -->
+        <field id="uri" type="string" alwaysNotify="true" onChange="onUriChanged" />
+        <!-- When true, automatically retries on load failure. -->
+        <field id="retryEnabled" type="boolean" value="true" />
+        <!-- Maximum automatic retry attempts per requested URI (0 = no retries). -->
+        <field id="maxRetries" type="integer" value="3" />
+        <!-- Delay in milliseconds before an automatic retry. -->
+        <field id="retryDelayMs" type="integer" value="1200" />
+
+        <!-- Observed status: "idle", "loading", "ready", "failed". -->
+        <field id="status" type="string" value="idle" alwaysNotify="true" />
+        <!-- Convenience mirror of target.loadStatus when available. -->
+        <field id="loadStatus" type="string" value="" alwaysNotify="true" />
+        <!-- True when the current desired URI is loaded and ready. -->
+        <field id="ready" type="boolean" value="false" alwaysNotify="true" />
+        <!-- Number of retries performed for the current requested URI. -->
+        <field id="retryCount" type="integer" value="0" />
+
+        <!-- Imperative API. -->
+        <function name="Load" />
+        <function name="Retry" />
+        <function name="Clear" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/PosterLoader.brs" />
+
+    <children>
+        <Timer id="retryTimer" repeat="false" />
+    </children>
+</component>
