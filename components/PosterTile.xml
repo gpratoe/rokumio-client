@@ -19,10 +19,13 @@
 
     <script type="text/brightscript" uri="pkg:/components/PosterTile.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
 
     <children>
-        <Timer id="retryTimer" repeat="false" />
-        <Timer id="loadingTimer" repeat="false" />
+        <!-- loadingTimeoutMs disabled (0): loading-state watchdog retries caused churn on
+             slow/high-latency links (aborting requests that would have completed). Keep
+             failure-status retries for definitive load failures. -->
+        <PosterLoader id="posterLoader" retryEnabled="true" maxRetries="3" retryDelayMs="1500" retryDelayMs2="4000" retryDelayMs3="8000" loadingTimeoutMs="0" />
         <!-- The artless unit: the face plus the title. Shown while there is no
              artwork, and HIDDEN the moment the poster reports it has painted, so
              the face genuinely stops rendering rather than sitting behind the
@@ -73,7 +76,7 @@
              The one residual: an add-on that served an off-ratio poster would
              now letterbox where scaleToFill used to crop, exposing the row
              behind the tile edges. -->
-        <Poster id="poster" width="270" height="405" loadWidth="270" loadHeight="405" loadDisplayMode="scaleToFit" />
+        <Poster id="poster" width="270" height="405" loadWidth="270" loadHeight="405" loadDisplayMode="scaleToFit" visible="true" />
 <!-- Optional continue-watching progress bar, painted on top of
              the poster's bottom edge (8px strip spanning the tile). The dark
              track is the full tile width and sits flush at x=0; the mint fill's

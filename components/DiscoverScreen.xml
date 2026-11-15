@@ -25,6 +25,8 @@
         <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
         <Timer id="discoverRetryTimer" duration="2.0" repeat="false" />
 
+        <PosterLoader id="heroPosterLoader" />
+        <PosterLoader id="heroLogoLoader" />
         <Poster
             id="heroPoster"
             translation="[800, 0]"
@@ -49,7 +51,7 @@
             width="1120"
             height="210"
             loadWidth="1"
-            loadHeight="256"
+            loadHeight="210"
             loadDisplayMode="scaleToFill"
             uri="pkg:/images/hero_fade_bt.png" />
         <Rectangle

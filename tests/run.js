@@ -66,6 +66,8 @@ async function writeCombinedScript() {
         'tests/cachesize.test.brs',
         'tests/textsstore.test.brs',
         'tests/serversettingsstore.test.brs',
+        'source/util/PosterLoaderCore.brs',
+        'tests/posterloader.test.brs',
         'tests/_run.brs'
     ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });
@@ -870,16 +872,18 @@ function checkPosterStatusContract() {
     // A success path must be reachable. Every surface that hides something
     // behind a poster needs the one value that means "a bitmap exists"; if that
     // literal is wrong the branch never runs and the fallback never goes away.
-    // Both spellings count: the tiles compare m.poster.loadStatus directly, the
-    // pairing screen copies it into a local first.
+    // Direct poster.loadStatus comparisons count, and PosterLoader-based tiles
+    // count if they detect ready via loader.ready or loader.status "ready".
     for (const name of ['PosterTile.brs', 'EpisodeTile.brs', 'LinkStremioScreen.brs']) {
         const src = fs.readFileSync(path.join(projectRoot, 'components', name), 'utf8')
             .split('\n').map(line => line.split("'")[0]).join('\n');
         const held = [...new Set([...src.matchAll(/(\w+)\s*=\s*[\w.]+\.loadStatus\b/g)].map(m => m[1]))];
         const subjects = ['loadStatus', ...held].join('|');
         const compared = [...src.matchAll(new RegExp('\\b(?:' + subjects + ')\\s*(?:<>|<|>|=)\\s*"([^"]+)"', 'g'))].map(m => m[1]);
-        if (!compared.includes(POSTER_LOAD_STATUS_READY)) {
-            console.error(`${name} never tests a Poster loadStatus against "${POSTER_LOAD_STATUS_READY}" (${POSTER_LOAD_STATUS.ready}). Without the success value its load handling cannot tell artwork from no artwork, so the fallback renders over the image forever`);
+        const directReady = compared.includes(POSTER_LOAD_STATUS_READY);
+        const loaderReady = /\.ready\s*=\s*true/.test(src) || /status\)?\s*=\s*"ready"/.test(src) || /"ready"\s*=\s*StringOf\(/.test(src);
+        if (!directReady && !loaderReady) {
+            console.error(`${name} never detects a ready poster state ("${POSTER_LOAD_STATUS_READY}"). Without the success value its load handling cannot tell artwork from no artwork, so the fallback renders over the image forever`);
             ok = false;
         }
     }
@@ -969,37 +973,45 @@ function checkPosterFallbackContract() {
             }
         }
 
-        const handler = body(src, 'sub onPosterLoadStatus()');
-        if (handler === null) {
-            console.error(`${name}.brs has no onPosterLoadStatus() — nothing would ever hide the face once artwork lands`);
-            ok = false;
-        } else {
-            // One shared source of truth for the success value, and one whole
-            // shape rather than three loose greps: this file once hardcoded the
-            // wrong literal in two places and agreed with itself, and a handler
-            // that merely *mentions* the right status is not enough — "= ready
-            // and false" or an inverted branch keeps the face on screen while
-            // passing a substring check. The two states are mutually exclusive
-            // by construction: exactly one of them, decided by exactly that
-            // comparison.
-            const shape = new RegExp(
-                `if\\s+m\\.poster\\.loadStatus\\s*=\\s*"${POSTER_LOAD_STATUS_READY}"\\s+then\\s+ShowPoster\\(\\)\\s+else\\s+ShowArtless\\(\\)`,
-            );
-            if (!shape.test(handler)) {
-                console.error(`${name}.brs onPosterLoadStatus() must be exactly 'if m.poster.loadStatus = "${POSTER_LOAD_STATUS_READY}" then ShowPoster() else ShowArtless()'. "${POSTER_LOAD_STATUS_READY}" is the documented success value (${POSTER_LOAD_STATUS.ready}); the full set is ${POSTER_LOAD_STATUS_LEGAL.join(' / ')} and there is no "loaded". Anything that merely mentions the right status can still leave the face rendering over the artwork, so pin the whole conditional`);
+        const usesLoader = /PosterLoader/.test(src) || /m\.posterLoader/.test(src);
+        if (usesLoader) {
+            if (!/ShowPoster\(\)/.test(src) || !/ShowArtless\(\)/.test(src)) {
+                console.error(`${name}.brs must switch between ShowPoster() and ShowArtless() based on load state`);
                 ok = false;
             }
-        }
+            if (!/\.ObserveField\("ready"/.test(src) || !/\.ObserveField\("status"/.test(src)) {
+                console.error(`${name}.brs never observes poster loader state, so the face is never hidden when artwork lands`);
+                ok = false;
+            }
+            // Cached/immediate-ready loads can settle without a later callback path
+            // being obvious; ensure presentation is applied after requesting/setting.
+            if (!/ApplyPosterPresentation\(\)/.test(src)) {
+                console.error(`${name}.brs does not apply poster presentation from current load state — a cached/settled image can leave the face showing over real artwork`);
+                ok = false;
+            }
+        } else {
+            const handler = body(src, 'sub onPosterLoadStatus()');
+            if (handler === null) {
+                console.error(`${name}.brs has no onPosterLoadStatus() — nothing would ever hide the face once artwork lands`);
+                ok = false;
+            } else {
+                const shape = new RegExp(
+                    `if\\s+m\\.poster\\.loadStatus\\s*=\\s*"${POSTER_LOAD_STATUS_READY}"\\s+then\\s+ShowPoster\\(\\)\\s+else\\s+ShowArtless\\(\\)`,
+                );
+                if (!shape.test(handler)) {
+                    console.error(`${name}.brs onPosterLoadStatus() must be exactly 'if m.poster.loadStatus = "${POSTER_LOAD_STATUS_READY}" then ShowPoster() else ShowArtless()'. "${POSTER_LOAD_STATUS_READY}" is the documented success value (${POSTER_LOAD_STATUS.ready}); the full set is ${POSTER_LOAD_STATUS_LEGAL.join(' / ')} and there is no "loaded". Anything that merely mentions the right status can still leave the face rendering over the artwork, so pin the whole conditional`);
+                    ok = false;
+                }
+            }
 
-        if (!/m\.poster\.ObserveField\("loadStatus"/.test(src)) {
-            console.error(`${name}.brs never observes poster.loadStatus, so the face is never hidden when artwork lands`);
-            ok = false;
-        }
-        // A uri can resolve from cache and settle before the observer fires, so
-        // the status has to be re-read where the uri is set.
-        if (!new RegExp(`m\\.poster\\.loadStatus\\s*=\\s*"${POSTER_LOAD_STATUS_READY}"[\\s\\S]{0,80}onPosterLoadStatus\\(\\)`).test(src)) {
-            console.error(`${name}.brs does not re-read loadStatus after setting the uri — a cached image can settle before the observer fires, leaving the face showing over real artwork`);
-            ok = false;
+            if (!/m\.poster\.ObserveField\("loadStatus"/.test(src)) {
+                console.error(`${name}.brs never observes poster.loadStatus, so the face is never hidden when artwork lands`);
+                ok = false;
+            }
+            if (!new RegExp(`m\\.poster\\.loadStatus\\s*=\\s*"${POSTER_LOAD_STATUS_READY}"[\\s\\S]{0,80}onPosterLoadStatus\\(\\)`).test(src)) {
+                console.error(`${name}.brs does not re-read loadStatus after setting the uri — a cached image can settle before the observer fires, leaving the face showing over real artwork`);
+                ok = false;
+            }
         }
 
         // Never hide the poster from code either: same deadlock, one layer down.

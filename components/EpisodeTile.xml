@@ -14,10 +14,13 @@
 
     <script type="text/brightscript" uri="pkg:/components/EpisodeTile.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
 
     <children>
-        <Timer id="retryTimer" repeat="false" />
-        <Timer id="loadingTimer" repeat="false" />
+        <!-- loadingTimeoutMs disabled (0): loading-state watchdog retries caused churn on
+             slow/high-latency links (aborting requests that would have completed). Keep
+             failure-status retries for definitive load failures. -->
+        <PosterLoader id="posterLoader" retryEnabled="true" maxRetries="3" retryDelayMs="1500" retryDelayMs2="4000" retryDelayMs3="8000" loadingTimeoutMs="0" />
         <Poster
             id="tileBorder"
             width="1760"

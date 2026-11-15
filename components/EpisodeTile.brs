@@ -1,23 +1,16 @@
-' EpisodeTile — wide episode card for EpisodesScreen's list.
+ ' EpisodeTile — wide episode card for EpisodesScreen's list.
 '
 ' RowList feeds each item its ContentNode through `itemContent` and drives
-' focus through `itemHasFocus`/`rowHasFocus`. The artwork comes from the
-' episode's thumbnail (hdPosterUrl); a cell is either artwork or the artless
-' unit (a thumbnail-sized face plus the S#E#/name text), never a blend:
-' ShowArtless/ShowPoster swap them as a unit on the thumbnail's own
-' loadStatus. Poster.loadStatus is none / loading / ready / failed — "ready"
-' is the success value, and there is no "loaded"; see the Poster field
-' reference.
-'
-' The card look at focus time is the chip look: focus does not invert the
-' content — it lifts the plate one step under a white hairline ring. Idle
-' keeps the soft hairline.
+' focus through `itemHasFocus`/`rowHasFocus`. Thumbnail loading is handled by
+' PosterLoader (centralized URI/retry/stuck-loading recovery); presentation
+' shows the artless unit until the thumbnail is ready.
 
 sub init()
     m.border = m.top.FindNode("tileBorder")
     m.face = m.top.FindNode("tileFace")
     m.artless = m.top.FindNode("artless")
     m.poster = m.top.FindNode("poster")
+    m.posterLoader = m.top.FindNode("posterLoader")
     m.tileBg = m.top.FindNode("tileBg")
     m.titleText = m.top.FindNode("titleText")
     m.watchedBadgeGroup = m.top.FindNode("watchedBadgeGroup")
@@ -34,93 +27,17 @@ sub init()
     m.epSynopsis.color = t.textSecondary
     m.watchedPlate.color = t.glyphPlate
 
-    m.retryCount = 0
-    m.retryUri = ""
-    m.retryTimer = m.top.FindNode("retryTimer")
-    m.loadingTimer = m.top.FindNode("loadingTimer")
-    if m.retryTimer <> invalid then m.retryTimer.ObserveField("fire", "onRetryTimer")
-    if m.loadingTimer <> invalid then m.loadingTimer.ObserveField("fire", "onLoadingTimeout")
+    if m.posterLoader <> invalid
+        m.posterLoader.target = m.poster
+        m.posterLoader.ObserveField("ready", "onPosterStateChanged")
+        m.posterLoader.ObserveField("status", "onPosterStateChanged")
+    end if
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
-    m.poster.ObserveField("loadStatus", "onPosterLoadStatus")
-    m.poster.ObserveField("loadStatus", "onPosterLoadStatusRetry")
 end sub
 
-sub StopPosterRetry()
-    if m.retryTimer <> invalid then m.retryTimer.control = "stop"
-    if m.loadingTimer <> invalid then m.loadingTimer.control = "stop"
-end sub
-
-sub ResetPosterRetry(uri as string)
-    StopPosterRetry()
-    m.retryCount = 0
-    m.retryUri = uri
-end sub
-
-sub SchedulePosterRetry()
-    if m.poster = invalid then return
-    uri = m.poster.uri
-    if uri = invalid or uri = "" then return
-    if uri <> m.retryUri then return
-    if m.retryCount >= 3
-        print "[EpisodeTile] retry: giving up after 3 attempts uri="; uri
-        return
-    end if
-    delay = 1.5
-    if m.retryCount = 1 then delay = 4.0
-    if m.retryCount >= 2 then delay = 8.0
-    m.retryCount = m.retryCount + 1
-    print "[EpisodeTile] retry: scheduling attempt "; m.retryCount; "/3 in "; delay; "s uri="; uri
-    if m.retryTimer = invalid then return
-    m.retryTimer.duration = delay
-    m.retryTimer.control = "stop"
-    m.retryTimer.control = "start"
-end sub
-
-sub StartLoadingTimeout()
-    if m.loadingTimer = invalid then return
-    m.loadingTimer.duration = 12
-    m.loadingTimer.control = "stop"
-    m.loadingTimer.control = "start"
-end sub
-
-sub onRetryTimer()
-    if m.poster = invalid then return
-    if m.top.itemContent = invalid then return
-    uri = m.retryUri
-    if uri = invalid or uri = "" then return
-    if m.poster.uri <> uri and m.poster.uri <> "" then return
-    current = m.top.itemContent.hdPosterUrl
-    if current = invalid then current = ""
-    if current <> uri then return
-    print "[EpisodeTile] retry: firing attempt "; m.retryCount; "/3 uri="; uri
-    m.poster.uri = ""
-    m.poster.uri = uri
-    ShowArtless()
-    StartLoadingTimeout()
-    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
-        onPosterLoadStatus()
-        onPosterLoadStatusRetry()
-    end if
-end sub
-
-sub onLoadingTimeout()
-    if m.poster = invalid then return
-    if m.poster.loadStatus = "loading"
-        uri = ""
-        if m.poster.uri <> invalid then uri = m.poster.uri
-        print "[EpisodeTile] retry: loading timeout (12s) uri="; uri
-        SchedulePosterRetry()
-    end if
-end sub
-
-' Every focus observer re-applies the whole look from the tile's current field
-' values. RowList recycles item components for new cells and content swaps, and
-' those observers only fire on value *changes* — on a recycle nothing may change
-' except itemContent, so unless the look is rebuilt there a tile carries stale
-' dimming (opacity 0.55) into a fresh RowList on another screen/media.
 sub UpdateLook()
     t = Theme()
     if m.top.itemHasFocus
@@ -131,9 +48,6 @@ sub UpdateLook()
         m.face.blendColor = t.tileFace
     end if
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
-    ' Episodes that haven't aired yet are dimmed further (still visible, but
-    ' clearly not watchable). Missing aired is treated as aired so non-episode
-    ' screens keep their current look.
     if m.top.itemContent <> invalid and m.top.itemContent.aired = false then m.top.opacity = 0.5 * m.top.opacity
 end sub
 
@@ -141,9 +55,6 @@ sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
-    ResetPosterRetry(poster)
-    m.poster.uri = poster
-    if poster <> "" then StartLoadingTimeout()
     label = m.top.itemContent.title
     if label = invalid then label = ""
     m.epTitle.text = label
@@ -166,22 +77,21 @@ sub onItemContentChanged()
     else
         m.watchedBadgeGroup.visible = false
     end if
-    ' Forced rather than read back from loadStatus: the uri was just set, so
-    ' this cell is artless whatever the status field still reports from the
-    ' previous one.
-    ShowArtless()
-    ' A uri set to something already cached can settle before the observer ever
-    ' fires, so re-read the status now instead of trusting the callback alone.
-    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
-        onPosterLoadStatus()
-        onPosterLoadStatusRetry()
+
+    if m.posterLoader <> invalid
+        if poster = ""
+            m.posterLoader.uri = ""
+        else
+            ' New item content should (re)request thumbnail; loader handles same-URI ready no-op.
+            m.posterLoader.uri = ""
+            m.posterLoader.uri = poster
+        end if
     end if
+    ShowArtless()
+    ApplyPosterPresentation()
     UpdateLook()
 end sub
 
-' The mark for focus walks: no extra work beyond the shared look, but listed
-' explicitly because the RowList drives both fields and either may arrive alone
-' on a recycle.
 sub onItemHasFocusChanged()
     UpdateLook()
 end sub
@@ -190,40 +100,31 @@ sub onRowHasFocusChanged()
     UpdateLook()
 end sub
 
-sub onPosterLoadStatus()
-    if m.poster.loadStatus = "ready" then ShowPoster() else ShowArtless()
+sub onPosterStateChanged()
+    ApplyPosterPresentation()
 end sub
 
-sub onPosterLoadStatusRetry()
-    if m.poster = invalid then return
-    status = m.poster.loadStatus
-    if status = "ready"
-        hadRetry = m.retryCount > 0
-        uri = ""
-        if m.poster.uri <> invalid then uri = m.poster.uri
-        StopPosterRetry()
-        m.retryCount = 0
-        if m.poster.uri <> invalid then m.retryUri = m.poster.uri else m.retryUri = ""
-        if hadRetry then print "[EpisodeTile] retry: succeeded uri="; uri
-    else if status = "failed"
-        if m.poster.uri <> invalid and m.poster.uri <> "" then m.retryUri = m.poster.uri
-        SchedulePosterRetry()
-    else if status = "loading"
-        ' loading timeout is managed by StartLoadingTimeout() on load start
+sub ApplyPosterPresentation()
+    if m.posterLoader = invalid then return
+    uri = ""
+    if m.top.itemContent <> invalid and m.top.itemContent.hdPosterUrl <> invalid then uri = StringOf(m.top.itemContent.hdPosterUrl)
+    if uri = ""
+        ShowArtless()
+        return
+    end if
+    if StringOf(m.posterLoader.uri) <> uri then return
+    if m.posterLoader.ready = true or StringOf(m.posterLoader.status) = "ready"
+        ShowPoster()
+    else
+        ShowArtless()
     end if
 end sub
 
-' The artless unit: the face plus the title. The poster is left alone on purpose
-' — it is visible from the start and paints nothing until it has a bitmap, so
-' there is nothing to hide.
 sub ShowArtless()
-    m.artless.visible = true
+    if m.artless <> invalid then m.artless.visible = true
 end sub
 
-' The thumbnail has painted, so the face must stop rendering rather than sit
-' behind the artwork where it still shows through on unfocused rows. Only this
-' group is hidden; hiding the poster itself would deadlock the load against the
-' gate waiting on it.
 sub ShowPoster()
-    m.artless.visible = false
+    if m.artless <> invalid then m.artless.visible = false
 end sub
+

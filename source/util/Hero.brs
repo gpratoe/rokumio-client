@@ -28,6 +28,84 @@ sub HeroInitState()
     m.heroFocusKey = ""
 end sub
 
+function HeroPosterUri() as string
+    if m.heroPosterLoader <> invalid then return StringOf(m.heroPosterLoader.uri)
+    if m.heroPoster = invalid then return ""
+    return StringOf(m.heroPoster.uri)
+end function
+
+sub HeroSetPosterUri(uri as string)
+    if m.heroPosterLoader <> invalid
+        m.heroPosterLoader.uri = uri
+    else if m.heroPoster <> invalid
+        m.heroPoster.uri = uri
+    end if
+end sub
+
+function HeroPosterReady(uri = "" as string) as boolean
+    if uri <> "" and HeroPosterUri() <> uri then return false
+    if m.heroPosterLoader <> invalid
+        return m.heroPosterLoader.ready = true or StringOf(m.heroPosterLoader.status) = "ready"
+    end if
+    if m.heroPoster = invalid then return false
+    return StringOf(m.heroPoster.loadStatus) = "ready"
+end function
+
+function HeroPosterFailed(uri = "" as string) as boolean
+    if uri <> "" and HeroPosterUri() <> uri then return false
+    if m.heroPosterLoader <> invalid
+        return StringOf(m.heroPosterLoader.status) = "failed"
+    end if
+    if m.heroPoster = invalid then return false
+    return StringOf(m.heroPoster.loadStatus) = "failed"
+end function
+
+function HeroPosterStatus(uri = "" as string) as string
+    if uri <> "" and HeroPosterUri() <> uri then return ""
+    if m.heroPosterLoader <> invalid then return StringOf(m.heroPosterLoader.status)
+    if m.heroPoster = invalid then return ""
+    return StringOf(m.heroPoster.loadStatus)
+end function
+
+function HeroLogoUri() as string
+    if m.heroLogoLoader <> invalid then return StringOf(m.heroLogoLoader.uri)
+    if m.heroLogo = invalid then return ""
+    return StringOf(m.heroLogo.uri)
+end function
+
+sub HeroSetLogoUri(uri as string)
+    if m.heroLogoLoader <> invalid
+        m.heroLogoLoader.uri = uri
+    else if m.heroLogo <> invalid
+        m.heroLogo.uri = uri
+    end if
+end sub
+
+function HeroLogoReady(uri = "" as string) as boolean
+    if uri <> "" and HeroLogoUri() <> uri then return false
+    if m.heroLogoLoader <> invalid
+        return m.heroLogoLoader.ready = true or StringOf(m.heroLogoLoader.status) = "ready"
+    end if
+    if m.heroLogo = invalid then return false
+    return StringOf(m.heroLogo.loadStatus) = "ready"
+end function
+
+function HeroLogoFailed(uri = "" as string) as boolean
+    if uri <> "" and HeroLogoUri() <> uri then return false
+    if m.heroLogoLoader <> invalid
+        return StringOf(m.heroLogoLoader.status) = "failed"
+    end if
+    if m.heroLogo = invalid then return false
+    return StringOf(m.heroLogo.loadStatus) = "failed"
+end function
+
+function HeroLogoStatus(uri = "" as string) as string
+    if uri <> "" and HeroLogoUri() <> uri then return ""
+    if m.heroLogoLoader <> invalid then return StringOf(m.heroLogoLoader.status)
+    if m.heroLogo = invalid then return ""
+    return StringOf(m.heroLogo.loadStatus)
+end function
+
 sub HeroSetFillUri(uri as string)
     if m.heroFill <> invalid and m.heroFill.uri <> uri then m.heroFill.uri = uri
     if m.heroFill1 <> invalid and m.heroFill1.uri <> uri then m.heroFill1.uri = uri
@@ -55,14 +133,14 @@ sub HeroClear()
     if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
     m.heroPosterPendingUri = ""
     m.heroPosterSourceUri = ""
+    HeroSetPosterUri("")
     if m.heroPoster <> invalid
-        m.heroPoster.uri = ""
         m.heroPoster.opacity = 1
         m.heroPoster.visible = false
     end if
     HeroSetFillUri("")
     HeroSetFillVisible(false)
-    if m.heroLogo <> invalid and m.heroLogo.uri <> "" then m.heroLogo.uri = ""
+    HeroSetLogoUri("")
     if m.heroTitle <> invalid then m.heroTitle.text = ""
     if m.heroMeta <> invalid then m.heroMeta.text = ""
     if m.heroRatingText <> invalid then m.heroRatingText.text = ""
@@ -112,8 +190,8 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
     logo = StringOf(meta.logo)
     background = StringOf(meta.background)
     if background = "" and posterFallback then background = StringOf(meta.poster)
-    currentLogoUri = m.heroLogo.uri
-    currentLogoReady = currentLogoUri <> "" and currentLogoUri = m.heroLogoUri and m.heroLogo.loadStatus = "ready"
+    currentLogoUri = HeroLogoUri()
+    currentLogoReady = currentLogoUri <> "" and currentLogoUri = m.heroLogoUri and HeroLogoReady(m.heroLogoUri)
     sameLogoReady = logo <> "" and logo = currentLogoUri and currentLogoReady and logo = m.heroLogoUri
 
     if m.heroTitle.text <> title then m.heroTitle.text = title
@@ -132,9 +210,9 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         m.heroPosterSourceUri = ""
         m.heroPosterPendingUri = ""
         if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-        m.heroPoster.opacity = 1
-        if m.heroPoster.uri <> "" then m.heroPoster.uri = ""
-        m.heroPoster.visible = false
+        if m.heroPoster <> invalid then m.heroPoster.opacity = 1
+        HeroSetPosterUri("")
+        if m.heroPoster <> invalid then m.heroPoster.visible = false
         HeroSetFillUri("")
         HeroSetFillVisible(false)
     else
@@ -142,23 +220,23 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
             m.heroPosterSourceUri = background
         end if
         requestUri = HeroRequestUri(background)
-        if m.heroPoster.uri <> requestUri
+        currentPosterUri = HeroPosterUri()
+        if currentPosterUri <> requestUri
             m.heroPosterPendingUri = requestUri
             if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-            m.heroPoster.opacity = 0
-            m.heroPoster.uri = ""
-            m.heroPoster.uri = requestUri
-            m.heroPoster.visible = true
+            if m.heroPoster <> invalid then m.heroPoster.opacity = 0
+            HeroSetPosterUri(requestUri)
+            if m.heroPoster <> invalid then m.heroPoster.visible = true
             HeroSetFillUri(requestUri)
             HeroSetFillVisible(true)
         else
             m.heroPosterPendingUri = requestUri
-            m.heroPoster.visible = true
+            if m.heroPoster <> invalid then m.heroPoster.visible = true
             HeroSetFillUri(requestUri)
             HeroSetFillVisible(true)
-            if m.heroPoster.loadStatus = "ready" or m.heroPoster.loadStatus = "failed"
+            if HeroPosterReady(requestUri) or HeroPosterFailed(requestUri)
                 if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-                m.heroPoster.opacity = 1
+                if m.heroPoster <> invalid then m.heroPoster.opacity = 1
             end if
         end if
     end if
@@ -168,7 +246,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         m.heroLogoGraceUri = ""
         m.heroLogoFallbackUri = ""
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        if m.heroLogo.uri <> "" then m.heroLogo.uri = ""
+        HeroSetLogoUri("")
         HeroApplyLayout("title", true)
         return
     end if
@@ -177,8 +255,8 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         m.heroLogoGraceUri = ""
         m.heroLogoFallbackUri = ""
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        m.heroLogo.visible = true
-        m.heroTitle.visible = false
+        if m.heroLogo <> invalid then m.heroLogo.visible = true
+        if m.heroTitle <> invalid then m.heroTitle.visible = false
         return
     end if
 
@@ -188,7 +266,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         m.heroLogoGraceUri = ""
         m.heroLogoFallbackUri = ""
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        m.heroLogo.uri = logo
+        HeroSetLogoUri(logo)
     end if
 
     if m.heroLogoFallbackUri = logo
@@ -206,8 +284,8 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
     end if
 
     if m.heroLayoutMode = "wide"
-        m.heroLogo.visible = false
-        m.heroTitle.visible = false
+        if m.heroLogo <> invalid then m.heroLogo.visible = false
+        if m.heroTitle <> invalid then m.heroTitle.visible = false
     else
         HeroApplyLayout("title", false)
     end if
@@ -215,9 +293,8 @@ end sub
 
 sub HeroOnPosterStatus()
     if m.heroPoster = invalid then return
-    if m.heroPoster.uri <> m.heroPosterPendingUri then return
-    status = m.heroPoster.loadStatus
-    if status = "ready"
+    if HeroPosterUri() <> m.heroPosterPendingUri then return
+    if HeroPosterReady(m.heroPosterPendingUri)
         if m.heroPosterFadeAnim <> invalid
             m.heroPosterFadeAnim.control = "stop"
             m.heroPoster.opacity = 0
@@ -225,20 +302,20 @@ sub HeroOnPosterStatus()
         else
             m.heroPoster.opacity = 1
         end if
-    else if status = "failed"
+    else if HeroPosterFailed(m.heroPosterPendingUri)
         if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
         m.heroPoster.opacity = 1
     end if
 end sub
 
 sub HeroOnLogoStatus()
-    if m.heroLogo.uri <> m.heroLogoUri then return
-    if m.heroLogo.loadStatus = "ready"
+    if HeroLogoUri() <> m.heroLogoUri then return
+    if HeroLogoReady(m.heroLogoUri)
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         m.heroLogoGraceUri = ""
         m.heroLogoFallbackUri = ""
         HeroFitLogo()
-    else if m.heroLogo.loadStatus = "failed"
+    else if HeroLogoFailed(m.heroLogoUri)
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         m.heroLogoGraceUri = ""
         m.heroLogoFallbackUri = m.heroLogoUri
@@ -248,8 +325,8 @@ end sub
 
 sub HeroOnTitleGraceFire()
     if m.heroLogoUri = "" then return
-    if m.heroLogo.uri <> m.heroLogoUri then return
-    if m.heroLogo.loadStatus = "ready" then return
+    if HeroLogoUri() <> m.heroLogoUri then return
+    if HeroLogoReady(m.heroLogoUri) then return
     m.heroLogoGraceUri = ""
     m.heroLogoFallbackUri = m.heroLogoUri
     HeroShowTitleFallback()

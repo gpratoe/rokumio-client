@@ -34,8 +34,22 @@ sub init()
     m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
 
     HeroInitState()
-    m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
-    m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
+    m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
+    if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
+    if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
+    if m.heroPosterLoader <> invalid
+        m.heroPosterLoader.ObserveField("ready", "HeroOnPosterStatus")
+        m.heroPosterLoader.ObserveField("status", "HeroOnPosterStatus")
+    else
+        m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
+    end if
+    if m.heroLogoLoader <> invalid
+        m.heroLogoLoader.ObserveField("ready", "HeroOnLogoStatus")
+        m.heroLogoLoader.ObserveField("status", "HeroOnLogoStatus")
+    else
+        m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    end if
     m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
     m.filtersHint = m.top.FindNode("filtersHint")
     m.filtersHintFade = m.top.FindNode("filtersHintFade")
@@ -70,6 +84,8 @@ sub init()
     m.loaded = false
     m.allLoaded = false
     m.loadTask = invalid
+    ' Bumped on explicit replay to force PosterTiles to reload failed/exhausted images.
+    m.posterReloadNonce = 0
     m.discoverRetryTimer = m.top.FindNode("discoverRetryTimer")
     m.discoverRetryTimer.ObserveField("fire", "onDiscoverRetry")
     m.discoverRetryCount = 0
@@ -928,6 +944,7 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
             item.title = name
             poster = meta.poster
             if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
+            if m.posterReloadNonce <> invalid then item.reloadNonce = m.posterReloadNonce
             glyph = ""
             if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
             item.watchedGlyph = glyph
@@ -973,7 +990,7 @@ sub onResultSelected()
         params: {
             addonAddress: m.selectedCatalog.address
             meta: m.metas[flat]
-            heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
+            heroTextureReady: HeroPosterReady()
         }
     }
 end sub
@@ -991,6 +1008,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
             if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
             m.discoverRetryCount = 0
             m.discoverRetryOffset = 0
+            m.posterReloadNonce = m.posterReloadNonce + 1
             ResetDiscover()
             FetchDiscover()
             return true

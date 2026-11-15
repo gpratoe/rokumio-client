@@ -57,8 +57,22 @@ sub init()
     m.heroMetaTaskKey = ""
 
     HeroInitState()
-    m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
-    m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
+    m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
+    if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
+    if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
+    if m.heroPosterLoader <> invalid
+        m.heroPosterLoader.ObserveField("ready", "HeroOnPosterStatus")
+        m.heroPosterLoader.ObserveField("status", "HeroOnPosterStatus")
+    else
+        m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
+    end if
+    if m.heroLogoLoader <> invalid
+        m.heroLogoLoader.ObserveField("ready", "HeroOnLogoStatus")
+        m.heroLogoLoader.ObserveField("status", "HeroOnLogoStatus")
+    else
+        m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    end if
     m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
@@ -1149,7 +1163,7 @@ sub onRowItemSelected(event as object)
             params: {
                 addonAddress: m.gridRows[row].addonAddress
                 meta: item
-                heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
+                heroTextureReady: HeroPosterReady()
             }
         }
     end if
@@ -1183,7 +1197,7 @@ sub OpenContinueWatching(item as object)
                 addonAddress: address
                 meta: display
                 resume: { videoId: item.videoId, season: item.season, episode: item.episode, position: item.position }
-                heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
+                heroTextureReady: HeroPosterReady()
             }
         }
         return
@@ -1254,7 +1268,7 @@ sub onContinueWatchingLoaded()
             addonAddress: pending.address
             meta: meta
             resume: pending.resume
-            heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
+            heroTextureReady: HeroPosterReady()
         }
     }
 end sub

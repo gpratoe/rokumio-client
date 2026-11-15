@@ -1,25 +1,15 @@
-' PosterTile — custom list-item component used by the Home catalog rows.
+ ' PosterTile — custom list-item component used by the Home catalog rows.
 '
 ' MarkupGrid/RowList feed each item its ContentNode through the interface field
 ' `itemContent` and drive focus through `itemHasFocus`/`rowHasFocus` (they never
-' touch `content` or `focused`). The artwork comes from the item's
-' hdPosterUrl (mapped from the addon meta's poster). A tile is either artwork or
-' the artless unit (a flat face plus the title), never a blend of the two:
-' ShowArtless/ShowPoster swap them as a unit on the poster's own loadStatus, so
-' the face stops rendering entirely once artwork paints instead of lingering
-' behind it where it still showed through on unfocused rows. No URL, a URL still
-' downloading, and a URL that failed all show the title. Poster.loadStatus is
-' none / loading / ready / failed — "ready" is the success value, and there is no
-' "loaded"; see the Poster field reference.
-'
-' Two optional overlays ride on itemContent and render nothing until a screen
-' provides them: `progress` (0..1) draws the bottom continue-watching bar, and
-' `watchedGlyph` ("eye" | "clock") draws the top-right badge. Screens that
-' set neither are pixel-identical to before.
+' touch `content` or `focused`). Artwork is loaded via PosterLoader (centralized
+' URI assignment, retry, stuck-loading recovery) and presentation is driven by
+' loader state: artless (face/title) is shown until the poster is ready.
 
 sub init()
     m.artless = m.top.FindNode("artless")
     m.poster = m.top.FindNode("poster")
+    m.posterLoader = m.top.FindNode("posterLoader")
     m.tileBg = m.top.FindNode("tileBg")
     m.titleText = m.top.FindNode("titleText")
 
@@ -45,119 +35,22 @@ sub init()
     if m.seeMoreLabel <> invalid then m.seeMoreLabel.color = t.textSecondary
 
     m.lastReloadNonce = 0
-    m.retryCount = 0
-    m.retryUri = ""
-    m.retryTimer = m.top.FindNode("retryTimer")
-    m.loadingTimer = m.top.FindNode("loadingTimer")
-    if m.retryTimer <> invalid then m.retryTimer.ObserveField("fire", "onRetryTimer")
-    if m.loadingTimer <> invalid then m.loadingTimer.ObserveField("fire", "onLoadingTimeout")
+    m.requestedPosterUri = ""
+
+    if m.posterLoader <> invalid
+        m.posterLoader.target = m.poster
+        m.posterLoader.ObserveField("ready", "onPosterStateChanged")
+        m.posterLoader.ObserveField("status", "onPosterStateChanged")
+    end if
 
     m.top.ObserveField("itemContent", "onItemContentChanged")
     m.top.ObserveField("itemHasFocus", "onItemHasFocusChanged")
     m.top.ObserveField("rowHasFocus", "onRowHasFocusChanged")
-    m.poster.ObserveField("loadStatus", "onPosterLoadStatus")
-    m.poster.ObserveField("loadStatus", "onPosterLoadStatusRetry")
 
     ApplyTileSize()
 end sub
 
-sub StopPosterRetry()
-    if m.retryTimer <> invalid then m.retryTimer.control = "stop"
-    if m.loadingTimer <> invalid then m.loadingTimer.control = "stop"
-end sub
-
-sub ResetPosterRetry(uri as string)
-    StopPosterRetry()
-    m.retryCount = 0
-    m.retryUri = uri
-end sub
-
-sub SchedulePosterRetry()
-    if m.poster = invalid then return
-    uri = m.poster.uri
-    if uri = invalid or uri = "" then return
-    if uri <> m.retryUri then return
-    if m.retryCount >= 3 then return
-    delay = 1.5
-    if m.retryCount = 1 then delay = 4.0
-    if m.retryCount >= 2 then delay = 8.0
-    m.retryCount = m.retryCount + 1
-    if m.retryTimer = invalid then return
-    m.retryTimer.duration = delay
-    m.retryTimer.control = "stop"
-    m.retryTimer.control = "start"
-end sub
-
-sub StartLoadingTimeout()
-    if m.loadingTimer = invalid then return
-    m.loadingTimer.duration = 12
-    m.loadingTimer.control = "stop"
-    m.loadingTimer.control = "start"
-end sub
-
-sub onRetryTimer()
-    if m.poster = invalid then return
-    if m.top.itemContent = invalid then return
-    uri = m.retryUri
-    if uri = invalid or uri = "" then return
-    ' Only retry if we're still supposed to show this URI.
-    if m.poster.uri <> uri and m.poster.uri <> "" then return
-    current = m.top.itemContent.hdPosterUrl
-    if current = invalid then current = ""
-    if current <> uri then return
-    m.poster.uri = ""
-    m.poster.uri = uri
-    ShowArtless()
-    StartLoadingTimeout()
-    ' A cached/immediate result may settle before observers fire.
-    if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
-        onPosterLoadStatus()
-        onPosterLoadStatusRetry()
-    end if
-end sub
-
-sub onLoadingTimeout()
-    if m.poster = invalid then return
-    if m.poster.loadStatus = "loading" then SchedulePosterRetry()
-end sub
-
-' RowList writes each item's cell size into the width/height interface fields,
-' one row at a time. Home gives channel/tv rows square cells, so the tile has
-' to follow: resize the poster (and the caps that keep its texture bounded —
-' loadWidth/loadHeight ride the node so the memory policy holds for the new
-' size too), plus the artless face, the title, the progress bar and the watched
-' badge, which are all laid out against the fixed 270x405 slab in XML.
-'
-' This must run on EVERY size change, portrait included. RowList recycles one
-' tile instance across rows, so a square channel cell can be reused for a 2:3
-' movie/series cell; a portrait early-return here left that recycled tile at the
-' previous row's 270x270 geometry — square artwork inside a 2:3 slot, the
-' progress bar stranded mid-tile, the title box scaled for a square. Rebuilding
-' the whole layout every time is what heals the recycle (fresh tiles simply
-' compute the same portrait numbers the XML already laid out).
-'
-' Portrait is the shape the XML authored by hand, and two of its coordinates are
-' not derived: the title's x and the spinner's y. The formula values below drift
-' from the hand-tuned XML (12 vs 18, 180.5 vs 163), so portrait keeps the XML
-' numbers verbatim; a square cell uses the computed origin.
 sub ApplyTileSize()
-    ' The RowList writes the cell size into the width/height interface fields as
-    ' it creates the item component, and that write fires this handler BEFORE
-    ' init() has run — so the nodes this function resizes are not there yet.
-    ' Assigning to an invalid node is a runtime error (&he4, "Invalid value for
-    ' left-side of expression"), not a no-op, and it lands on the first line
-    ' that touches one. It is not a crash the user sees: Roku catches it in
-    ' the callback, init() then runs and calls ApplyTileSize() again with the
-    ' cell size already in the interface fields, and the tile is laid out
-    ' correctly. All it costs is a runtime error in the log, and Roku reports
-    ' those to the developer's crash dashboard — one per tile created, and Home
-    ' creates a few hundred.
-    '
-    ' Nothing is lost by returning here: init() calls ApplyTileSize() again at
-    ' its end, by which time the interface fields already hold the cell size
-    ' the RowList wrote. The node is the check, not a flag: it is the first
-    ' thing this function touches, and "is this node there yet" is the actual
-    ' precondition.
     if m.poster = invalid then return
 
     w = m.top.width
@@ -198,13 +91,7 @@ sub ApplyTileSize()
     if m.top.itemContent <> invalid then UpdateOverlays()
 end sub
 
-' Every focus observer re-applies the whole look from the tile's current field
-' values. RowList recycles item components for new cells and content swaps, and
-' those observers only fire on value *changes* — on a recycle nothing may change
-' except itemContent, so unless the look is rebuilt there a tile carries stale
-' dimming (opacity 0.55) into a fresh row on another screen/media.
 sub UpdateLook()
-    t = Theme()
     if m.top.rowHasFocus then m.top.opacity = 1.0 else m.top.opacity = 0.55
 end sub
 
@@ -212,8 +99,6 @@ sub onItemHasFocusChanged()
     UpdateLook()
 end sub
 
-' A whole row dims when its list row loses focus (user moved to another row),
-' reinforcing which row the "selected" indicator sits in.
 sub onRowHasFocusChanged()
     UpdateLook()
 end sub
@@ -221,10 +106,8 @@ end sub
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     if m.top.itemContent.seeMore = true
-        StopPosterRetry()
-        m.retryCount = 0
-        m.retryUri = ""
-        m.poster.uri = ""
+        m.requestedPosterUri = ""
+        if m.posterLoader <> invalid then m.posterLoader.uri = ""
         m.artless.visible = false
         if m.progressTrack <> invalid then m.progressTrack.visible = false
         if m.progressFill <> invalid then m.progressFill.visible = false
@@ -240,10 +123,8 @@ sub onItemContentChanged()
 
     loading = m.top.itemContent.loadState = "loading"
     if loading
-        StopPosterRetry()
-        m.retryCount = 0
-        m.retryUri = ""
-        m.poster.uri = ""
+        m.requestedPosterUri = ""
+        if m.posterLoader <> invalid then m.posterLoader.uri = ""
         m.titleText.text = m.top.itemContent.title
         ShowArtless()
         UpdateOverlays()
@@ -253,102 +134,67 @@ sub onItemContentChanged()
 
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
-    prevUri = m.poster.uri
-    prevStatus = m.poster.loadStatus
-    changed = prevUri <> poster
     nonce = 0
     if m.top.itemContent.reloadNonce <> invalid then nonce = m.top.itemContent.reloadNonce
     forceReload = nonce <> 0 and nonce <> m.lastReloadNonce
     if forceReload then m.lastReloadNonce = nonce
 
-    ' Avoid churning textures in steady state: if the URL is unchanged and the
-    ' poster is already ready, keep the resident image (rebinds from scroll,
-    ' streaming row inserts, or syncs shouldn't reload it). Still force a fresh
-    ' load when the URL changed, the previous load failed/wasn't ready, or an
-    ' explicit refresh requested a retry (nonce bump).
-    needsReload = changed or forceReload or poster = "" or prevStatus = "failed" or prevStatus = "none" or prevStatus = "loading"
-
+    prevUri = m.requestedPosterUri
     m.titleText.text = m.top.itemContent.title
     UpdateOverlays()
 
-    if needsReload
-        if changed or forceReload or poster <> m.retryUri
-            ResetPosterRetry(poster)
-        else
-            ' Same URI reload (e.g. failed state/rebind): keep retry progress but
-            ' cancel any pending backoff timer since we're loading now.
-            StopPosterRetry()
-            m.retryUri = poster
-        end if
-        ' Clear first so Roku treats this as a fresh load even when retrying the
-        ' same URI (a failed/stale load, or an explicit refresh). Reset-to-empty
-        ' then set forces the request while the tile shows artless.
-        m.poster.uri = ""
-        m.poster.uri = poster
-        if poster <> "" then StartLoadingTimeout()
-        ' Forced rather than read back from loadStatus: the uri was just set, so
-        ' this cell is artless whatever the status field still reports from the
-        ' previous one.
+    if poster = ""
+        m.requestedPosterUri = ""
+        if m.posterLoader <> invalid then m.posterLoader.uri = ""
         ShowArtless()
-        ' A uri that resolves from cache can settle before the observer ever fires,
-        ' so re-read the status now instead of trusting the callback alone.
-        if m.poster.loadStatus = "ready" or m.poster.loadStatus = "failed"
-            onPosterLoadStatus()
-            onPosterLoadStatusRetry()
-        end if
     else
-        ' Keep the already-ready poster; just ensure the artless face isn't shown.
-        if m.poster.loadStatus = "ready"
-            StopPosterRetry()
-            m.retryCount = 0
-            m.retryUri = poster
-            ShowPoster()
-        else
+        if forceReload or prevUri <> poster
+            m.requestedPosterUri = poster
+            if m.posterLoader <> invalid
+                ' Force a fresh request even for same URI on explicit reload.
+                m.posterLoader.callFunc("Clear")
+                m.posterLoader.callFunc("Load", poster)
+            end if
             ShowArtless()
-            if m.poster.loadStatus = "failed" then onPosterLoadStatus()
+        else
+            ' Same requested URI: keep presentation based on current loader state.
+            m.requestedPosterUri = poster
+            ApplyPosterPresentation()
         end if
     end if
     UpdateLook()
 end sub
 
-sub onPosterLoadStatus()
-    if m.poster.loadStatus = "ready" then ShowPoster() else ShowArtless()
+sub onPosterStateChanged()
+    ApplyPosterPresentation()
 end sub
 
-sub onPosterLoadStatusRetry()
-    if m.poster = invalid then return
-    status = m.poster.loadStatus
-    if status = "ready"
-        StopPosterRetry()
-        m.retryCount = 0
-        if m.poster.uri <> invalid then m.retryUri = m.poster.uri else m.retryUri = ""
-    else if status = "failed"
-        if m.poster.uri <> invalid and m.poster.uri <> "" then m.retryUri = m.poster.uri
-        SchedulePosterRetry()
-    else if status = "loading"
-        ' loading timeout is managed by StartLoadingTimeout() on load start
+sub ApplyPosterPresentation()
+    if m.posterLoader = invalid then return
+    if m.requestedPosterUri = "" then
+        ShowArtless()
+        return
+    end if
+    ' Ignore stale loader updates from a previous request.
+    if StringOf(m.posterLoader.uri) <> m.requestedPosterUri then return
+    if m.posterLoader.ready = true or StringOf(m.posterLoader.status) = "ready"
+        ShowPoster()
+    else
+        ' loading/failed (including retries exhausted) keeps artless/title visible.
+        ShowArtless()
     end if
 end sub
 
-' The artless unit: the face plus the title. The poster is left alone on purpose
-' — it is visible from the start and paints nothing until it has a bitmap, so
-' there is nothing to hide here.
 sub ShowArtless()
-    m.artless.visible = true
+    if m.artless <> invalid then m.artless.visible = true
 end sub
 
-' The artwork has painted, so the face must stop rendering rather than sit
-' behind the artwork where it still shows through on unfocused rows. Only this
-' group is hidden; hiding the poster itself would deadlock the load against the
-' gate waiting on it.
 sub ShowPoster()
-    m.artless.visible = false
+    if m.artless <> invalid then m.artless.visible = false
 end sub
 
-' The progress bar and watched glyph are driven entirely by optional
-' itemContent fields, so a tile reused without them (or recycled onto one
-' without them) never shows a stale overlay.
 sub UpdateOverlays()
+    if m.top.itemContent = invalid then return
     progress = m.top.itemContent.progress
     if progress <> invalid and progress > 0 and progress <= 1
         m.progressFill.width = m.poster.width * progress

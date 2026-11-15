@@ -17,6 +17,13 @@
         <field id="maxRetries" type="integer" value="3" />
         <!-- Delay in milliseconds before an automatic retry. -->
         <field id="retryDelayMs" type="integer" value="1200" />
+        <!-- Optional per-attempt retry delays (ms). 0 = use retryDelayMs. -->
+        <field id="retryDelayMs2" type="integer" value="0" />
+        <field id="retryDelayMs3" type="integer" value="0" />
+        <!-- Optional timeout for "loading" state (ms). 0 disables watchdog.
+             Disabled in app tile configs: timing-based retries churned on slow/latency-heavy
+             networks by aborting loads that would complete; real loadStatus failures still retry. -->
+        <field id="loadingTimeoutMs" type="integer" value="0" />
 
         <!-- Observed status: "idle", "loading", "ready", "failed". -->
         <field id="status" type="string" value="idle" alwaysNotify="true" />
@@ -33,9 +40,12 @@
         <function name="Clear" />
     </interface>
 
+    <script type="text/brightscript" uri="pkg:/source/util/PosterLoaderCore.brs" />
     <script type="text/brightscript" uri="pkg:/components/PosterLoader.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
 
     <children>
         <Timer id="retryTimer" repeat="false" />
+        <Timer id="loadingTimer" repeat="false" />
     </children>
 </component>

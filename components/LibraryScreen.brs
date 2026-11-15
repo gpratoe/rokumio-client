@@ -33,6 +33,10 @@ sub init()
     m.filtersHintFade = m.top.FindNode("filtersHintFade")
 
     HeroInitState()
+    m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
+    m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
+    if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
+    if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
 
     t = Theme()
     m.status.color = t.accent
@@ -49,8 +53,18 @@ sub init()
     m.filterBar.ObserveField("optionPicked", "onOptionPicked")
     m.grid.ObserveField("rowItemSelected", "onResultSelected")
     m.grid.ObserveField("rowItemFocused", "onGridItemFocused")
-    m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
-    m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    if m.heroPosterLoader <> invalid
+        m.heroPosterLoader.ObserveField("ready", "HeroOnPosterStatus")
+        m.heroPosterLoader.ObserveField("status", "HeroOnPosterStatus")
+    else
+        m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
+    end if
+    if m.heroLogoLoader <> invalid
+        m.heroLogoLoader.ObserveField("ready", "HeroOnLogoStatus")
+        m.heroLogoLoader.ObserveField("status", "HeroOnLogoStatus")
+    else
+        m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
+    end if
     m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
 
     m.chunk = 6
