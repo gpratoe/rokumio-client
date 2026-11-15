@@ -47,19 +47,23 @@
             font="font:MediumSystemFont"
             horizAlign="center" />
 
-        <Group id="bufferingGroup" visible="false" translation="[510, 287]">
+        <Group id="bufferingGroup" visible="false" translation="[680, 360]">
             <Poster
                 id="logoBack"
                 uri=""
-                width="900"
-                height="506"
+                width="560"
+                height="360"
+                loadWidth="560"
+                loadHeight="360"
                 opacity="0.22"
                 loadDisplayMode="scaleToFit" />
             <Poster
                 id="logoFront"
                 uri=""
-                width="900"
-                height="506"
+                width="560"
+                height="360"
+                loadWidth="560"
+                loadHeight="360"
                 opacity="1.0"
                 loadDisplayMode="scaleToFit"
                 clippingRect="[0, 0, 0, 506]" />
