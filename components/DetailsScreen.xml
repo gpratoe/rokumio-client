@@ -33,41 +33,41 @@
 
         <Poster
             id="heroLogo"
-            translation="[162, 72]"
+            translation="[162, 48]"
             width="820"
             height="460"
             loadWidth="820"
             loadHeight="460"
-            loadDisplayMode="scaleToFit"
+            loadDisplayMode="limitSize"
             visible="false" />
         <Label
             id="detailName"
-            translation="[162, 112]"
+            translation="[162, 88]"
             width="680"
             height="90"
             wrap="true"
             font="font:LargeBoldSystemFont" />
         <Label
             id="detailType"
-            translation="[166, 216]"
+            translation="[166, 192]"
             width="900"
             height="30"
-            font="font:SmallSystemFont" />
-        <Group id="detailRating" translation="[166, 256]" visible="false">
+            font="font:SmallerSystemFont" />
+        <Group id="detailRating" translation="[166, 232]" visible="false">
             <Poster id="detailImdbLogo" width="64" height="32" loadWidth="64" loadHeight="32" loadDisplayMode="scaleToFit" uri="pkg:/images/imdb.png" />
             <Label id="detailRatingText" translation="[76, 0]" width="110" height="36" vertAlign="center" font="font:LargeBoldSystemFont" />
         </Group>
         <Label
             id="detailGenres"
-            translation="[166, 307]"
+            translation="[166, 283]"
             width="860"
             height="32"
-            font="font:SmallSystemFont" />
+            font="font:SmallerSystemFont" />
         <Label
             id="detailDesc"
-            translation="[166, 357]"
-            width="860"
-            height="215"
+            translation="[166, 333]"
+            width="720"
+            height="265"
             wrap="true"
             vertAlign="top"
             font="font:SmallSystemFont" />
