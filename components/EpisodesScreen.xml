@@ -39,16 +39,16 @@
              in when it doesn't. -->
         <Poster
             id="heroLogo"
-            translation="[162, 72]"
+            translation="[162, 48]"
             width="820"
             height="460"
             loadWidth="820"
             loadHeight="460"
-            loadDisplayMode="scaleToFit"
+            loadDisplayMode="limitSize"
             visible="false" />
         <Label
             id="epName"
-            translation="[166, 112]"
+            translation="[162, 88]"
             width="680"
             height="90"
             wrap="true"

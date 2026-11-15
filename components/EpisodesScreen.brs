@@ -233,17 +233,16 @@ end sub
 sub FitHeroLogo()
     fit = HeroFit(m.heroLogo.bitmapWidth, m.heroLogo.bitmapHeight)
     if fit = invalid then return
-    m.heroLogo.width = fit.width
-    m.heroLogo.height = fit.height
-    if fit.tall
-        m.heroLogo.translation = [162, 72 + Int((460 - fit.height) / 2)]
-    else
-        m.heroLogo.translation = [162, 72 + Int((190 - fit.height) / 2)]
-    end if
+    logoWidth = fit.width
+    logoHeight = fit.height
+
+    m.heroLogo.width = logoWidth
+    m.heroLogo.height = logoHeight
+    m.heroLogo.translation = [162, 46 + Int((190 - logoHeight) / 2)]
 end sub
 
 sub ResetHeroLogoLayout()
-    m.heroLogo.translation = [162, 72]
+    m.heroLogo.translation = [162, 48]
     m.heroLogo.width = 820
     m.heroLogo.height = 460
 end sub
