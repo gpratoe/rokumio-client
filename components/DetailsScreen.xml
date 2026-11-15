@@ -25,11 +25,18 @@
     <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
 
     <children>
-        <!-- Same background-first hero as Home: source art, scrim, then a
-             bottom ramp to keep the action row readable. -->
+        <!-- Background: show hero texture first, then fade in high quality. -->
         <Rectangle id="detailsBg" width="1920" height="1080" />
-        <Poster id="bgPoster" width="1920" height="1080" loadWidth="1920" loadHeight="1080" loadDisplayMode="scaleToZoom" />
+        <Poster id="bgPoster" translation="[0, 0]" width="1920" height="1080" loadWidth="1120" loadHeight="630" loadDisplayMode="scaleToZoom" opacity="0" />
+        <Poster id="bgPosterFull" translation="[0, 0]" width="1920" height="1080" loadWidth="1920" loadHeight="1080" loadDisplayMode="scaleToZoom" opacity="0" visible="false" />
         <Rectangle id="bgScrim" width="1920" height="1080" />
+
+        <Animation id="bgPosterFadeAnim" duration="0.4" repeat="false" easeFunction="linear">
+            <FloatFieldInterpolator id="bgPosterFadeInterp" fieldToInterp="bgPoster.opacity" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" />
+        </Animation>
+        <Animation id="bgFullFadeAnim" duration="0.35" repeat="false" easeFunction="linear">
+            <FloatFieldInterpolator id="bgFullFadeInterp" fieldToInterp="bgPosterFull.opacity" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" />
+        </Animation>
 
         <Poster
             id="heroLogo"

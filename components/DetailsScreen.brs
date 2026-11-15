@@ -13,10 +13,16 @@
 
 sub init()
     m.bgPoster = m.top.FindNode("bgPoster")
+    m.bgPosterFull = m.top.FindNode("bgPosterFull")
     m.bgScrim = m.top.FindNode("bgScrim")
+    m.bgPosterFadeAnim = m.top.FindNode("bgPosterFadeAnim")
+    m.bgFullFadeAnim = m.top.FindNode("bgFullFadeAnim")
     m.heroLogo = m.top.FindNode("heroLogo")
     m.heroLogo.ObserveField("loadStatus", "onHeroLogoStatus")
+    m.bgPoster.ObserveField("loadStatus", "onBgPosterStatus")
+    m.bgPosterFull.ObserveField("loadStatus", "onBgFullStatus")
     m.heroLogoUri = ""
+    m.bgUri = ""
     m.detailName = m.top.FindNode("detailName")
     m.detailType = m.top.FindNode("detailType")
     m.detailRating = m.top.FindNode("detailRating")
@@ -108,9 +114,32 @@ end function
 sub RenderHero(meta as object)
     if meta = invalid then return
 
-    bg = meta.background
-    m.bgPoster.uri = StringOf(bg)
-    m.bgPoster.visible = m.bgPoster.uri <> ""
+    bg = StringOf(meta.background)
+    if bg <> m.bgUri
+        m.bgUri = bg
+        if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
+        if m.bgFullFadeAnim <> invalid then m.bgFullFadeAnim.control = "stop"
+        m.bgPoster.opacity = 0
+        m.bgPoster.uri = ""
+        m.bgPoster.visible = false
+        m.bgPosterFull.uri = ""
+        m.bgPosterFull.opacity = 0
+        m.bgPosterFull.visible = false
+        if bg <> ""
+            ' Show hero texture first (quick, fade in), then load and fade in high quality.
+            m.bgPoster.uri = bg
+            m.bgPoster.visible = true
+            m.bgPosterFull.visible = true
+            m.bgPosterFull.uri = bg
+        end if
+    else if bg = ""
+        if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
+        m.bgPoster.opacity = 0
+        m.bgPoster.uri = ""
+        m.bgPoster.visible = false
+        m.bgPosterFull.uri = ""
+        m.bgPosterFull.visible = false
+    end if
 
     title = StringOf(meta.name)
     if title.Trim() = "" then title = StringOf(meta.title)
@@ -481,3 +510,39 @@ function LibraryIcon() as string
     if m.stores <> invalid and m.stores.library.callFunc("LibraryIsSaved", m.meta.id) then return "pkg:/images/library_add_check.png"
     return "pkg:/images/library_add.png"
 end function
+
+
+sub onBgPosterStatus()
+    if m.bgPoster = invalid then return
+    if m.bgPoster.uri <> m.bgUri then return
+    status = m.bgPoster.loadStatus
+    if status = "ready"
+        if m.bgPosterFadeAnim <> invalid
+            m.bgPosterFadeAnim.control = "stop"
+            m.bgPoster.opacity = 0
+            m.bgPosterFadeAnim.control = "start"
+        else
+            m.bgPoster.opacity = 1
+        end if
+    else if status = "failed"
+        if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
+        m.bgPoster.opacity = 1
+    end if
+end sub
+
+sub onBgFullStatus()
+    if m.bgPosterFull = invalid then return
+    if m.bgPosterFull.uri <> m.bgUri then return
+    status = m.bgPosterFull.loadStatus
+    if status = "ready"
+        if m.bgFullFadeAnim <> invalid
+            m.bgFullFadeAnim.control = "stop"
+            m.bgPosterFull.opacity = 0
+            m.bgFullFadeAnim.control = "start"
+        else
+            m.bgPosterFull.opacity = 1
+        end if
+    else if status = "failed"
+        m.bgPosterFull.visible = false
+    end if
+end sub
