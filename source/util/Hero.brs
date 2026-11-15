@@ -26,6 +26,12 @@ sub HeroInitState()
     m.heroLogoFallbackUri = ""
     m.heroLayoutMode = "title"
     m.heroFocusKey = ""
+    if m.heroPosterPrev <> invalid
+        m.heroPosterPrev.opacity = 0
+        m.heroPosterPrev.visible = false
+        m.heroPosterPrev.uri = ""
+    end if
+    if m.heroPosterPrevFadeOutAnim <> invalid then m.heroPosterPrevFadeOutAnim.control = "stop"
 end sub
 
 function HeroPosterUri() as string
@@ -124,6 +130,40 @@ sub HeroSetFillVisible(visible as boolean)
     if m.heroFill2 <> invalid then m.heroFill2.visible = visible
 end sub
 
+sub HeroStopPosterPrevFade(clearNode = true as boolean)
+    if m.heroPosterPrevFadeOutAnim <> invalid then m.heroPosterPrevFadeOutAnim.control = "stop"
+    if m.heroPosterPrev = invalid then return
+    m.heroPosterPrev.opacity = 0
+    m.heroPosterPrev.visible = false
+    if clearNode then m.heroPosterPrev.uri = ""
+end sub
+
+sub HeroPreparePosterCrossfade(newRequestUri as string)
+    ' Keep previous ready hero image on a secondary poster while the next loads/fades in.
+    ' This avoids blank gaps without decoding multiple new images at once.
+    if m.heroPosterPrev = invalid or m.heroPoster = invalid then return
+    if newRequestUri = "" then return
+    currUri = HeroPosterUri()
+    if currUri = "" or currUri = newRequestUri then return
+    if not HeroPosterReady(currUri) then return
+
+    HeroStopPosterPrevFade(false)
+    m.heroPosterPrev.uri = currUri
+    m.heroPosterPrev.opacity = 1
+    m.heroPosterPrev.visible = true
+    if m.heroPosterPrevFadeOutAnim <> invalid
+        m.heroPosterPrevFadeOutAnim.control = "start"
+    else
+        HeroStopPosterPrevFade(true)
+    end if
+end sub
+
+sub HeroOnPosterPrevFadeOutState()
+    if m.heroPosterPrevFadeOutAnim = invalid then return
+    if m.heroPosterPrevFadeOutAnim.state <> "stopped" then return
+    HeroStopPosterPrevFade(true)
+end sub
+
 sub HeroClear()
     m.heroFocusKey = ""
     m.heroLogoUri = ""
@@ -131,6 +171,7 @@ sub HeroClear()
     m.heroLogoFallbackUri = ""
     if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
     if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+    HeroStopPosterPrevFade(true)
     m.heroPosterPendingUri = ""
     m.heroPosterSourceUri = ""
     HeroSetPosterUri("")
@@ -210,6 +251,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         m.heroPosterSourceUri = ""
         m.heroPosterPendingUri = ""
         if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+        HeroStopPosterPrevFade(true)
         if m.heroPoster <> invalid then m.heroPoster.opacity = 1
         HeroSetPosterUri("")
         if m.heroPoster <> invalid then m.heroPoster.visible = false
@@ -222,6 +264,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         requestUri = HeroRequestUri(background)
         currentPosterUri = HeroPosterUri()
         if currentPosterUri <> requestUri
+            HeroPreparePosterCrossfade(requestUri)
             m.heroPosterPendingUri = requestUri
             if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
             if m.heroPoster <> invalid then m.heroPoster.opacity = 0

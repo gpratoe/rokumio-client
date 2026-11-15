@@ -21,46 +21,11 @@ sub init()
     m.filterBar = m.top.FindNode("filterBar")
     m.grid = m.top.FindNode("discoverGrid")
 
-    m.heroPoster = m.top.FindNode("heroPoster")
-    m.heroPosterFadeAnim = m.top.FindNode("heroPosterFadeAnim")
-    m.heroScrim = m.top.FindNode("heroScrim")
-    m.heroLogo = m.top.FindNode("heroLogo")
-    m.heroTitle = m.top.FindNode("heroTitle")
-    m.heroMeta = m.top.FindNode("heroMeta")
-    m.heroRating = m.top.FindNode("heroRating")
-    m.heroRatingText = m.top.FindNode("heroRatingText")
-    m.heroGenres = m.top.FindNode("heroGenres")
-    m.heroDescription = m.top.FindNode("heroDescription")
-    m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
-
-    HeroInitState()
-    m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
-    m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
-    if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
-    if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
-    if m.heroPosterLoader <> invalid
-        m.heroPosterLoader.ObserveField("ready", "HeroOnPosterStatus")
-        m.heroPosterLoader.ObserveField("status", "HeroOnPosterStatus")
-    else
-        m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
-    end if
-    if m.heroLogoLoader <> invalid
-        m.heroLogoLoader.ObserveField("ready", "HeroOnLogoStatus")
-        m.heroLogoLoader.ObserveField("status", "HeroOnLogoStatus")
-    else
-        m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
-    end if
-    m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
+    m.hero = m.top.FindNode("hero")
     m.filtersHint = m.top.FindNode("filtersHint")
     m.filtersHintFade = m.top.FindNode("filtersHintFade")
 
     t = Theme()
-    m.heroScrim.color = t.scrim
-    m.heroTitle.color = t.textPrimary
-    m.heroMeta.color = t.textSecondary
-    m.heroRatingText.color = t.accentWarm
-    m.heroGenres.color = t.textSecondary
-    m.heroDescription.color = t.textPrimary
     m.status.color = t.accent
     m.grid.focusBitmapBlendColor = t.accentFocus
 
@@ -143,8 +108,6 @@ function OnBackPressed() as boolean
 end function
 
 sub BlurFocus()
-    if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
     if m.filtersHint <> invalid then m.filtersHint.visible = false
 end sub
 
@@ -780,13 +743,13 @@ sub UpdateDiscoverHero(position as object)
 end sub
 
 sub ClearDiscoverHero()
-    HeroClear()
+    if m.hero <> invalid then m.hero.callFunc("Clear")
 end sub
 
 sub RenderDiscoverHero(meta as object)
     fallbackType = ""
     if m.selectedCatalog <> invalid then fallbackType = StringOf(m.selectedCatalog.rawType)
-    HeroRender(meta, fallbackType)
+    if m.hero <> invalid then m.hero.callFunc("Render", meta, fallbackType)
 end sub
 
 sub LandingChipsFocus()
@@ -990,7 +953,7 @@ sub onResultSelected()
         params: {
             addonAddress: m.selectedCatalog.address
             meta: m.metas[flat]
-            heroTextureReady: HeroPosterReady()
+            heroTextureReady: (m.hero <> invalid and m.hero.callFunc("PosterReady") = true)
         }
     }
 end sub

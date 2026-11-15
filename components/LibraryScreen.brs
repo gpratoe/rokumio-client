@@ -18,54 +18,19 @@ sub init()
     m.filterBar = m.top.FindNode("filterBar")
     m.grid = m.top.FindNode("libraryGrid")
 
-    m.heroPoster = m.top.FindNode("heroPoster")
-    m.heroScrim = m.top.FindNode("heroScrim")
-    m.heroLogo = m.top.FindNode("heroLogo")
-    m.heroTitle = m.top.FindNode("heroTitle")
-    m.heroMeta = m.top.FindNode("heroMeta")
-    m.heroRating = m.top.FindNode("heroRating")
-    m.heroRatingText = m.top.FindNode("heroRatingText")
-    m.heroGenres = m.top.FindNode("heroGenres")
-    m.heroDescription = m.top.FindNode("heroDescription")
-    m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
-    m.heroPosterFadeAnim = m.top.FindNode("heroPosterFadeAnim")
+    m.hero = m.top.FindNode("hero")
     m.filtersHint = m.top.FindNode("filtersHint")
     m.filtersHintFade = m.top.FindNode("filtersHintFade")
-
-    HeroInitState()
-    m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
-    m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
-    if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
-    if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
 
     t = Theme()
     m.status.color = t.accent
     m.empty.color = t.textSecondary
-    m.heroScrim.color = t.scrim
-    m.heroTitle.color = t.textPrimary
-    m.heroMeta.color = t.textSecondary
-    m.heroRatingText.color = t.accentWarm
-    m.heroGenres.color = t.textSecondary
-    m.heroDescription.color = t.textPrimary
     m.grid.focusBitmapBlendColor = t.accentFocus
 
     m.filterBar.ObserveField("chipActivated", "onChipActivated")
     m.filterBar.ObserveField("optionPicked", "onOptionPicked")
     m.grid.ObserveField("rowItemSelected", "onResultSelected")
     m.grid.ObserveField("rowItemFocused", "onGridItemFocused")
-    if m.heroPosterLoader <> invalid
-        m.heroPosterLoader.ObserveField("ready", "HeroOnPosterStatus")
-        m.heroPosterLoader.ObserveField("status", "HeroOnPosterStatus")
-    else
-        m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
-    end if
-    if m.heroLogoLoader <> invalid
-        m.heroLogoLoader.ObserveField("ready", "HeroOnLogoStatus")
-        m.heroLogoLoader.ObserveField("status", "HeroOnLogoStatus")
-    else
-        m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
-    end if
-    m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
 
     m.chunk = 6
     ' Grid budget matches Discover: 6 standard poster tiles per row.
@@ -95,7 +60,7 @@ function OnEnter(params as object) as void
         m.grid.SetFocus(true)
         RefreshLibraryHeroFromFocus()
     else
-        HeroClear()
+        if m.hero <> invalid then m.hero.callFunc("Clear")
         m.filterBar.callFunc("FocusChips")
     end if
     UpdateFiltersHint()
@@ -109,8 +74,6 @@ function OnBackPressed() as boolean
 end function
 
 sub BlurFocus()
-    if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
     if m.filtersHint <> invalid then m.filtersHint.visible = false
 end sub
 
@@ -123,7 +86,7 @@ function RefreshRows() as void
     if m.items.Count() > 0
         if gridHadFocus then RefreshLibraryHeroFromFocus()
     else
-        HeroClear()
+        if m.hero <> invalid then m.hero.callFunc("Clear")
     end if
     UpdateFiltersHint()
 end function
@@ -215,7 +178,7 @@ sub onOptionPicked()
     if m.items.Count() > 0
         RefreshLibraryHeroFromFocus()
     else
-        HeroClear()
+        if m.hero <> invalid then m.hero.callFunc("Clear")
     end if
     UpdateFiltersHint()
 end sub
@@ -306,7 +269,7 @@ sub RefreshLibraryHeroFromFocus()
     if m.items.Count() > 0
         RenderLibraryHero(m.items[0])
     else
-        HeroClear()
+        if m.hero <> invalid then m.hero.callFunc("Clear")
     end if
 end sub
 
@@ -331,7 +294,7 @@ sub RenderLibraryHero(item as object)
         poster: item.poster
         type: item.metaType
     }
-    HeroRender(meta)
+    if m.hero <> invalid then m.hero.callFunc("Render", meta)
 end sub
 
 ' The asterisk-key hint: shown only while grid focus is past the first row

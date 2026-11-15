@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="BrowseHero" extends="Group">
+    <interface>
+        <field id="posterLoadWidth" type="integer" value="1120" />
+        <field id="posterLoadHeight" type="integer" value="630" />
+        <function name="Render" />
+        <function name="Clear" />
+        <function name="PosterReady" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/components/BrowseHero.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Hero.brs" />
+    <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
+
+    <children>
+        <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
+        <PosterLoader id="heroPosterLoader" />
+        <PosterLoader id="heroLogoLoader" />
+        <!-- Previous hero background kept visible while next loads/fades in. -->
+        <Poster
+            id="heroPosterPrev"
+            translation="[800, 0]"
+            width="1120"
+            height="630"
+            loadWidth="1120"
+            loadHeight="630"
+            loadDisplayMode="scaleToZoom"
+            opacity="0.0"
+            visible="false" />
+        <Poster
+            id="heroPoster"
+            translation="[800, 0]"
+            width="1120"
+            height="630"
+            loadWidth="1120"
+            loadHeight="630"
+            loadDisplayMode="scaleToZoom"
+            opacity="1.0" />
+        <Poster
+            id="heroFadeLR"
+            translation="[800, 0]"
+            width="360"
+            height="630"
+            loadWidth="256"
+            loadHeight="1"
+            loadDisplayMode="scaleToFill"
+            uri="pkg:/images/hero_fade_lr.png" />
+        <Poster
+            id="heroFadeBT"
+            translation="[800, 420]"
+            width="1120"
+            height="210"
+            loadWidth="1"
+            loadHeight="210"
+            loadDisplayMode="scaleToFill"
+            uri="pkg:/images/hero_fade_bt.png" />
+        <Rectangle
+            id="heroScrim"
+            translation="[0, 0]"
+            width="1920"
+            height="1080"
+            color="0x00000000" />
+        <Poster
+            id="heroLogo"
+            translation="[162, 48]"
+            width="820"
+            height="460"
+            loadWidth="560"
+            loadHeight="360"
+            loadDisplayMode="scaleToFit"
+            visible="false" />
+
+        <Label
+            id="heroTitle"
+            translation="[162, 88]"
+            width="680"
+            height="90"
+            wrap="true"
+            font="font:LargeBoldSystemFont" />
+        <Label
+            id="heroMeta"
+            translation="[166, 192]"
+            width="900"
+            height="30"
+            font="font:SmallerSystemFont" />
+        <Group id="heroRating" translation="[166, 232]" visible="false">
+            <Poster
+                id="heroImdbLogo"
+                width="64"
+                height="32"
+                loadWidth="64"
+                loadHeight="32"
+                loadDisplayMode="scaleToFit"
+                uri="pkg:/images/imdb.png" />
+            <Label
+                id="heroRatingText"
+                translation="[76, 0]"
+                width="110"
+                height="36"
+                vertAlign="center"
+                font="font:LargeBoldSystemFont" />
+        </Group>
+        <Label
+            id="heroGenres"
+            translation="[166, 283]"
+            width="860"
+            height="32"
+            font="font:SmallerSystemFont" />
+        <Label
+            id="heroDescription"
+            translation="[166, 333]"
+            width="620"
+            height="185"
+            wrap="true"
+            vertAlign="top"
+            font="font:SmallSystemFont" />
+
+        <Animation id="heroPosterFadeAnim" duration="0.2" repeat="false" easeFunction="linear">
+            <FloatFieldInterpolator
+                id="heroPosterFadeInterp"
+                fieldToInterp="heroPoster.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[0.0, 1.0]" />
+        </Animation>
+        <Animation id="heroPosterPrevFadeOutAnim" duration="0.25" repeat="false" easeFunction="linear">
+            <FloatFieldInterpolator
+                id="heroPosterPrevFadeInterp"
+                fieldToInterp="heroPosterPrev.opacity"
+                key="[0.0, 1.0]"
+                keyValue="[1.0, 0.0]" />
+        </Animation>
+    </children>
+</component>

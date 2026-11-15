@@ -22,103 +22,12 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/TileSize.bs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
-    <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
-    <script type="text/brightscript" uri="pkg:/source/util/Hero.brs" />
 
     <children>
         <Rectangle id="homeBg" width="1920" height="1080" color="0x0" />
         <Timer id="heroMetaDelay" duration="0.35" repeat="false" />
         <Timer id="heroPrefetchDelay" duration="0.45" repeat="false" />
-        <Timer id="heroTitleGrace" duration="0.18" repeat="false" />
-        <PosterLoader id="heroPosterLoader" />
-        <PosterLoader id="heroLogoLoader" />
-        <Poster
-            id="heroPoster"
-            translation="[800, 0]"
-            width="1120"
-            height="630"
-            loadWidth="1120"
-            loadHeight="630"
-            loadDisplayMode="scaleToZoom"
-            opacity="1.0" />
-        <Poster
-            id="heroFadeLR"
-            translation="[800, 0]"
-            width="360"
-            height="630"
-            loadWidth="256"
-            loadHeight="1"
-            loadDisplayMode="scaleToFill"
-            uri="pkg:/images/hero_fade_lr.png" />
-        <Poster
-            id="heroFadeBT"
-            translation="[800, 420]"
-            width="1120"
-            height="210"
-            loadWidth="1"
-            loadHeight="210"
-            loadDisplayMode="scaleToFill"
-            uri="pkg:/images/hero_fade_bt.png" />
-        <Rectangle
-            id="heroScrim"
-            translation="[0, 0]"
-            width="1920"
-            height="1080"
-            color="0x00000000" />
-        <Poster
-            id="heroLogo"
-            translation="[162, 48]"
-            width="820"
-            height="460"
-            loadWidth="560"
-            loadHeight="360"
-            loadDisplayMode="scaleToFit"
-            visible="false" />
-
-        <Label
-            id="heroTitle"
-            translation="[162, 88]"
-            width="680"
-            height="90"
-            wrap="true"
-            font="font:LargeBoldSystemFont" />
-        <Label
-            id="heroMeta"
-            translation="[166, 192]"
-            width="900"
-            height="30"
-            font="font:SmallerSystemFont" />
-        <Group id="heroRating" translation="[166, 232]" visible="false">
-            <Poster
-                id="heroImdbLogo"
-                width="64"
-                height="32"
-                loadWidth="64"
-                loadHeight="32"
-                loadDisplayMode="scaleToFit"
-                uri="pkg:/images/imdb.png" />
-            <Label
-                id="heroRatingText"
-                translation="[76, 0]"
-                width="110"
-                height="36"
-                vertAlign="center"
-                font="font:LargeBoldSystemFont" />
-        </Group>
-        <Label
-            id="heroGenres"
-            translation="[166, 283]"
-            width="860"
-            height="32"
-            font="font:SmallerSystemFont" />
-        <Label
-            id="heroDescription"
-            translation="[166, 333]"
-            width="620"
-            height="185"
-            wrap="true"
-            vertAlign="top"
-            font="font:SmallSystemFont" />
+        <BrowseHero id="hero" />
         <Label
             id="homeEmpty"
             translation="[172, 570]"
@@ -208,12 +117,6 @@
                 key="[0.0, 0.6, 1.0]"
                 keyValue="[320.0, 166.0, 112.0]" />
         </Animation>
-        <Animation id="heroPosterFadeAnim" duration="0.2" repeat="false" easeFunction="linear">
-            <FloatFieldInterpolator
-                id="heroPosterFadeInterp"
-                fieldToInterp="heroPoster.opacity"
-                key="[0.0, 1.0]"
-                keyValue="[0.0, 1.0]" />
-        </Animation>
+
     </children>
 </component>

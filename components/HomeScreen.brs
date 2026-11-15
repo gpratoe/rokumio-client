@@ -34,56 +34,22 @@ sub init()
     m.railBrandExpandAnim = m.top.FindNode("railBrandExpandAnim")
     m.railBrandCollapseAnim = m.top.FindNode("railBrandCollapseAnim")
     m.railBg = m.top.FindNode("railBg")
-    m.heroPoster = m.top.FindNode("heroPoster")
-    m.heroPosterFadeAnim = m.top.FindNode("heroPosterFadeAnim")
-    m.heroScrim = m.top.FindNode("heroScrim")
-    m.heroLogo = m.top.FindNode("heroLogo")
-    m.heroTitle = m.top.FindNode("heroTitle")
-    m.heroMeta = m.top.FindNode("heroMeta")
-    m.heroRating = m.top.FindNode("heroRating")
-    m.heroRatingText = m.top.FindNode("heroRatingText")
-    m.heroGenres = m.top.FindNode("heroGenres")
-    m.heroDescription = m.top.FindNode("heroDescription")
+    m.hero = m.top.FindNode("hero")
     m.heroMetaDelay = m.top.FindNode("heroMetaDelay")
     m.heroMetaDelay.ObserveField("fire", "onHeroMetaDelayFire")
     m.heroPrefetchDelay = m.top.FindNode("heroPrefetchDelay")
     m.heroPrefetchDelay.ObserveField("fire", "onHeroPrefetchDelayFire")
-    m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
     m.heroPrefetchTasks = []
     m.heroPrefetchKeys = {}
     m.heroMetaCache = {}
     m.heroMetaRequest = invalid
     m.heroMetaTask = invalid
     m.heroMetaTaskKey = ""
-
-    HeroInitState()
-    m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
-    m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
-    if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
-    if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
-    if m.heroPosterLoader <> invalid
-        m.heroPosterLoader.ObserveField("ready", "HeroOnPosterStatus")
-        m.heroPosterLoader.ObserveField("status", "HeroOnPosterStatus")
-    else
-        m.heroPoster.ObserveField("loadStatus", "HeroOnPosterStatus")
-    end if
-    if m.heroLogoLoader <> invalid
-        m.heroLogoLoader.ObserveField("ready", "HeroOnLogoStatus")
-        m.heroLogoLoader.ObserveField("status", "HeroOnLogoStatus")
-    else
-        m.heroLogo.ObserveField("loadStatus", "HeroOnLogoStatus")
-    end if
-    m.heroTitleGrace.ObserveField("fire", "HeroOnTitleGraceFire")
+    m.heroFocusKey = ""
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
 
     t = Theme()
-    m.heroScrim.color = t.scrim
-    m.heroTitle.color = t.textPrimary
-    m.heroMeta.color = t.textSecondary
-    m.heroRatingText.color = t.accentWarm
-    m.heroGenres.color = t.textSecondary
-    m.heroDescription.color = t.textPrimary
     m.homeEmpty.color = t.textSecondary
     m.railBg.color = t.navBg
     m.catalog.rowLabelOffset = [0,10]
@@ -409,7 +375,7 @@ sub RenderHomeHero(meta as object)
     if description.Trim() = "" and enriched.season <> invalid and enriched.episode <> invalid
         enriched.description = Fill(Lang("common", "episodeMarker"), { season: StringOf(enriched.season), episode: StringOf(enriched.episode) })
     end if
-    HeroRender(enriched, "", false)
+    if m.hero <> invalid then m.hero.callFunc("Render", enriched, "", false)
 end sub
 
 sub UpdateHomeTileMeta(rowIndex as integer, itemIndex as integer, meta as object)
@@ -966,9 +932,7 @@ sub BlurFocus()
     CollapseRail()
     CancelHeroMetaRequest()
     CancelHeroPrefetch()
-    if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-    HeroClear()
+    if m.hero <> invalid then m.hero.callFunc("Clear")
     CancelOpen()
 end sub
 
@@ -1163,7 +1127,7 @@ sub onRowItemSelected(event as object)
             params: {
                 addonAddress: m.gridRows[row].addonAddress
                 meta: item
-                heroTextureReady: HeroPosterReady()
+                heroTextureReady: (m.hero <> invalid and m.hero.callFunc("PosterReady") = true)
             }
         }
     end if
@@ -1197,7 +1161,7 @@ sub OpenContinueWatching(item as object)
                 addonAddress: address
                 meta: display
                 resume: { videoId: item.videoId, season: item.season, episode: item.episode, position: item.position }
-                heroTextureReady: HeroPosterReady()
+                heroTextureReady: (m.hero <> invalid and m.hero.callFunc("PosterReady") = true)
             }
         }
         return
@@ -1268,7 +1232,7 @@ sub onContinueWatchingLoaded()
             addonAddress: pending.address
             meta: meta
             resume: pending.resume
-            heroTextureReady: HeroPosterReady()
+            heroTextureReady: (m.hero <> invalid and m.hero.callFunc("PosterReady") = true)
         }
     }
 end sub
