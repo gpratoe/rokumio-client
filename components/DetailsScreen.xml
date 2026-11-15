@@ -43,9 +43,9 @@
             translation="[162, 48]"
             width="820"
             height="460"
-            loadWidth="820"
-            loadHeight="460"
-            loadDisplayMode="limitSize"
+            loadWidth="560"
+            loadHeight="360"
+            loadDisplayMode="scaleToFit"
             visible="false" />
         <Label
             id="detailName"
