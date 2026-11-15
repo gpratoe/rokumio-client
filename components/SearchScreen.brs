@@ -729,6 +729,7 @@ sub onResultSelected()
         params: {
             addonAddress: target.addonAddress
             meta: metas[index]
+            heroTextureReady: false
         }
     }
 end sub

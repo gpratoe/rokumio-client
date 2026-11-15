@@ -357,6 +357,7 @@ sub onResultSelected()
         screen: "detailsScreen"
         params: {
             addonAddress: m.cinemetaAddress
+            heroTextureReady: false
             meta: {
                 id: item.metaId
                 type: item.metaType

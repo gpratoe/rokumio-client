@@ -23,6 +23,7 @@ sub init()
     m.bgPosterFull.ObserveField("loadStatus", "onBgFullStatus")
     m.heroLogoUri = ""
     m.bgUri = ""
+    m.preferHeroTexture = false
     m.detailName = m.top.FindNode("detailName")
     m.detailType = m.top.FindNode("detailType")
     m.detailRating = m.top.FindNode("detailRating")
@@ -95,6 +96,8 @@ function OnEnter(params as object) as void
         m.resume = invalid
     end if
 
+    m.preferHeroTexture = false
+    if params.heroTextureReady <> invalid and params.heroTextureReady = true then m.preferHeroTexture = true
     m.metaRefreshed = false
     m.textsLanguage = TextsLanguage()
     RenderHero(meta)
@@ -126,11 +129,17 @@ sub RenderHero(meta as object)
         m.bgPosterFull.opacity = 0
         m.bgPosterFull.visible = false
         if bg <> ""
-            ' Show hero texture first (quick, fade in), then load and fade in high quality.
-            m.bgPoster.uri = bg
-            m.bgPoster.visible = true
-            m.bgPosterFull.visible = true
-            m.bgPosterFull.uri = bg
+            if m.preferHeroTexture = true
+                ' Reuse likely-cached hero texture (1120x630) for a snappy transition.
+                m.bgPoster.uri = bg
+                m.bgPoster.visible = true
+                m.bgPosterFull.visible = true
+                m.bgPosterFull.uri = bg
+            else
+                ' No preloaded hero texture: load high-res only to avoid extra decode.
+                m.bgPosterFull.visible = true
+                m.bgPosterFull.uri = bg
+            end if
         end if
     else if bg = ""
         if m.bgPosterFadeAnim <> invalid then m.bgPosterFadeAnim.control = "stop"
@@ -228,6 +237,8 @@ sub onMetaLoaded()
     m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
     m.meta = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.metaRefreshed = true
+    ' Refreshed meta can introduce a background that wasn't hero-preloaded.
+    m.preferHeroTexture = false
     RenderHero(m.meta)
 end sub
 

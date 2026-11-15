@@ -973,6 +973,7 @@ sub onResultSelected()
         params: {
             addonAddress: m.selectedCatalog.address
             meta: m.metas[flat]
+            heroTextureReady: true
         }
     }
 end sub
