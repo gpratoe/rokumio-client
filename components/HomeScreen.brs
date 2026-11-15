@@ -1149,7 +1149,7 @@ sub onRowItemSelected(event as object)
             params: {
                 addonAddress: m.gridRows[row].addonAddress
                 meta: item
-                heroTextureReady: true
+                heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
             }
         }
     end if
@@ -1183,7 +1183,7 @@ sub OpenContinueWatching(item as object)
                 addonAddress: address
                 meta: display
                 resume: { videoId: item.videoId, season: item.season, episode: item.episode, position: item.position }
-                heroTextureReady: true
+                heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
             }
         }
         return
@@ -1254,7 +1254,7 @@ sub onContinueWatchingLoaded()
             addonAddress: pending.address
             meta: meta
             resume: pending.resume
-            heroTextureReady: true
+            heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
         }
     }
 end sub

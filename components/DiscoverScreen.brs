@@ -973,7 +973,7 @@ sub onResultSelected()
         params: {
             addonAddress: m.selectedCatalog.address
             meta: m.metas[flat]
-            heroTextureReady: true
+            heroTextureReady: (m.heroPoster <> invalid and m.heroPoster.loadStatus = "ready")
         }
     }
 end sub
