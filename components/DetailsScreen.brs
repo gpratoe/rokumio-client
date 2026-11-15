@@ -193,36 +193,50 @@ sub RenderHero(meta as object)
                 end if
 
                 if desiredMode = "heroThenFull"
-                    ' Ensure correct loader requests without clearing already-ready targets.
+                    ' heroThenFull: prefer low-res continuity first, then swap to full when ready.
                     if m.bgPosterLoader.uri <> bg then m.bgPosterLoader.uri = bg
                     if m.bgFullLoader.uri <> bg then m.bgFullLoader.uri = bg
-                    if m.bgFullLoader.ready = true
-                        m.bgPoster.opacity = 0
-                        m.bgPoster.visible = false
-                        m.bgPosterFull.visible = true
-                        m.bgPosterFull.opacity = 1
-                    else if m.bgPosterLoader.ready = true
-                        m.bgPoster.visible = true
+                    m.bgPoster.visible = true
+                    m.bgPosterFull.visible = true
+                    m.bgPosterFull.opacity = 0
+                    if m.bgPosterLoader.ready = true
+                        print "[DetailsBg] heroThenFull hero ready"
                         m.bgPoster.opacity = 1
-                        m.bgPosterFull.visible = true
-                        if m.bgPosterFull.opacity >= 1 then m.bgPosterFull.opacity = 0
                     else
-                        if not (m.bgPoster.opacity >= 1) then m.bgPoster.opacity = 0
-                        m.bgPoster.visible = true
-                        m.bgPosterFull.visible = true
-                        if not (m.bgPosterFull.opacity >= 1) then m.bgPosterFull.opacity = 0
+                        ' Keep low-res as base layer (may become ready shortly/cached), avoid jumping to full.
+                        print "[DetailsBg] heroThenFull wait hero"
+                        m.bgPoster.opacity = 0
+                    end if
+                    ' If full is already ready and low-res is ready, show full immediately.
+                    ' If full is ready but low-res not ready yet, keep waiting for low-res continuity
+                    ' unless low-res has definitively failed.
+                    if m.bgFullLoader.ready = true and (m.bgPosterLoader.ready = true or m.bgPosterLoader.status = "failed")
+                        print "[DetailsBg] heroThenFull show full now"
+                        m.bgPoster.opacity = 0
+                        m.bgPosterFull.opacity = 1
                     end if
                 else
+                    ' fullOnly: fade in from black on fresh/unsatisfied presentation.
                     if m.bgPosterLoader.uri <> "" then m.bgPosterLoader.uri = ""
                     if m.bgFullLoader.uri <> bg then m.bgFullLoader.uri = bg
                     m.bgPoster.opacity = 0
                     m.bgPoster.visible = false
+                    m.bgPosterFull.visible = true
                     if m.bgFullLoader.ready = true
-                        m.bgPosterFull.visible = true
-                        m.bgPosterFull.opacity = 1
+                        if bgChanged or not sameConfig
+                            m.bgPosterFull.opacity = 0
+                            if m.bgFullFadeAnim <> invalid
+                                m.bgFullFadeAnim.control = "stop"
+                                m.bgFullFadeAnim.control = "start"
+                                print "[DetailsBg] start full fade"
+                            else
+                                m.bgPosterFull.opacity = 1
+                            end if
+                        else
+                            m.bgPosterFull.opacity = 1
+                        end if
                     else
-                        m.bgPosterFull.visible = true
-                        if not (m.bgPosterFull.opacity >= 1) then m.bgPosterFull.opacity = 0
+                        m.bgPosterFull.opacity = 0
                     end if
                 end if
             else
@@ -374,25 +388,28 @@ sub onBgPosterReady()
     if m.bgPosterLoader = invalid or m.bgPoster = invalid then return
     if m.bgMode <> "heroThenFull" then return
     if StringOf(m.bgPosterLoader.uri) <> m.bgUri or m.bgUri = "" then return
-    ' Details owns transition: fade in low-res only if it becomes the visible layer.
+    ' heroThenFull: show low-res immediately (no fade). Full swaps in once low-res is shown/ready.
     if m.bgPosterLoader.ready = true or m.bgPosterLoader.status = "ready"
-        if m.bgFullLoader <> invalid and m.bgFullLoader.ready = true then return
+        print "[DetailsBg] poster ready show immediate"
         m.bgPoster.visible = true
-        if m.bgPoster.opacity >= 1 then return
-        if m.bgPosterFadeAnim <> invalid
-            if m.bgPosterFadeAnim.state = "running" then return
-            m.bgPosterFadeAnim.control = "stop"
+        m.bgPoster.opacity = 1
+        if m.bgFullLoader <> invalid and (m.bgFullLoader.ready = true or m.bgFullLoader.status = "ready")
+            print "[DetailsBg] full already ready swap now"
             m.bgPoster.opacity = 0
-            m.bgPosterFadeAnim.control = "start"
-            print "[DetailsBg] start poster fade state="; m.bgPosterFadeAnim.state
-        else
-            m.bgPoster.opacity = 1
+            m.bgPosterFull.visible = true
+            m.bgPosterFull.opacity = 1
         end if
     else if m.bgPosterLoader.status = "failed" and m.bgPosterLoader.retryCount >= m.bgPosterLoader.maxRetries
         print "[DetailsBg] poster failed retries exhausted"
-        ' Retries exhausted: keep UI stable (full-res may still load/fade in).
-        m.bgPoster.visible = true
-        if m.bgPoster.opacity <= 0 then m.bgPoster.opacity = 1
+        ' Retries exhausted: if full-res is ready show it, otherwise keep low-res slot visible.
+        if m.bgFullLoader <> invalid and (m.bgFullLoader.ready = true or m.bgFullLoader.status = "ready")
+            m.bgPoster.opacity = 0
+            m.bgPosterFull.visible = true
+            m.bgPosterFull.opacity = 1
+        else
+            m.bgPoster.visible = true
+            if m.bgPoster.opacity <= 0 then m.bgPoster.opacity = 1
+        end if
     end if
 end sub
 
@@ -401,15 +418,31 @@ sub onBgFullReady()
     if StringOf(m.bgFullLoader.uri) <> m.bgUri or m.bgUri = "" then return
     if m.bgFullLoader.ready = true or m.bgFullLoader.status = "ready"
         m.bgPosterFull.visible = true
-        if m.bgPosterFull.opacity >= 1 then return
-        if m.bgFullFadeAnim <> invalid
-            if m.bgFullFadeAnim.state = "running" then return
-            m.bgFullFadeAnim.control = "stop"
-            m.bgPosterFull.opacity = 0
-            m.bgFullFadeAnim.control = "start"
-            print "[DetailsBg] start full fade state="; m.bgFullFadeAnim.state
+        if m.bgMode = "fullOnly"
+            if m.bgPosterFull.opacity >= 1 then return
+            if m.bgFullFadeAnim <> invalid
+                if m.bgFullFadeAnim.state = "running" then return
+                m.bgFullFadeAnim.control = "stop"
+                m.bgPosterFull.opacity = 0
+                m.bgFullFadeAnim.control = "start"
+                print "[DetailsBg] start full fade"
+            else
+                m.bgPosterFull.opacity = 1
+            end if
         else
-            m.bgPosterFull.opacity = 1
+            ' heroThenFull: prefer low-res continuity; swap to full only when low-res is ready/visible or failed.
+            if m.bgPosterLoader <> invalid and (m.bgPosterLoader.ready = true or m.bgPosterLoader.status = "ready")
+                print "[DetailsBg] full ready swap (hero ready)"
+                m.bgPoster.opacity = 0
+                m.bgPosterFull.opacity = 1
+            else if m.bgPosterLoader <> invalid and m.bgPosterLoader.status = "failed"
+                print "[DetailsBg] full ready swap (hero failed)"
+                m.bgPoster.opacity = 0
+                m.bgPosterFull.opacity = 1
+            else
+                ' Wait for low-res to become ready/failed to avoid flashing past it.
+                print "[DetailsBg] full ready waiting for hero"
+            end if
         end if
     else if m.bgFullLoader.status = "failed" and m.bgFullLoader.retryCount >= m.bgFullLoader.maxRetries
         print "[DetailsBg] full failed retries exhausted"
