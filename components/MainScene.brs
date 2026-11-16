@@ -7,6 +7,13 @@
 sub init()
     m.stack = ScreenStack(m.top)
     m.top.palette = AppPalette()
+    ' Dev/test: set e.g. "http://192.168.x.x:8787" to route image URLs through
+    ' scripts/metahub-proxy.js for failure/retry testing. Empty = disabled.
+    if m.global <> invalid and not m.global.HasField("testImageProxyBase")
+        m.global.addField("testImageProxyBase", "string", false)
+        m.global.testImageProxyBase = ""
+    end if
+
 
     m.homeScreen = m.top.FindNode("homeScreen")
     m.homeScreen.ObserveField("pushRequest", "onHomeAction")

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks pushes when the dev image proxy is enabled by default.
+# Enable once per clone: git config core.hooksPath .githooks
+node scripts/check-image-proxy-disabled.js || exit 1

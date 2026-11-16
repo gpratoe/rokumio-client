@@ -125,10 +125,10 @@ function OnEnter(params as object) as void
 
     bg = m.meta.background
     if bg = invalid then bg = ""
-    m.bgLoader.uri = bg
+    m.bgLoader.uri = ProxyImageUri(bg)
 
     logo = StringOf(m.meta.logo)
-    m.logoLoader.uri = logo
+    m.logoLoader.uri = ProxyImageUri(logo)
     ApplyHeroLogo()
 
     LoadSeries()

@@ -121,8 +121,9 @@ end sub
 function HeroRequestUri(source as dynamic) as string
     src = StringOf(source)
     if src = "" then return ""
-    return src
+    return ProxyImageUri(src)
 end function
+
 
 sub HeroSetFillVisible(visible as boolean)
     if m.heroFill <> invalid then m.heroFill.visible = visible

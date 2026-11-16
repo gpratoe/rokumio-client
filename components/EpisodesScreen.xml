@@ -21,8 +21,9 @@
     <script type="text/brightscript" uri="pkg:/components/EpisodesScreen.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/AsyncTask.bs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
-    <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageProxy.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
 
     <children>
         <Rectangle id="epBg" width="1920" height="1080" color="0x0" />

@@ -55,6 +55,8 @@ sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
+    requestPoster = ""
+    if poster <> "" then requestPoster = ProxyImageUri(poster)
     label = m.top.itemContent.title
     if label = invalid then label = ""
     m.epTitle.text = label
@@ -79,12 +81,12 @@ sub onItemContentChanged()
     end if
 
     if m.posterLoader <> invalid
-        if poster = ""
+        if requestPoster = ""
             m.posterLoader.uri = ""
         else
             ' New item content should (re)request thumbnail; loader handles same-URI ready no-op.
             m.posterLoader.uri = ""
-            m.posterLoader.uri = poster
+            m.posterLoader.uri = requestPoster
         end if
     end if
     ShowArtless()
@@ -107,7 +109,7 @@ end sub
 sub ApplyPosterPresentation()
     if m.posterLoader = invalid then return
     uri = ""
-    if m.top.itemContent <> invalid and m.top.itemContent.hdPosterUrl <> invalid then uri = StringOf(m.top.itemContent.hdPosterUrl)
+    if m.top.itemContent <> invalid and m.top.itemContent.hdPosterUrl <> invalid then uri = ProxyImageUri(StringOf(m.top.itemContent.hdPosterUrl))
     if uri = ""
         ShowArtless()
         return
@@ -119,6 +121,7 @@ sub ApplyPosterPresentation()
         ShowArtless()
     end if
 end sub
+
 
 sub ShowArtless()
     if m.artless <> invalid then m.artless.visible = true

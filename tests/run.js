@@ -5397,6 +5397,24 @@ function checkPreVideoWaitLabelContract() {
 // first re-buffer. The property that matters is therefore the SHAPE — the
 // suppression is armed at play start AND re-applied from the "buffering" branch —
 // and it cannot be vouched for by a suite that never runs the component.
+function checkImageProxyDisabled() {
+    const fs = require('fs');
+    const mainScene = fs.readFileSync(path.join(projectRoot, 'components', 'MainScene.brs'), 'utf8');
+    const code = mainScene.split('\n').map(line => line.split("'")[0]).join('\n');
+    let ok = true;
+    if (!/m\.global\.testImageProxyBase\s*=\s*""/.test(code)) {
+        console.error('MainScene.brs must default m.global.testImageProxyBase to "" (dev image proxy must be disabled by default)');
+        ok = false;
+    }
+    for (const m of code.matchAll(/m\.global\.testImageProxyBase\s*=\s*"([^"]*)"/g)) {
+        if (m[1] !== "") {
+            console.error(`MainScene.brs sets m.global.testImageProxyBase to "${m[1]}" — dev image proxy must not be enabled in committed builds`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 function checkNativeBufferingSuppressionContract() {
     const fs = require('fs');
     const read = (f) => fs.readFileSync(path.join(projectRoot, 'components', f), 'utf8');
@@ -5931,7 +5949,7 @@ async function main() {
     // silently no-op on device. Guard the contract here.
     if (!checkDirectPlayContract()) process.exit(1);
     if (!checkPlaybackProxyHeadersContract()) process.exit(1);
-    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkDeviceCapContract() || !checkCodecPlaybackContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkHomeCatalogResultsAreIncremental() || !checkStopSignalContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkLibraryPutTaskContract() || !checkAddonsWriteTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkSettingsSectionsContract() || !checkTorrentProfileContract() || !checkCacheSizeContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract() || !checkMetaFieldCoercionContract() || !checkStringOfContract() || !checkI18nContract() || !checkNoUntranslatedLiterals() || !checkEpisodeSeriesBatchContract() || !checkStoreAddonValueContract() || !checkAddonJsonContract() || !checkSubtitlePlayGateContract() || !checkPreVideoIndicatorContract() || !checkPreVideoWaitLabelContract() || !checkNativeBufferingSuppressionContract()) {
+    if (!checkDeferredVideoPlayContract() || !checkScreenRuntimeHazards() || !checkScreenContract() || !checkScreensHidden() || !checkTileContract() || !checkPosterStatusContract() || !checkPosterFallbackContract() || !checkNoDuplicateScripts() || !checkStoreHandoffContract() || !checkLibraryCodecContract() || !checkMainSceneContract() || !checkSessionAuthorityContract() || !checkStremioProvisioningContract() || !checkAddonOrderingContract() || !checkAddonSyncTaskContract() || !checkStreamResolveTaskContract() || !checkEngineWarmupContract() || !checkTransportRetryContract() || !checkStaggeredSyncContract() || !checkNetDiagContract() || !checkDeviceCapContract() || !checkCodecPlaybackContract() || !checkHomeCatalogStalenessContract() || !checkTaskTeardownContract() || !checkHomeCatalogResultsAreIncremental() || !checkStopSignalContract() || !checkSubtitleMergeContract() || !checkWatchStatePushContract() || !checkHomeScreenContract() || !checkFilterBarContract() || !checkLibraryScreenContract() || !checkLibraryPutTaskContract() || !checkAddonsWriteTaskContract() || !checkLogoutTaskContract() || !checkSettingsPushContract() || !checkSettingsSectionsContract() || !checkTorrentProfileContract() || !checkCacheSizeContract() || !checkThemeContract() || !checkPosterScalingContract() || !checkPosterLoadSizePolicy() || !checkCompanionQrContract() || !checkSetupServerContract() || !checkDetailsMetaTypeContract() || !checkStreamFormatQueryContract() || !checkChannelCwPolicyContract() || !checkStreamTypeGateContract() || !checkDiscoverSourcesContract() || !checkMultiAddonSearchContract() || !checkStringMethodContract() || !checkMetaFieldCoercionContract() || !checkStringOfContract() || !checkI18nContract() || !checkNoUntranslatedLiterals() || !checkEpisodeSeriesBatchContract() || !checkStoreAddonValueContract() || !checkAddonJsonContract() || !checkSubtitlePlayGateContract() || !checkPreVideoIndicatorContract() || !checkPreVideoWaitLabelContract() || !checkNativeBufferingSuppressionContract() || !checkImageProxyDisabled()) {
         process.exit(1);
     }
 

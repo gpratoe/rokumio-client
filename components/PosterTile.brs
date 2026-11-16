@@ -134,6 +134,8 @@ sub onItemContentChanged()
 
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
+    requestPoster = ""
+    if poster <> "" then requestPoster = ProxyImageUri(poster)
     nonce = 0
     if m.top.itemContent.reloadNonce <> invalid then nonce = m.top.itemContent.reloadNonce
     forceReload = nonce <> 0 and nonce <> m.lastReloadNonce
@@ -143,22 +145,22 @@ sub onItemContentChanged()
     m.titleText.text = m.top.itemContent.title
     UpdateOverlays()
 
-    if poster = ""
+    if requestPoster = ""
         m.requestedPosterUri = ""
         if m.posterLoader <> invalid then m.posterLoader.uri = ""
         ShowArtless()
     else
-        if forceReload or prevUri <> poster
-            m.requestedPosterUri = poster
+        if forceReload or prevUri <> requestPoster
+            m.requestedPosterUri = requestPoster
             if m.posterLoader <> invalid
                 ' Force a fresh request even for same URI on explicit reload.
                 m.posterLoader.callFunc("Clear")
-                m.posterLoader.callFunc("Load", poster)
+                m.posterLoader.callFunc("Load", requestPoster)
             end if
             ShowArtless()
         else
             ' Same requested URI: keep presentation based on current loader state.
-            m.requestedPosterUri = poster
+            m.requestedPosterUri = requestPoster
             ApplyPosterPresentation()
         end if
     end if
