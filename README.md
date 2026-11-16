@@ -16,11 +16,11 @@
 
 ## Images
 
-![home](img/home.png)
+![home](img/home-eng_resized.png)
 
-![details](img/bb-details.png)
+![details](img/details-eng_resized.png)
 
-![episodes](img/bb-episodes.png)
+![discover](img/discover-eng_resized.png)
 
 ## Features
 
