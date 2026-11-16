@@ -168,6 +168,13 @@ sub init()
     m.discoverScreen.callFunc("SetStores", m.storeHost, m.top)
     m.libraryScreen.callFunc("SetStores", m.storeHost, m.top)
     m.playerScreen.callFunc("SetStores", m.storeHost, m.top)
+
+    homeHero = m.homeScreen.FindNode("hero")
+    if homeHero <> invalid then homeHero.callFunc("SetStores", m.storeHost, m.top)
+    discoverHero = m.discoverScreen.FindNode("hero")
+    if discoverHero <> invalid then discoverHero.callFunc("SetStores", m.storeHost, m.top)
+    libraryHero = m.libraryScreen.FindNode("hero")
+    if libraryHero <> invalid then libraryHero.callFunc("SetStores", m.storeHost, m.top)
 end sub
 
 sub Notify(text as string, kind = "info" as string)

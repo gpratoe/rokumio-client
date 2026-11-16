@@ -3,6 +3,7 @@
     <interface>
         <field id="posterLoadWidth" type="integer" value="1120" />
         <field id="posterLoadHeight" type="integer" value="630" />
+        <function name="SetStores" />
         <function name="Render" />
         <function name="Clear" />
         <function name="PosterReady" />

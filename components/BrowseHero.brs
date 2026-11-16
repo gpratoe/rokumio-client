@@ -14,6 +14,7 @@ sub init()
     m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
     m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
     m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
+    m.stores = invalid
 
     if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
     if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
@@ -44,6 +45,25 @@ sub init()
     ApplyHeroTheme()
 end sub
 
+sub SetStores(storeHost as object, _scene = invalid as object)
+    if storeHost = invalid
+        m.stores = invalid
+        RefreshTexts()
+        return
+    end if
+    m.stores = {
+        addons: storeHost
+        auth: storeHost
+        episodes: storeHost
+        library: storeHost
+        settings: storeHost
+        texts: storeHost
+        time: storeHost
+        watch: storeHost
+    }
+    RefreshTexts()
+end sub
+
 sub ApplyHeroTheme()
     t = Theme()
     if m.heroScrim <> invalid then m.heroScrim.color = t.scrim
@@ -55,6 +75,7 @@ sub ApplyHeroTheme()
 end sub
 
 sub Render(meta as object, fallbackType = "" as dynamic, posterFallback = true as dynamic)
+    if m._texts = invalid and m.stores <> invalid then RefreshTexts()
     fbType = ""
     if fallbackType <> invalid then fbType = fallbackType
     pFallback = true
