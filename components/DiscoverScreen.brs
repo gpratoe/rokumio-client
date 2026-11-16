@@ -298,6 +298,7 @@ function TypeLabel(key as string) as string
     if key = "movie" then return Lang("common", "movies")
     if key = "series" then return Lang("common", "series")
     if key = "channels" then return Lang("common", "channels")
+    if key = "other" then return Lang("common", "other")
     if key = "" then return ""
     ' A declared type is a free string ("sports", "tv", …), so this fallback is
     ' reachable. UCase is a global function, not an roString method — the chained
@@ -353,7 +354,7 @@ function CatalogOptions() as object
     ' (the brs interpreter uses independent iterators, so tests never see it).
     for i = 0 to count - 1
         candidate = catalogs[i]
-        label = candidate.title
+        label = GenreLabel(candidate.title)
         dupes = 0
         for j = 0 to count - 1
             other = catalogs[j]
@@ -375,7 +376,7 @@ function CatalogChipLabel() as string
     for each option in CatalogOptions()
         if SameCatalog(option.catalog, m.selectedCatalog) then return option.label
     end for
-    return m.selectedCatalog.title
+    return GenreLabel(m.selectedCatalog.title)
 end function
 
 ' --- selection defaults -----------------------------------------------------
@@ -441,7 +442,7 @@ function GenreOptions() as object
     if caps.genreOptions = invalid or Type(caps.genreOptions) <> "roArray" or caps.genreOptions.Count() = 0 then return options
     if not caps.genreRequired then options.Push({ raw: "all", label: Lang("common", "all") })
     for each genre in caps.genreOptions
-        options.Push({ raw: genre, label: genre })
+        options.Push({ raw: genre, label: GenreLabel(genre) })
     end for
     return options
 end function
@@ -498,8 +499,8 @@ sub SetChips()
         entries.Push({ raw: m.selectedCatalog.catalogId, label: CatalogChipLabel() })
     end if
     if GenreOptions().Count() > 0
-        label = m.genre
-        if label = "" or label = "all" then label = Lang("common", "all")
+        label = Lang("common", "all")
+        if m.genre <> "" and m.genre <> "all" then label = GenreLabel(m.genre)
         entries.Push({ raw: m.genre, label: label })
     end if
     m.filterBar.callFunc("SetChips", entries)
@@ -869,8 +870,8 @@ end function
 ' The human summary of the current filters, e.g. "Popular · Movies · Sci-Fi".
 function DiscoverLabel() as string
     if m.selectedCatalog = invalid then return ""
-    label = m.selectedCatalog.title + " · " + TypeLabel(TypeKey(m.selectedCatalog.rawType))
-    if m.genre <> "" and m.genre <> "all" then label = label + " · " + m.genre
+    label = GenreLabel(m.selectedCatalog.title) + " · " + TypeLabel(TypeKey(m.selectedCatalog.rawType))
+    if m.genre <> "" and m.genre <> "all" then label = label + " · " + GenreLabel(m.genre)
     return label
 end function
 

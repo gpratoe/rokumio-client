@@ -41,7 +41,8 @@
             "dateFormat": "{month} {day}, {year}",
             "airDateAired": "Aired {date}",
             "airDatePremieres": "Premieres {date}",
-            "episodeMarker": "S{season}E{episode}"
+            "episodeMarker": "S{season}E{episode}",
+            "other": "Other"
         },
         "settings": {
             "title": "Settings",
@@ -310,6 +311,37 @@
             "newCodeHint": "Press OK to get a new code",
             "loggedIn": "Logged in!",
             "loginFailed": "Login failed"
+        },
+        "genres": {
+            "Action": "Action",
+            "Adventure": "Adventure",
+            "Animation": "Animation",
+            "Biography": "Biography",
+            "Comedy": "Comedy",
+            "Crime": "Crime",
+            "Documentary": "Documentary",
+            "Drama": "Drama",
+            "Family": "Family",
+            "Fantasy": "Fantasy",
+            "History": "History",
+            "Horror": "Horror",
+            "Mystery": "Mystery",
+            "Romance": "Romance",
+            "Sci-Fi": "Sci-Fi",
+            "Sport": "Sport",
+            "Thriller": "Thriller",
+            "War": "War",
+            "Western": "Western",
+            "Reality-TV": "Reality-TV",
+            "Talk-Show": "Talk-Show",
+            "Game-Show": "Game-Show",
+            "New": "New",
+            "Featured": "Featured",
+            "Other": "Other",
+            "Popular": "Popular",
+            "Top": "Top",
+            "Latest": "Latest",
+            "Trending": "Trending"
         }
     },
     "es": {
@@ -354,7 +386,8 @@
             "dateFormat": "{day} {month} {year}",
             "airDateAired": "Emitido el {date}",
             "airDatePremieres": "Estreno el {date}",
-            "episodeMarker": "T{season}E{episode}"
+            "episodeMarker": "T{season}E{episode}",
+            "other": "Otros"
         },
         "settings": {
             "title": "Ajustes",
@@ -623,6 +656,37 @@
             "newCodeHint": "Pulsa OK para obtener un código nuevo",
             "loggedIn": "¡Sesión iniciada!",
             "loginFailed": "Falló el inicio de sesión"
+        },
+        "genres": {
+            "Action": "Acción",
+            "Adventure": "Aventura",
+            "Animation": "Animación",
+            "Biography": "Biografía",
+            "Comedy": "Comedia",
+            "Crime": "Crimen",
+            "Documentary": "Documental",
+            "Drama": "Drama",
+            "Family": "Familiar",
+            "Fantasy": "Fantasía",
+            "History": "Historia",
+            "Horror": "Terror",
+            "Mystery": "Misterio",
+            "Romance": "Romance",
+            "Sci-Fi": "Ciencia ficción",
+            "Sport": "Deporte",
+            "Thriller": "Suspenso",
+            "War": "Bélica",
+            "Western": "Western",
+            "Reality-TV": "Reality TV",
+            "Talk-Show": "Entrevistas",
+            "Game-Show": "Concurso",
+            "New": "Nuevo",
+            "Featured": "Destacados",
+            "Other": "Otros",
+            "Popular": "Popular",
+            "Top": "Top",
+            "Latest": "Recientes",
+            "Trending": "Tendencias"
         }
     }
 }

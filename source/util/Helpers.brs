@@ -60,8 +60,27 @@ function FormatRuntime(runtime as dynamic) as string
     return StringOf(runtime).Trim()
 end function
 
+' Translate a Cinemeta/add-on genre label when texts provide one; fall back to
+' the original string for unknown/custom genres.
+function GenreLabel(genre as dynamic) as string
+    raw = StringOf(genre).Trim()
+    if raw = "" then return ""
+    translated = invalid
+    if Type(m._texts) = "roAssociativeArray" then translated = TextsFromSlice(m._texts, "genres", raw)
+    if (Type(translated) <> "String" and Type(translated) <> "roString") or translated = ""
+        translated = invalid
+        if Type(m._textsEn) = "roAssociativeArray" then translated = TextsFromSlice(m._textsEn, "genres", raw)
+    end if
+    if (Type(translated) = "String" or Type(translated) = "roString") and translated <> ""
+        return translated
+    end if
+    return raw
+end function
+
 ' A compact genre line shared by the Home and Details heroes. Keep only a few
 ' entries so a noisy add-on cannot take over the hero copy.
+' Cinemeta/add-on genres are usually English keys; translate when a matching
+' entry exists in texts (genres section), otherwise show the original string.
 function HeroGenresText(genres as dynamic) as string
     if Type(genres) <> "roArray" then return ""
     text = ""
@@ -69,8 +88,9 @@ function HeroGenresText(genres as dynamic) as string
     for each value in genres
         genre = StringOf(value).Trim()
         if genre = "" then continue for
+        displayGenre = GenreLabel(genre)
         if text <> "" then text = text + "  ·  "
-        text = text + genre
+        text = text + displayGenre
         count = count + 1
         if count >= 5 then exit for
     end for

@@ -64,3 +64,51 @@ sub Test_Helpers_FormatRuntime()
     Harness_Equal(FormatRuntime("121"), "121", "a string runtime passes through")
     Harness_Equal(FormatRuntime(invalid), "", "no runtime is empty")
 end sub
+
+sub Test_Helpers_GenreLabel_TranslatesAndFallsBack()
+    Harness_Suite("Helpers.GenreLabel translates known genres and falls back")
+    m._texts = {
+        genres: {
+            Action: "Acción"
+            "Reality-TV": "Telerrealidad"
+        }
+    }
+    m._textsEn = {
+        genres: {
+            Action: "Action"
+            Drama: "Drama"
+        }
+    }
+
+    Harness_Equal(GenreLabel("Action"), "Acción", "current language translation wins")
+    Harness_Equal(GenreLabel("Drama"), "Drama", "falls back to English texts when missing in current language")
+    Harness_Equal(GenreLabel("Custom-Genre"), "Custom-Genre", "unknown genre falls back to original string")
+    Harness_Equal(GenreLabel(""), "", "empty genre stays empty")
+
+    m._texts = invalid
+    m._textsEn = invalid
+end sub
+
+sub Test_Helpers_HeroGenresText_UsesTranslationsAndFallback()
+    Harness_Suite("Helpers.HeroGenresText joins translated genres and keeps fallbacks")
+    m._texts = {
+        genres: {
+            Action: "Acción"
+            Comedy: "Comedia"
+            New: "Nuevo"
+        }
+    }
+    m._textsEn = {
+        genres: {
+            Drama: "Drama"
+        }
+    }
+
+    line = HeroGenresText(["Action", "Comedy", "Indie", "New"])
+    Harness_Equal(line, "Acción  ·  Comedia  ·  Indie  ·  Nuevo", "mixes translated and original genres")
+    Harness_Equal(HeroGenresText([]), "", "empty list returns empty string")
+    Harness_Equal(HeroGenresText(invalid), "", "invalid input returns empty string")
+
+    m._texts = invalid
+    m._textsEn = invalid
+end sub
