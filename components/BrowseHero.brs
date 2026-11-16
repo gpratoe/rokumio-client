@@ -15,6 +15,7 @@ sub init()
     m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
     m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
     m.stores = invalid
+    m.textsLanguage = ""
 
     if m.heroPosterLoader <> invalid then m.heroPosterLoader.target = m.heroPoster
     if m.heroLogoLoader <> invalid then m.heroLogoLoader.target = m.heroLogo
@@ -48,7 +49,8 @@ end sub
 sub SetStores(storeHost as object, _scene = invalid as object)
     if storeHost = invalid
         m.stores = invalid
-        RefreshTexts()
+        m.textsLanguage = ""
+        LoadTexts(invalid)
         return
     end if
     m.stores = {
@@ -61,7 +63,19 @@ sub SetStores(storeHost as object, _scene = invalid as object)
         time: storeHost
         watch: storeHost
     }
-    RefreshTexts()
+    RefreshHeroTexts()
+end sub
+
+sub RefreshHeroTexts()
+    if m.stores = invalid
+        m.textsLanguage = ""
+        LoadTexts(invalid)
+        return
+    end if
+    currentLang = TextsLanguage()
+    if m._texts <> invalid and m.textsLanguage = currentLang then return
+    LoadTexts(m.stores.texts)
+    m.textsLanguage = TextsLanguage()
 end sub
 
 sub ApplyHeroTheme()
@@ -75,7 +89,7 @@ sub ApplyHeroTheme()
 end sub
 
 sub Render(meta as object, fallbackType = "" as dynamic, posterFallback = true as dynamic)
-    if m._texts = invalid and m.stores <> invalid then RefreshTexts()
+    if m.stores <> invalid then RefreshHeroTexts()
     fbType = ""
     if fallbackType <> invalid then fbType = fallbackType
     pFallback = true
