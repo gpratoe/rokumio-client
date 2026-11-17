@@ -810,9 +810,9 @@ sub onDiscoverLoaded()
     if wantedOffset = 0
         m.discoverRetryCount = 0
         m.discoverRetryOffset = 0
-        m.metas = result.metas
+        m.metas = DiscoverOpenableMetas(result.metas)
         m.loaded = true
-        m.allLoaded = not result.hasMore or result.metas.Count() = 0
+        m.allLoaded = not result.hasMore or m.metas.Count() = 0
         if m.metas.Count() = 0
             m.grid.content = CreateObject("roSGNode", "ContentNode")
             m.grid.numRows = 0
@@ -833,14 +833,17 @@ sub onDiscoverLoaded()
         ' repeats the last item of the 49-item first page, and an add-on
         ' that ignores skip returns the same page forever — a page that
         ' adds no new ids ends pagination instead of paging infinitely.
+        ' The openable gate is the helper, not an inline copy: one spelling
+        ' of the filter for both the landing and the append.
+        page = DiscoverOpenableMetas(result.metas)
         seen = {}
         for each existing in m.metas
             if existing.id <> invalid then seen[existing.id] = true
         end for
         added = 0
-        for each meta in result.metas
-            if meta.id <> invalid and seen.DoesExist(meta.id) then continue for
-            if meta.id <> invalid then seen[meta.id] = true
+        for each meta in page
+            if seen.DoesExist(meta.id) then continue for
+            seen[meta.id] = true
             m.metas.Push(meta)
             added = added + 1
         end for
@@ -949,6 +952,15 @@ sub onResultSelected()
     if data = invalid or data.Count() < 2 then return
     flat = data[0] * m.chunk + data[1]
     if flat < 0 or flat >= m.metas.Count() then return
+    if not HomeMetaOpenable(m.metas[flat])
+        ' The landing filters keep idless metas off the grid; this is the
+        ' tripwire for any path that leaks one through. No details are
+        ' addressable without an id, so say so instead of pushing a screen
+        ' that can only fail.
+        print "Rokumio: refused to open a meta without a usable id (flat=" + flat.ToStr() + ")"
+        Notify(Lang("main", "itemUnavailable"), "error")
+        return
+    end if
     m.top.pushRequest = {
         screen: "detailsScreen"
         params: {
@@ -957,6 +969,39 @@ sub onResultSelected()
             heroTextureReady: (m.hero <> invalid and m.hero.callFunc("PosterReady") = true)
         }
     }
+end sub
+
+' The metas this screen will render and open: an add-on meta without a usable
+' id cannot be opened (Details is addressed by it), so it is dropped before it
+' reaches the grid — a tile whose OK does nothing is a worse lie than a missing
+' tile. Every drop is warned once per landing: a toast naming the catalog plus
+' a console line, so a misbehaving add-on is identifiable from the logs.
+function DiscoverOpenableMetas(metas as dynamic) as object
+    ' The shared filter does the splitting; this wrapper keeps Discover's
+    ' warning context (the selected catalog) attached to its drops.
+    filtered = FilterOpenableMetas(metas)
+    DiscoverWarnDropped(filtered.dropped)
+    return filtered.openable
+end function
+
+sub DiscoverWarnDropped(dropped as integer)
+    if dropped = 0 then return
+    label = ""
+    catalogId = ""
+    if m.selectedCatalog <> invalid
+        label = StringOf(m.selectedCatalog.title)
+        catalogId = StringOf(m.selectedCatalog.catalogId)
+    end if
+    print "Rokumio: dropped " + dropped.ToStr() + " metas without a usable id (catalog=" + catalogId + ")"
+    Notify(Fill(Lang("main", "catalogDataSkipped"), { addon: label }))
+end sub
+
+' Toasts surface through the scene's shared Toast node (see AddonsScreen for
+' the precedent): screens have no toast nodes of their own, the Scene owns the
+' one display surface.
+sub Notify(text as string, kind = "info" as string)
+    scene = m.top.getScene()
+    if scene <> invalid then scene.callFunc("Notify", text, kind)
 end sub
 
 ' Focus travel between the chips and the results grid. The dropdown's own keys

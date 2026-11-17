@@ -182,9 +182,23 @@ end sub
 ' Insert one streamed catalog row at its deterministic slot. All rows arrive in
 ' ascending index order, so the grid stays in task order even though each
 ' snapshot is a full copy.
+'
+' Metas without a usable id are dropped before the cap: a tile without an id
+' can never be opened (Details is addressed by it), so rendering it only
+' creates a tile whose OK does nothing. A row that loses every meta this way is
+' skipped outright — an empty titled row is worse than no row — and the walk
+' keeps going: later rows slot after what is present, ascending as ever.
 sub ApplyCatalogRow(row as object)
-    displayMetas = row.metas
-    if displayMetas <> invalid and displayMetas.Count() > 15
+    filtered = FilterOpenableMetas(row.metas)
+    if filtered.dropped > 0
+        print "Rokumio: dropped " + filtered.dropped.ToStr() + " metas without a usable id (addon=" + StringOf(row.addonAddress) + " catalog=" + StringOf(row.catalogId) + ")"
+        Notify(Fill(Lang("main", "catalogDataSkipped"), { addon: row.title }))
+    end if
+    openable = filtered.openable
+    if openable.Count() = 0 then return
+
+    displayMetas = openable
+    if displayMetas.Count() > 15
         capped = []
         for i = 0 to 14
             capped.Push(displayMetas[i])
@@ -197,7 +211,7 @@ sub ApplyCatalogRow(row as object)
         catalogId: row.catalogId
         title: row.title
         metaType: row.metaType
-        posterShape: TilePosterShape(row.metas)
+        posterShape: TilePosterShape(openable)
         metas: displayMetas
     }
     cwOffset = 0
@@ -1122,6 +1136,15 @@ sub onRowItemSelected(event as object)
     if m.gridRows[row].source = "library"
         OpenContinueWatching(item)
     else
+        if not HomeMetaOpenable(item)
+            ' Layer-2 filtering should keep idless metas off the grid; this is
+            ' the tripwire for any path that leaks one through. No details are
+            ' addressable without an id, so say so instead of pushing a screen
+            ' that can only fail.
+            print "Rokumio: refused to open a meta without a usable id (row=" + row.ToStr() + " item=" + index.ToStr() + ")"
+            Notify(Lang("main", "itemUnavailable"), "error")
+            return
+        end if
         m.top.pushRequest = {
             screen: "detailsScreen"
             params: {
@@ -1131,6 +1154,14 @@ sub onRowItemSelected(event as object)
             }
         }
     end if
+end sub
+
+' Toasts surface through the scene's shared Toast node (see AddonsScreen for
+' the precedent): screens have no toast nodes of their own, the Scene owns the
+' one display surface.
+sub Notify(text as string, kind = "info" as string)
+    scene = m.top.getScene()
+    if scene <> invalid then scene.callFunc("Notify", text, kind)
 end sub
 
 ' Begin opening a Continue-Watching tile. The full meta is fetched off the UI

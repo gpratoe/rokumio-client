@@ -28,6 +28,37 @@ function HomeCatalogBrowsable(catalog as dynamic) as boolean
     return true
 end function
 
+' Can this catalog meta be opened at all? A tile's whole life after the row
+' lands is keyed on meta.id: Details is entered with it (the add-on meta
+' endpoint, streams resolution, save/resume/watched are all addressed by it),
+' and every downstream library call takes it as text. An add-on meta that ships
+' without a usable id cannot be opened — so it must not be rendered either
+' (a tile whose OK does nothing is a worse lie than a missing tile). Intrinsics
+' only, so every screen and the test bundle share one definition.
+function HomeMetaOpenable(meta as dynamic) as boolean
+    if meta = invalid or Type(meta) <> "roAssociativeArray" then return false
+    if GetInterface(meta.id, "ifString") = invalid or meta.id = "" then return false
+    return true
+end function
+
+' Splits a raw add-on meta list into the metas that can be opened and a count
+' of the ones that cannot. Pure — no logging, no UI — so Home, Discover and
+' Search filter with one spelling of the rule and keep their own context for
+' the warning each drop deserves. See HomeMetaOpenable for why an unusable id
+' means the meta must not be rendered either.
+function FilterOpenableMetas(metas as dynamic) as object
+    result = { openable: [], dropped: 0 }
+    if metas = invalid or Type(metas) <> "roArray" then return result
+    for each meta in metas
+        if HomeMetaOpenable(meta)
+            result.openable.Push(meta)
+        else
+            result.dropped = result.dropped + 1
+        end if
+    end for
+    return result
+end function
+
 function HomeCatalogIsHidden(addonAddress as string, metaType as string, catalogId as string, hiddenCatalogs as dynamic) as boolean
     if hiddenCatalogs = invalid or Type(hiddenCatalogs) <> "roArray" then return false
     for each hidden in hiddenCatalogs

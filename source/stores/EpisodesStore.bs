@@ -106,9 +106,9 @@ class EpisodesStore
     '
     ' Returns { seasons, runs, orderedVideoIds }. runs is aligned with seasons;
     ' each run is { season, episodes }.
-    function SeriesData(seriesId as string, meta as object) as object
+    function SeriesData(seriesId as dynamic, meta as object) as object
         result = { seasons: [], runs: [], orderedVideoIds: [] }
-        if seriesId = "" or meta = invalid or meta.videos = invalid then return result
+        if not m.HasText(seriesId) or meta = invalid or meta.videos = invalid then return result
 
         seasons = []
         runs = []
@@ -151,8 +151,11 @@ class EpisodesStore
     ' "{imdbId}:{season}:{episode}" — the video id stream add-ons resolve.
     ' Built through VideoIdCodec so the convention has one owner (the account
     ' bitfield indexes the OrderedVideoIds list, and watched-state queries key
-    ' on the same string).
-    function ResolveVideoId(seriesId as string, season as integer, episode as integer) as string
+    ' on the same string). Untyped + HasText like SeriesData: the id rides in
+    ' from the raw meta, and a non-text one answers "no video" rather than
+    ' throwing out of the play handler.
+    function ResolveVideoId(seriesId as dynamic, season as integer, episode as integer) as string
+        if not m.HasText(seriesId) then return ""
         return m.videoId.Build(seriesId, season, episode)
     end function
 
@@ -178,9 +181,9 @@ class EpisodesStore
     ' regular (non-special) episode in display order — the ordering the account
     ' watched bitfield indexes (bit i is the i-th id here), so it must never
     ' drift from what EpisodesScreen paints. Skips season 0 (specials).
-    function OrderedVideoIds(seriesId as string, meta as object) as object
+    function OrderedVideoIds(seriesId as dynamic, meta as object) as object
         ids = []
-        if seriesId = "" or meta = invalid or meta.videos = invalid then return ids
+        if not m.HasText(seriesId) or meta = invalid or meta.videos = invalid then return ids
         seasons = m.Seasons(meta)
         ordered = m.OrderedSeasons(seasons)
         for s = 0 to ordered.Count() - 1

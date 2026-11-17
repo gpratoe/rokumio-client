@@ -23,6 +23,7 @@ async function writeCombinedScript() {
         'tests/harness.brs',
         'tests/mocks.brs',
         'components/NetDiagTask.brs',
+        'components/StoreHost.brs',
         'source/util/ToastMetrics.brs',
         'tests/screenstack.test.brs',
         'tests/transport.test.brs',
@@ -39,6 +40,7 @@ async function writeCombinedScript() {
         'tests/deeplinkstore.test.brs',
         'tests/episodesstore.test.brs',
         'tests/librarystore.test.brs',
+        'tests/storehost.test.brs',
         'tests/librarysync.test.brs',
         'tests/watchstatepush.test.brs',
         'tests/librarywritepush.test.brs',
@@ -69,7 +71,19 @@ async function writeCombinedScript() {
         'source/util/PosterLoaderCore.brs',
         'tests/posterloader.test.brs',
         'tests/_run.brs'
-    ].map(rel => fs.readFileSync(path.join(projectRoot, rel), 'utf8'));
+    ].map(rel => {
+        let src = fs.readFileSync(path.join(projectRoot, rel), 'utf8');
+        // StoreHost.brs joins the bundle so the tests exercise the REAL adapter
+        // functions the screens call through. Its init() builds the session
+        // stores over real transports and must never run here — and its
+        // `sub init()` collides with NetDiagTask's in the one combined scope —
+        // so the constructor is renamed out of reach while every adapter stays
+        // byte-identical to the shipped file.
+        if (rel === 'components/StoreHost.brs') {
+            src = src.replace(/^sub init\(\)/m, 'sub init_unreachable_in_tests()');
+        }
+        return src;
+    });
     fs.mkdirSync(path.dirname(combinedPath), { recursive: true });
     fs.writeFileSync(combinedPath, parts.join('\n'));
 }
@@ -3941,7 +3955,7 @@ function checkChannelCwPolicyContract() {
         err('LibraryStore.bs SyncFromStremio no longer excludes channel/tv items from the cw stack — a linked session would surface the account\'s live-channel entries in Continue Watching');
     }
 
-    const bridge = host.includes('function LibraryIsChannelType(metaType as string) as boolean');
+    const bridge = host.includes('function LibraryIsChannelType(metaType as dynamic) as boolean') || host.includes('function LibraryIsChannelType(metaType as string) as boolean');
     if (!bridge) {
         err('StoreHost.brs has no LibraryIsChannelType bridge — the player cannot call the shared predicate through m.stores.library');
     }

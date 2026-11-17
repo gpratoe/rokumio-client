@@ -220,8 +220,8 @@ end function
 
 ' episodes.SeriesData — all season groups and the ordered bitfield ids from
 ' one pass over the series meta.
-function EpisodesSeriesData(seriesId as string, meta as object) as object
-    return m.stores.episodes.SeriesData(seriesId, meta)
+function EpisodesSeriesData(seriesId as dynamic, meta as object) as object
+    return m.stores.episodes.SeriesData(StringOf(seriesId), meta)
 end function
 
 ' episodes.MergeMeta
@@ -240,13 +240,17 @@ function EpisodesOrderedSeasons(allSeasons as object) as object
 end function
 
 ' episodes.OrderedVideoIds
-function EpisodesOrderedVideoIds(seriesId as string, meta as object) as object
-    return m.stores.episodes.OrderedVideoIds(seriesId, meta)
+function EpisodesOrderedVideoIds(seriesId as dynamic, meta as object) as object
+    return m.stores.episodes.OrderedVideoIds(StringOf(seriesId), meta)
 end function
 
 ' episodes.ResolveVideoId
-function EpisodesResolveVideoId(seriesId as string, season as integer, episode as integer) as string
-    return m.stores.episodes.ResolveVideoId(seriesId, season, episode)
+' The Details play/resume path hands this m.meta.id straight from the add-on's
+' meta; untyped + coerced like the library id adapters, so a non-text id
+' degrades to "" and answers "no video" instead of a cast crash on the most
+' used path in the app.
+function EpisodesResolveVideoId(seriesId as dynamic, season as integer, episode as integer) as string
+    return m.stores.episodes.ResolveVideoId(StringOf(seriesId), season, episode)
 end function
 
 ' episodes.Seasons
@@ -270,8 +274,11 @@ function EpisodesFullMeta(metaType as dynamic, metaId as dynamic) as object
 end function
 
 ' library.AddSaved
-function LibraryAddSaved(metaId as string, metaType as string, name as string, poster = "" as string, posterShape = "" as string) as boolean
-    return m.stores.library.AddSaved(metaId, metaType, name, poster, posterShape)
+' Id/type/name ride in from the raw Details meta (the "+ Library" action), so
+' the same untyped+coerced policy as the rest of the id-carrying adapters
+' applies; the store's AddSaved keeps its HasText id guard.
+function LibraryAddSaved(metaId as dynamic, metaType as dynamic, name as dynamic, poster = "" as string, posterShape = "" as string) as boolean
+    return m.stores.library.AddSaved(StringOf(metaId), StringOf(metaType), StringOf(name), poster, posterShape)
 end function
 
 ' library.BuildLibraryChangeItem
@@ -295,26 +302,36 @@ function LibraryContinueWatching() as object
 end function
 
 ' library.EpisodeMark
-function LibraryEpisodeMark(metaId as string, season as integer, ep as object, orderedEpisodes as object, nowIso as dynamic) as object
-    return m.stores.library.EpisodeMark(metaId, season, ep, orderedEpisodes, nowIso)
+' The id-carrying library adapters are untyped + coerced (StringOf → "") as one
+' policy, for one reason: their arguments ride in from raw add-on metas
+' (Details/Episodes are entered with the catalog meta the tile shipped), and a
+' meta can carry an id that is missing or not text at all. A typed String
+' parameter rejects the roInvalid at the callFunc boundary (&h18 "Unable to
+' cast") — the crash class that killed the whole channel on v0.3.1 from one bad
+' meta in any installed add-on's catalog. Every id below degrades to "" and the
+' store answers "nothing saved / no marks / no-op" for it. The store methods
+' behind these are untyped with the same guards, so the store stays callable
+' directly in tests with invalid too.
+function LibraryEpisodeMark(metaId as dynamic, season as integer, ep as object, orderedEpisodes as object, nowIso as dynamic) as object
+    return m.stores.library.EpisodeMark(StringOf(metaId), season, ep, orderedEpisodes, nowIso)
 end function
 
 ' library.EpisodeMarks — the watched marks for a whole run of episodes, in the
 ' order of the episodes. One decode of the account's bitfield for the run,
 ' instead of one per episode.
-function LibraryEpisodeMarks(metaId as string, season as integer, episodes as object, orderedEpisodes as object, nowIso as dynamic) as object
-    return m.stores.library.EpisodeMarks(metaId, season, episodes, orderedEpisodes, nowIso)
+function LibraryEpisodeMarks(metaId as dynamic, season as integer, episodes as object, orderedEpisodes as object, nowIso as dynamic) as object
+    return m.stores.library.EpisodeMarks(StringOf(metaId), season, episodes, orderedEpisodes, nowIso)
 end function
 
 ' library.EpisodeMarksForSeries — all watched marks, with one bitfield decode
 ' for the series.
-function LibraryEpisodeMarksForSeries(metaId as string, seasonRuns as object, orderedEpisodes as object, nowIso as dynamic) as object
-    return m.stores.library.EpisodeMarksForSeries(metaId, seasonRuns, orderedEpisodes, nowIso)
+function LibraryEpisodeMarksForSeries(metaId as dynamic, seasonRuns as object, orderedEpisodes as object, nowIso as dynamic) as object
+    return m.stores.library.EpisodeMarksForSeries(StringOf(metaId), seasonRuns, orderedEpisodes, nowIso)
 end function
 
 ' library.IsSaved
-function LibraryIsSaved(metaId as string) as boolean
-    return m.stores.library.IsSaved(metaId)
+function LibraryIsSaved(metaId as dynamic) as boolean
+    return m.stores.library.IsSaved(StringOf(metaId))
 end function
 
 ' library.LibraryView
@@ -323,53 +340,61 @@ function LibraryLibraryView(typeFilter as string, sort as string) as object
 end function
 
 ' library.MarkAllIfDone
-function LibraryMarkAllIfDone(metaId as string, anyRegular as boolean, allDone as boolean) as void
-    m.stores.library.MarkAllIfDone(metaId, anyRegular, allDone)
+function LibraryMarkAllIfDone(metaId as dynamic, anyRegular as boolean, allDone as boolean) as void
+    m.stores.library.MarkAllIfDone(StringOf(metaId), anyRegular, allDone)
 end function
 
 ' library.MarkEpisodeUnwatched
-function LibraryMarkEpisodeUnwatched(metaId as string, videoId as string) as void
-    m.stores.library.MarkEpisodeUnwatched(metaId, videoId)
+function LibraryMarkEpisodeUnwatched(metaId as dynamic, videoId as dynamic) as void
+    m.stores.library.MarkEpisodeUnwatched(StringOf(metaId), StringOf(videoId))
 end function
 
 ' library.MarkEpisodeWatched
-function LibraryMarkEpisodeWatched(metaId as string, videoId as string) as void
-    m.stores.library.MarkEpisodeWatched(metaId, videoId)
+function LibraryMarkEpisodeWatched(metaId as dynamic, videoId as dynamic) as void
+    m.stores.library.MarkEpisodeWatched(StringOf(metaId), StringOf(videoId))
 end function
 
 ' library.MarkUpToUnwatched
-function LibraryMarkUpToUnwatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
-    m.stores.library.MarkUpToUnwatched(metaId, orderedEpisodeIds, lastIndex)
+function LibraryMarkUpToUnwatched(metaId as dynamic, orderedEpisodeIds as object, lastIndex as integer) as void
+    m.stores.library.MarkUpToUnwatched(StringOf(metaId), orderedEpisodeIds, lastIndex)
 end function
 
 ' library.MarkUpToWatched
-function LibraryMarkUpToWatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
-    m.stores.library.MarkUpToWatched(metaId, orderedEpisodeIds, lastIndex)
+function LibraryMarkUpToWatched(metaId as dynamic, orderedEpisodeIds as object, lastIndex as integer) as void
+    m.stores.library.MarkUpToWatched(StringOf(metaId), orderedEpisodeIds, lastIndex)
 end function
 
 ' library.MarkWatchedIfFinished
-function LibraryMarkWatchedIfFinished(metaId as string, videoId as string, position as integer, duration as integer) as void
-    m.stores.library.MarkWatchedIfFinished(metaId, videoId, position, duration)
+function LibraryMarkWatchedIfFinished(metaId as dynamic, videoId as dynamic, position as integer, duration as integer) as void
+    m.stores.library.MarkWatchedIfFinished(StringOf(metaId), StringOf(videoId), position, duration)
 end function
 
 ' library.ProgressFraction
-function LibraryProgressFraction(metaId as string) as dynamic
-    return m.stores.library.ProgressFraction(metaId)
+' The screens hand this whatever the meta or entry carries — raw add-on catalog
+' metas included — and a meta can ship without an id. A typed String parameter
+' would reject the roInvalid at the callFunc boundary (&h18 "Unable to cast"),
+' which is the crash that killed the whole channel on v0.3.1. Coerce here, so
+' invalid degrades to "" and the store answers "no bar" for it.
+function LibraryProgressFraction(metaId as dynamic) as dynamic
+    return m.stores.library.ProgressFraction(StringOf(metaId))
 end function
 
 ' library.RemoveSaved
-function LibraryRemoveSaved(metaId as string) as boolean
-    return m.stores.library.RemoveSaved(metaId)
+function LibraryRemoveSaved(metaId as dynamic) as boolean
+    return m.stores.library.RemoveSaved(StringOf(metaId))
 end function
 
 ' library.ResumeFor
-function LibraryResumeFor(metaId as string) as dynamic
-    return m.stores.library.ResumeFor(metaId)
+function LibraryResumeFor(metaId as dynamic) as dynamic
+    return m.stores.library.ResumeFor(StringOf(metaId))
 end function
 
 ' library.IsChannelType
-function LibraryIsChannelType(metaType as string) as boolean
-    return m.stores.library.IsChannelType(metaType)
+' The metaType comes from the playback meta, which can carry an id but no type
+' (an add-on is free to omit it); invalid must answer "not a channel", not a
+' cast crash.
+function LibraryIsChannelType(metaType as dynamic) as boolean
+    return m.stores.library.IsChannelType(StringOf(metaType))
 end function
 
 ' library.SetPosition
@@ -383,8 +408,11 @@ function LibrarySyncFromStremio(items as dynamic) as void
 end function
 
 ' library.WatchedGlyph
-function LibraryWatchedGlyph(metaId as string, metaType as string) as string
-    return m.stores.library.WatchedGlyph(metaId, metaType)
+' Untyped + coerced for the same reason as LibraryProgressFraction: a catalog
+' meta with no id/type must not die in the adapter before the store's own
+' invalid guards can run — every tile of every catalog row goes through here.
+function LibraryWatchedGlyph(metaId as dynamic, metaType as dynamic) as string
+    return m.stores.library.WatchedGlyph(StringOf(metaId), StringOf(metaType))
 end function
 
 ' settings.ClearServerAddress

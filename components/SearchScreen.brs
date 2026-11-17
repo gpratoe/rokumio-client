@@ -628,13 +628,26 @@ sub RebuildRows()
     for each candidate in m.searchOrder
         metas = m.landed[candidate.key]
         if metas <> invalid and metas.Count() > 0
-            rows.Push({
-                key: candidate.key
-                addonAddress: candidate.addonAddress
-                title: candidate.title
-                rawType: candidate.rawType
-                metas: metas
-            })
+            ' An add-on meta without a usable id cannot be opened (Details is
+            ' addressed by it), so it is dropped before it becomes a tile — a
+            ' tile whose OK does nothing is a worse lie than a missing tile.
+            ' Every drop warns: a toast naming the catalog plus a console line,
+            ' so a misbehaving add-on is identifiable from the logs.
+            filtered = FilterOpenableMetas(metas)
+            if filtered.dropped > 0
+                print "Rokumio: dropped " + filtered.dropped.ToStr() + " metas without a usable id (catalog=" + StringOf(candidate.title) + ")"
+                Notify(Fill(Lang("main", "catalogDataSkipped"), { addon: candidate.title }))
+            end if
+            openable = filtered.openable
+            if openable.Count() > 0
+                rows.Push({
+                    key: candidate.key
+                    addonAddress: candidate.addonAddress
+                    title: candidate.title
+                    rawType: candidate.rawType
+                    metas: openable
+                })
+            end if
         end if
     end for
     m.rows = rows
@@ -724,6 +737,13 @@ sub onResultSelected()
     target = m.rows[row]
     metas = target.metas
     if index >= metas.Count() then return
+    if not HomeMetaOpenable(metas[index])
+        ' The row build filters idless metas; this is the tripwire for any path
+        ' that leaks one through. No details are addressable without an id.
+        print "Rokumio: refused to open a meta without a usable id (row=" + row.ToStr() + " item=" + index.ToStr() + ")"
+        Notify(Lang("main", "itemUnavailable"), "error")
+        return
+    end if
     m.top.pushRequest = {
         screen: "detailsScreen"
         params: {
@@ -732,6 +752,14 @@ sub onResultSelected()
             heroTextureReady: false
         }
     }
+end sub
+
+' Toasts surface through the scene's shared Toast node (see AddonsScreen for
+' the precedent): screens have no toast nodes of their own, the Scene owns the
+' one display surface.
+sub Notify(text as string, kind = "info" as string)
+    scene = m.top.getScene()
+    if scene <> invalid then scene.callFunc("Notify", text, kind)
 end sub
 
 ' The keyboard extension reported a pane escape: Down/Right pressed at an

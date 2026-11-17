@@ -121,8 +121,8 @@ class LibraryStore
     ' added and then removed re-enters CW the moment it is added back. A guest
     ' session has no account item, so nothing is re-seeded and a re-add stays out
     ' of CW.
-    function AddSaved(metaId as string, metaType as string, name as string, poster = "" as string, posterShape = "" as string) as boolean
-        if metaId = "" then return false
+    function AddSaved(metaId as dynamic, metaType as string, name as string, poster = "" as string, posterShape = "" as string) as boolean
+        if not m.HasText(metaId) then return false
         if m.HasKey(m.saved, metaId) then return false
         if m.sessionType <> "stremio"
             while m.savedOrder.Count() >= MAX_GUEST_SAVED
@@ -150,7 +150,8 @@ class LibraryStore
     ' temp:false). A removed-but-watched title keeps its state.timeOffset on the
     ' account, so AddSaved re-seeds it — but only on stremio, since a guest has
     ' no account item to restore from.
-    function RemoveSaved(metaId as string) as boolean
+    function RemoveSaved(metaId as dynamic) as boolean
+        if not m.HasText(metaId) then return false
         if m.HasKey(m.saved, metaId)
             m.saved.Delete(metaId)
             for i = m.savedOrder.Count() - 1 to 0 step -1
@@ -201,7 +202,8 @@ class LibraryStore
         return invalid
     end function
 
-    function IsSaved(metaId as string) as boolean
+    function IsSaved(metaId as dynamic) as boolean
+        if not m.HasText(metaId) then return false
         return m.HasKey(m.saved, metaId)
     end function
 
@@ -393,8 +395,8 @@ class LibraryStore
     ' when nothing has been watched. Details uses this to resurrect a resume
     ' hint for episodes opened straight from a catalog row. Since the array is
     ' newest-first, the first match is the one to resume.
-    function ResumeFor(metaId as string) as dynamic
-        if metaId = "" then return invalid
+    function ResumeFor(metaId as dynamic) as dynamic
+        if not m.HasText(metaId) then return invalid
         for each entry in m.positions
             if entry.metaId = metaId then return entry
         end for
@@ -420,11 +422,17 @@ class LibraryStore
     ' so re-watching never duplicates. The local set is display-side only — it
     ' is written here on both guest and stremio sessions but never pushed to the
     ' account (the push clones the account's own flags, see BuildWatchStateItem).
-    sub MarkWatchedIfFinished(metaId as string, videoId as string, position as integer, duration as integer)
+    sub MarkWatchedIfFinished(metaId as dynamic, videoId as dynamic, position as integer, duration as integer)
         if duration <= 0 then return
         if position < duration * WATCHED_THRESHOLD then return
-        key = metaId
-        if videoId <> "" then key = videoId
+        ' videoId wins when both arrive (an episode key beats the meta key);
+        ' either being text is enough to key the watch.
+        key = ""
+        if m.HasText(videoId)
+            key = videoId
+        else if m.HasText(metaId)
+            key = metaId
+        end if
         if key = "" then return
         if m.HasKey(m.watched, key) then return
         m.watched[key] = true
@@ -514,18 +522,18 @@ class LibraryStore
     ' of the run is answered from it.
     '
     ' The marks come back in the order of the episodes, one per episode.
-    function EpisodeMarks(metaId as string, season as integer, episodes as object, orderedEpisodes as object, nowIso as dynamic) as object
+    function EpisodeMarks(metaId as dynamic, season as integer, episodes as object, orderedEpisodes as object, nowIso as dynamic) as object
         marks = []
         if episodes = invalid then return marks
         facts = invalid
         watchedSet = invalid
-        if orderedEpisodes <> invalid and Type(orderedEpisodes) = "roArray" then
+        if m.HasText(metaId) and orderedEpisodes <> invalid and Type(orderedEpisodes) = "roArray" then
             facts = m.AccountWatchedFacts(metaId)
             watchedSet = m.AccountWatchedSet(metaId, orderedEpisodes)
         end if
         for each ep in episodes
             mark = { aired: false, watched: false }
-            if metaId <> "" and ep <> invalid and ep.episode <> invalid and m.time <> invalid then
+            if m.HasText(metaId) and ep <> invalid and ep.episode <> invalid and m.time <> invalid then
                 mark.aired = m.time.EpisodeAired(ep, nowIso)
                 if mark.aired and facts <> invalid then
                     mark.watched = m.EpisodeWatchedWith(metaId, season, ep.episode, facts, watchedSet)
@@ -547,13 +555,13 @@ class LibraryStore
     ' seasonRuns is the EpisodesStore.SeriesData result's runs array:
     ' { season, episodes } records. The result is aligned with it and has the
     ' same record shape with a marks array alongside each season.
-    function EpisodeMarksForSeries(metaId as string, seasonRuns as object, orderedEpisodes as object, nowIso as dynamic) as object
+    function EpisodeMarksForSeries(metaId as dynamic, seasonRuns as object, orderedEpisodes as object, nowIso as dynamic) as object
         result = []
         if seasonRuns = invalid then return result
 
         facts = invalid
         watchedSet = invalid
-        if orderedEpisodes <> invalid and Type(orderedEpisodes) = "roArray"
+        if m.HasText(metaId) and orderedEpisodes <> invalid and Type(orderedEpisodes) = "roArray"
             facts = m.AccountWatchedFacts(metaId)
             watchedSet = m.AccountWatchedSet(metaId, orderedEpisodes)
         end if
@@ -566,7 +574,7 @@ class LibraryStore
                 if season <> 0 and seasonRun.episodes <> invalid
                     for each ep in seasonRun.episodes
                         mark = { aired: false, watched: false }
-                        if metaId <> "" and ep <> invalid and ep.episode <> invalid and m.time <> invalid
+                        if m.HasText(metaId) and ep <> invalid and ep.episode <> invalid and m.time <> invalid
                             mark.aired = m.time.EpisodeAired(ep, nowIso)
                             if mark.aired and facts <> invalid
                                 mark.watched = m.EpisodeWatchedWith(metaId, season, ep.episode, facts, watchedSet)
@@ -588,9 +596,9 @@ class LibraryStore
     ' on episodes that don't exist yet. One source for the badge rule shared by
     ' the build and the re-paint, so it cannot drift. `nowIso` is injectable for
     ' tests; production passes the store's TimeUtil stamp.
-    function EpisodeMark(metaId as string, season as integer, ep as object, orderedEpisodes as object, nowIso as dynamic) as object
+    function EpisodeMark(metaId as dynamic, season as integer, ep as object, orderedEpisodes as object, nowIso as dynamic) as object
         mark = { aired: false, watched: false }
-        if metaId = "" or ep = invalid or ep.episode = invalid then return mark
+        if not m.HasText(metaId) or ep = invalid or ep.episode = invalid then return mark
         if m.time = invalid then return mark
         mark.aired = m.time.EpisodeAired(ep, nowIso)
         if mark.aired then mark.watched = m.EpisodeWatched(metaId, season, ep.episode, orderedEpisodes)
@@ -602,8 +610,8 @@ class LibraryStore
     ' tiles that only carry a coarse SeriesStatus badge. `metaId` is injected so
     ' the completion rule is store-pure and shared by the build and the in-place
     ' re-paint. Persists through MarkSeriesDone on both sessions (display-side).
-    sub MarkAllIfDone(metaId as string, anyRegular as boolean, allDone as boolean) as void
-        if anyRegular and allDone and metaId <> ""
+    sub MarkAllIfDone(metaId as dynamic, anyRegular as boolean, allDone as boolean) as void
+        if anyRegular and allDone and m.HasText(metaId)
             m.MarkSeriesDone(metaId)
         end if
     end sub
@@ -652,10 +660,16 @@ class LibraryStore
     ' untouched → no badge); everything else by IsWatched (GLYPH_WATCHED or none).
     ' One definition here, so renaming a glyph touches the store + the PosterTile
     ' image — not the one-line adapters in Home/Library/Discover/Search.
-    function WatchedGlyph(metaId as string, metaType as string) as string
-        if metaId = invalid or metaId = "" then return ""
-        kind = metaType
-        if kind = invalid then kind = ""
+    ' Untyped on purpose: the id/type ride in from raw add-on catalog metas and
+    ' a typed String signature would reject a missing field at the call site
+    ' (the &h18 cast crash that took the whole channel down on v0.3.1). HasText
+    ' is the store's own predicate, not StringOf — a Helpers.brs global resolves
+    ' against the component that invoked the method, so a store cannot call it.
+    ' A meta with no id (or a non-text one) simply draws no badge.
+    function WatchedGlyph(metaId as dynamic, metaType as dynamic) as string
+        if not m.HasText(metaId) then return ""
+        kind = ""
+        if m.HasText(metaType) then kind = metaType
         if kind = "series"
             status = m.SeriesStatus(metaId)
             if status = "done" then return GLYPH_WATCHED
@@ -668,8 +682,10 @@ class LibraryStore
 
     ' The existing continue-watching position for a meta, as the progress bar
     ' needs it (position/duration in ms), or invalid when there is none.
-    function ProgressFor(metaId as string) as dynamic
-        if metaId = "" then return invalid
+    ' Untyped + HasText like WatchedGlyph: screen code hands over whatever the
+    ' meta carried, and invalid must answer "no position", not a cast crash.
+    function ProgressFor(metaId as dynamic) as dynamic
+        if not m.HasText(metaId) then return invalid
         for i = 0 to m.positions.Count() - 1
             if m.positions[i].metaId = metaId
                 return { position: m.positions[i].position, duration: m.positions[i].duration }
@@ -682,8 +698,10 @@ class LibraryStore
     ' (0, 1], or invalid when there is no playable progress (never started, bogus
     ' or zero duration). Screen code just paints the returned value — the clamped
     ' fraction math lives here so Home and Library tiles agree on the bar.
-    function ProgressFraction(metaId as string) as dynamic
-        if metaId = "" then return invalid
+    ' Untyped + HasText like WatchedGlyph: a meta without an id is a tile
+    ' without a bar, never a crash.
+    function ProgressFraction(metaId as dynamic) as dynamic
+        if not m.HasText(metaId) then return invalid
         entry = invalid
         for i = 0 to m.positions.Count() - 1
             if m.positions[i].metaId = metaId then entry = m.positions[i]
@@ -694,6 +712,18 @@ class LibraryStore
         fraction = entry.position / entry.duration
         if fraction > 1 then fraction = 1
         return fraction
+    end function
+
+    ' Is this text with something in it. Intrinsic-only via GetInterface, so a
+    ' parsed JSON value answers the same regardless of how the runtime spells
+    ' its type ("String" vs "roString"): ids, names and dates count, invalid,
+    ' numbers, booleans and containers do not. It exists for the untyped meta
+    ' fields above; an instance method, not a Helpers.brs global, because a
+    ' user-defined global resolves against the component that invoked the
+    ' method (see the file header).
+    function HasText(value as dynamic) as boolean
+        if GetInterface(value, "ifString") = invalid then return false
+        return value <> ""
     end function
 
     ' Persist a whole-series done flag (guest local, stremio display-only like
@@ -717,8 +747,8 @@ class LibraryStore
     ' The whole-series done key is left alone — a single episode mark never turns
     ' a series done (MarkAllIfDone does that once the full list is known and
     ' every tile is watched). Drops any session unwatch override for the episode.
-    sub MarkEpisodeWatched(metaId as string, videoId as string) as void
-        if metaId = "" or videoId = "" then return
+    sub MarkEpisodeWatched(metaId as dynamic, videoId as dynamic) as void
+        if not m.HasText(metaId) or not m.HasText(videoId) then return
         m.watched[videoId] = true
         m.ClearUnwatchOverride(metaId, videoId)
         m.Save()
@@ -730,8 +760,8 @@ class LibraryStore
     ' the account's bitfield still lists the episode watched until the corrected
     ' bitfield is pushed and re-synced; the override is what keeps both the tile
     ' badge and any re-encoded bitfield honoring "not watched" meanwhile.
-    sub MarkEpisodeUnwatched(metaId as string, videoId as string) as void
-        if metaId = "" or videoId = "" then return
+    sub MarkEpisodeUnwatched(metaId as dynamic, videoId as dynamic) as void
+        if not m.HasText(metaId) or not m.HasText(videoId) then return
         if m.HasKey(m.watched, videoId) then m.watched.Delete(videoId)
         if m.HasKey(m.watched, metaId) then m.watched.Delete(metaId)
         if m.sessionType = "stremio" then m.RecordUnwatchOverride(metaId, videoId)
@@ -743,8 +773,8 @@ class LibraryStore
     ' overrides for those ids — they are watched again. The list is whatever
     ' scoped a caller to (the whole series or one season row): the store is
     ' agnostic, the bitfield it later authors stays series-global regardless.
-    sub MarkUpToWatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
-        if metaId = "" or orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return
+    sub MarkUpToWatched(metaId as dynamic, orderedEpisodeIds as object, lastIndex as integer) as void
+        if not m.HasText(metaId) or orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return
         if lastIndex < 0 then lastIndex = 0
         if lastIndex >= orderedEpisodeIds.Count() then lastIndex = orderedEpisodeIds.Count() - 1
         for i = 0 to lastIndex
@@ -760,8 +790,8 @@ class LibraryStore
     ' unwatched episode cannot stay done), and — on a stremio session — the ids
     ' are remembered as unwatch overrides so the badge and any re-encoded
     ' bitfield keep honoring "not watched" until the correction re-syncs.
-    sub MarkUpToUnwatched(metaId as string, orderedEpisodeIds as object, lastIndex as integer) as void
-        if metaId = "" or orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return
+    sub MarkUpToUnwatched(metaId as dynamic, orderedEpisodeIds as object, lastIndex as integer) as void
+        if not m.HasText(metaId) or orderedEpisodeIds = invalid or Type(orderedEpisodeIds) <> "roArray" or orderedEpisodeIds.Count() = 0 then return
         if lastIndex < 0 then lastIndex = 0
         if lastIndex >= orderedEpisodeIds.Count() then lastIndex = orderedEpisodeIds.Count() - 1
         for i = 0 to lastIndex

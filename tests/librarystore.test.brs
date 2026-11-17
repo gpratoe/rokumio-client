@@ -577,6 +577,20 @@ sub Test_Library_ProgressFraction()
     Harness_Ok(store.ProgressFraction("ttQW2") = invalid, "zero duration has no bar")
 end sub
 
+sub Test_Library_GlyphAndProgressTolerateInvalid()
+    Harness_Suite("WatchedGlyph/ProgressFor/ProgressFraction accept the invalid a meta can carry")
+    ' The screens hand these whatever the meta carried. Pre-fix, a typed String
+    ' parameter rejected invalid at the signature; these direct store calls only
+    ' work because the store methods are untyped and coerce through StringOf.
+    store = LibraryStore(MockRegistry())
+    Harness_Equal(store.WatchedGlyph(invalid, "movie"), "", "no id draws no badge")
+    Harness_Equal(store.WatchedGlyph(invalid, invalid), "", "no id and no type draw no badge")
+    Harness_Ok(store.ProgressFor(invalid) = invalid, "no id has no position")
+    Harness_Ok(store.ProgressFraction(invalid) = invalid, "no id has no bar")
+    store.MarkWatchedIfFinished("ttQW", "ttQW", 800, 1000)
+    Harness_Equal(store.WatchedGlyph("ttQW", invalid), "eye", "invalid type still answers the whole-key watch check")
+end sub
+
 sub Test_Library_WatchedGlyph()
     Harness_Suite("WatchedGlyph maps watched state to a single glyph token per tile")
     store = LibraryStore(MockRegistry())

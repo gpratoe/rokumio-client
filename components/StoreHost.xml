@@ -113,5 +113,6 @@
     <script type="text/brightscript" uri="pkg:/source/stores/TextsStore.bs" />
     <script type="text/brightscript" uri="pkg:/source/util/AddonJson.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/TextsData.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
     <script type="text/brightscript" uri="pkg:/components/StoreHost.brs" />
 </component>
