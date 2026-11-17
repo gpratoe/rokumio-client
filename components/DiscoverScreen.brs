@@ -742,18 +742,21 @@ sub UpdateDiscoverHero(position as object)
     end if
     RenderDiscoverHero(m.metas[flat])
 
-    ' High-priority, predictive: hero assets for focused and likely-next items.
+    ' High-priority, predictive hero art for focused and grid neighbors
+    ' (left/right in the same row, below in the same column). Posters are not
+    ' prefetched here: tiles load them on-demand and rely on cache/retries.
     heroUrls = []
-    for offset = -1 to 2
-        idx = flat + offset
-        if idx >= 0 and idx < m.metas.Count()
-            m2 = m.metas[idx]
-            if m2 <> invalid
-                if m2.poster <> invalid and m2.poster <> "" then heroUrls.Push(StringOf(m2.poster))
-                if m2.background <> invalid and m2.background <> "" then heroUrls.Push(StringOf(m2.background))
-                if m2.logo <> invalid and m2.logo <> "" then heroUrls.Push(StringOf(m2.logo))
-            end if
-        end if
+    neighborIdxs = [flat]
+    if col > 0 then neighborIdxs.Push(flat - 1)
+    if col < m.chunk - 1 and (flat + 1) < m.metas.Count() then neighborIdxs.Push(flat + 1)
+    below = flat + m.chunk
+    if below < m.metas.Count() then neighborIdxs.Push(below)
+    for each idx in neighborIdxs
+        if idx < 0 or idx >= m.metas.Count() then continue for
+        m2 = m.metas[idx]
+        if m2 = invalid then continue for
+        if m2.background <> invalid and m2.background <> "" then heroUrls.Push(StringOf(m2.background))
+        if m2.logo <> invalid and m2.logo <> "" then heroUrls.Push(StringOf(m2.logo))
     end for
     if heroUrls.Count() > 0 then ImageCachePrefetch(heroUrls, true)
 end sub
