@@ -14,6 +14,17 @@ sub init()
         m.global.testImageProxyBase = ""
     end if
 
+    ' Background image byte prefetch (download-only, no pre-decode). The task
+    ' fills tmp:/imgcache so ResolveImageUri can serve local files on display.
+    m.imageCacheTask = m.top.FindNode("imageCacheTask")
+    if m.imageCacheTask <> invalid
+        if m.global <> invalid and not m.global.HasField("imageCacheTask")
+            m.global.addField("imageCacheTask", "node", false)
+        end if
+        if m.global <> invalid then m.global.imageCacheTask = m.imageCacheTask
+        m.imageCacheTask.control = "RUN"
+    end if
+
 
     m.homeScreen = m.top.FindNode("homeScreen")
     m.homeScreen.ObserveField("pushRequest", "onHomeAction")

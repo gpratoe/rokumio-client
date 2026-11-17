@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="ImageCacheTask" extends="Task">
+    <interface>
+        <!-- Array of original image URIs to prefetch (http/https). The task
+             resolves/proxies each, dedupes, downloads misses to tmp:/imgcache,
+             and enforces a bounded LRU. -->
+        <field id="enqueue" type="array" alwaysNotify="true" />
+        <!-- High-priority enqueue (e.g. focused hero assets), drained first. -->
+        <field id="enqueueHi" type="array" alwaysNotify="true" />
+        <!-- Published map of cached requestUrl -> true for render-thread resolve. -->
+        <field id="cached" type="assocarray" />
+        <!-- Optional status/debug snapshot written by the task. -->
+        <field id="status" type="assocarray" />
+        <!-- Cooperative stop for teardown. -->
+        <field id="stop" type="boolean" alwaysNotify="true" />
+    </interface>
+
+    <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageProxy.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageCache.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageCacheRuntime.brs" />
+    <script type="text/brightscript" uri="pkg:/components/ImageCacheTask.brs" />
+</component>
