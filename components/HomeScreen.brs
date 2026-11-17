@@ -805,17 +805,26 @@ end sub
 sub PaintTileFields(item as object, meta as object, fallbackGlyph as dynamic)
     name = meta.name
     if name = invalid then name = ""
-    item.title = name
+    if item.title <> name then item.title = name
+
     poster = meta.poster
     if poster = invalid then poster = ""
-    item.hdPosterUrl = ResolveImageUri(poster)
-    item.progress = 0
-    if meta.progress <> invalid and meta.progress > 0 then item.progress = meta.progress
+    ' Store the original URL; the tile resolves at display time so a cache-hit
+    ' flip (remote -> tmp) can be recognized without reloading.
+    if item.hdPosterUrl <> poster then item.hdPosterUrl = poster
+
+    progress = 0.0
+    if meta.progress <> invalid and meta.progress > 0 then progress = meta.progress
+    if item.progress <> progress then item.progress = progress
+
     glyph = meta.watchedGlyph
     if glyph = invalid then glyph = fallbackGlyph
     if glyph = invalid then glyph = ""
-    item.watchedGlyph = glyph
-    if m.posterReloadNonce <> invalid then item.reloadNonce = m.posterReloadNonce
+    if item.watchedGlyph <> glyph then item.watchedGlyph = glyph
+
+    if m.posterReloadNonce <> invalid and item.reloadNonce <> m.posterReloadNonce
+        item.reloadNonce = m.posterReloadNonce
+    end if
 end sub
 
 ' The top row when the user has watched something: one tile per local

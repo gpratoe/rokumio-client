@@ -670,7 +670,7 @@ sub RenderRows()
             if name = invalid then name = ""
             entry.title = name
             poster = meta.poster
-            if poster <> invalid and poster <> "" then entry.hdPosterUrl = ResolveImageUri(poster)
+            if poster <> invalid and poster <> "" then entry.hdPosterUrl = poster
             glyph = ""
             if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
             entry.watchedGlyph = glyph

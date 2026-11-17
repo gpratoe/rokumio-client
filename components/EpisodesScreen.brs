@@ -420,7 +420,7 @@ sub BuildSeasonPage(rowIndex as integer)
         ' string field — a numeric thumbnail would throw on the compare first
         ' and on the assignment next.
         thumbnail = StringOf(ep.thumbnail)
-        if thumbnail <> "" then item.hdPosterUrl = ResolveImageUri(thumbnail)
+        if thumbnail <> "" then item.hdPosterUrl = thumbnail
         if season <> 0
             mark = MarkAt(marks, e)
             item.watched = mark.watched

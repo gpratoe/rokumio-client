@@ -209,7 +209,7 @@ sub BuildRows()
             if name = invalid then name = ""
             tile.title = name
             poster = item.poster
-            if poster <> invalid and poster <> "" then tile.hdPosterUrl = ResolveImageUri(poster)
+            if poster <> invalid and poster <> "" then tile.hdPosterUrl = poster
             if item.metaType <> invalid and LCase(item.metaType) = "channel" then tile.watchedGlyph = ""
             TileWatchFields(tile, item.metaId, item.metaType)
         end for

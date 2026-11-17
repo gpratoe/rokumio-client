@@ -1,4 +1,4 @@
- ' PosterTile — custom list-item component used by the Home catalog rows.
+' PosterTile — custom list-item component used by the Home catalog rows.
 '
 ' MarkupGrid/RowList feed each item its ContentNode through the interface field
 ' `itemContent` and drive focus through `itemHasFocus`/`rowHasFocus` (they never
@@ -36,6 +36,9 @@ sub init()
 
     m.lastReloadNonce = 0
     m.requestedPosterUri = ""
+    m.requestedOriginalUri = ""
+    m.posterReady = false
+    m.swapPending = false
 
     if m.posterLoader <> invalid
         m.posterLoader.target = m.poster
@@ -103,10 +106,23 @@ sub onRowHasFocusChanged()
     UpdateLook()
 end sub
 
+' The original URL drives resolution and equivalence checks. A cache hit flips
+' the resolved URI from remote -> tmp:/ for the same image; treating that flip
+' as equivalent avoids clearing/reloading an already-displayed poster when a
+' tile is rebound during open/streaming.
+function PosterDisplayUri(originalUri as dynamic) as string
+    s = StringOf(originalUri)
+    if s = "" then return ""
+    return ResolveImageUri(s)
+end function
+
 sub onItemContentChanged()
     if m.top.itemContent = invalid then return
     if m.top.itemContent.seeMore = true
         m.requestedPosterUri = ""
+        m.requestedOriginalUri = ""
+        m.posterReady = false
+        m.swapPending = false
         if m.posterLoader <> invalid then m.posterLoader.uri = ""
         m.artless.visible = false
         if m.progressTrack <> invalid then m.progressTrack.visible = false
@@ -124,6 +140,9 @@ sub onItemContentChanged()
     loading = m.top.itemContent.loadState = "loading"
     if loading
         m.requestedPosterUri = ""
+        m.requestedOriginalUri = ""
+        m.posterReady = false
+        m.swapPending = false
         if m.posterLoader <> invalid then m.posterLoader.uri = ""
         m.titleText.text = m.top.itemContent.title
         ShowArtless()
@@ -132,35 +151,67 @@ sub onItemContentChanged()
         return
     end if
 
-    poster = m.top.itemContent.hdPosterUrl
-    if poster = invalid then poster = ""
-    requestPoster = ""
-    if poster <> "" then requestPoster = ResolveImageUri(poster)
+    original = m.top.itemContent.hdPosterUrl
+    if original = invalid then original = ""
+    requestPoster = PosterDisplayUri(original)
     nonce = 0
     if m.top.itemContent.reloadNonce <> invalid then nonce = m.top.itemContent.reloadNonce
     forceReload = nonce <> 0 and nonce <> m.lastReloadNonce
     if forceReload then m.lastReloadNonce = nonce
 
     prevUri = m.requestedPosterUri
+    prevOriginal = m.requestedOriginalUri
     m.titleText.text = m.top.itemContent.title
     UpdateOverlays()
 
     if requestPoster = ""
         m.requestedPosterUri = ""
+        m.requestedOriginalUri = ""
+        m.posterReady = false
+        m.swapPending = false
         if m.posterLoader <> invalid then m.posterLoader.uri = ""
         ShowArtless()
     else
-        if forceReload or prevUri <> requestPoster
-            m.requestedPosterUri = requestPoster
-            if m.posterLoader <> invalid
-                ' Force a fresh request even for same URI on explicit reload.
-                m.posterLoader.callFunc("Clear")
-                m.posterLoader.callFunc("Load", requestPoster)
+        sameImage = false
+        if not forceReload
+            if prevUri = requestPoster
+                sameImage = true
+            else if prevOriginal <> "" and StringOf(prevOriginal) = StringOf(original) and ImageCacheSameResolvedUri(original, prevUri, requestPoster)
+                sameImage = true
+            else if ImageCacheSameResolvedUri(original, prevUri, requestPoster) and m.posterReady
+                sameImage = true
             end if
-            ShowArtless()
-        else
-            ' Same requested URI: keep presentation based on current loader state.
+        end if
+
+        if sameImage
+            ' Same underlying image (including a remote -> cached tmp flip).
+            ' Do not clear/reload: keep the current presentation and just
+            ' track the resolved URI, avoiding an erase/reload flash.
             m.requestedPosterUri = requestPoster
+            m.requestedOriginalUri = original
+            m.swapPending = false
+            ApplyPosterPresentation()
+        else if forceReload or prevUri <> requestPoster
+            hadReady = m.posterReady = true
+            m.requestedPosterUri = requestPoster
+            m.requestedOriginalUri = original
+            m.posterReady = false
+            ' Swapping to a genuinely different poster: keep the previous
+            ' visual until the new one is ready to avoid an artless flash.
+            m.swapPending = hadReady and not forceReload
+            if m.posterLoader <> invalid
+                if forceReload
+                    m.posterLoader.callFunc("Clear")
+                    m.posterLoader.callFunc("Load", requestPoster)
+                else
+                    m.posterLoader.callFunc("Load", requestPoster)
+                end if
+            end if
+            if not m.swapPending then ShowArtless()
+            if not m.swapPending then ApplyPosterPresentation()
+        else
+            m.requestedPosterUri = requestPoster
+            m.requestedOriginalUri = original
             ApplyPosterPresentation()
         end if
     end if
@@ -173,17 +224,26 @@ end sub
 
 sub ApplyPosterPresentation()
     if m.posterLoader = invalid then return
-    if m.requestedPosterUri = "" then
+    if m.requestedPosterUri = ""
         ShowArtless()
         return
     end if
     ' Ignore stale loader updates from a previous request.
     if StringOf(m.posterLoader.uri) <> m.requestedPosterUri then return
-    if m.posterLoader.ready = true or StringOf(m.posterLoader.status) = "ready"
+    status = StringOf(m.posterLoader.status)
+    if m.posterLoader.ready = true or status = "ready"
+        m.posterReady = true
+        m.swapPending = false
         ShowPoster()
-    else
-        ' loading/failed (including retries exhausted) keeps artless/title visible.
+    else if status = "failed"
+        m.posterReady = false
+        m.swapPending = false
+        ' Failed (including retries exhausted): show artless/title fallback.
         ShowArtless()
+    else
+        ' Loading/transient. During a swap keep the previous visual to avoid
+        ' flashing artless while the new image decodes.
+        if not m.swapPending then ShowArtless()
     end if
 end sub
 

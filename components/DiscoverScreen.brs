@@ -925,7 +925,7 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
             if name = invalid then name = ""
             item.title = name
             poster = meta.poster
-            if poster <> invalid and poster <> "" then item.hdPosterUrl = ResolveImageUri(poster)
+            if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
             if m.posterReloadNonce <> invalid then item.reloadNonce = m.posterReloadNonce
             glyph = ""
             if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)

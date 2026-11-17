@@ -69,6 +69,14 @@ function ImageCachePathForRequestUrl(requestUrl as string) as string
     return ImageCacheDir() + "/" + ImageCacheHash(requestUrl)
 end function
 
+' The effective network request URL for an image (honors dev proxy rewrites).
+function ImageCacheRequestUrl(uri as dynamic) as string
+    s = StringOf(uri)
+    if s = "" then return ""
+    if not ImageCacheIsCacheable(s) then return s
+    return ProxyImageUri(s)
+end function
+
 ' Resolve a display image URI to a local cached file when available, otherwise
 ' to the (possibly proxied) remote request URL. Non-http URIs (pkg:/, tmp:/,
 ' already-local, empty) pass through unchanged. This is the single choke point
@@ -83,9 +91,6 @@ function ResolveImageUri(uri as dynamic) as string
 
     if not ImageCacheIsCacheable(s) then return s
 
-    ' Effective request URL (honors dev proxy rewrites). ProxyImageUri is a
-    ' file-scope function from ImageProxy.brs, available when both utils are
-    ' included in the same component (the normal case for display code).
     requestUrl = ProxyImageUri(s)
 
     g = GetGlobalAA()
@@ -99,6 +104,24 @@ function ResolveImageUri(uri as dynamic) as string
     end if
     return requestUrl
 end function
+
+' True when two resolved display URIs refer to the same underlying image. A
+' cache miss resolves to the remote/proxied URL and a hit to the tmp:/ path; a
+' later re-resolve can flip between them for the same original image. Treating
+' that flip as equivalent avoids reloading an already-displayed poster.
+function ImageCacheSameResolvedUri(originalUri as dynamic, uriA as dynamic, uriB as dynamic) as boolean
+    a = StringOf(uriA)
+    b = StringOf(uriB)
+    if a = b then return true
+    s = StringOf(originalUri)
+    if s = "" or not ImageCacheIsCacheable(s) then return false
+    requestUrl = ProxyImageUri(s)
+    localPath = ImageCachePathForRequestUrl(requestUrl)
+    if a = requestUrl and b = localPath then return true
+    if a = localPath and b = requestUrl then return true
+    return false
+end function
+
 
 ' Enqueue image URIs for background byte prefetch (download-only). Best-effort
 ' and non-blocking: if the cache task is not available this is a no-op. Accepts
