@@ -142,7 +142,7 @@ sub RenderHero(meta as object)
         m.bgPosterFull.opacity = 0
         m.bgPosterFull.visible = false
     else
-        requestBg = ProxyImageUri(bg)
+        requestBg = ResolveImageUri(bg)
         desiredHero = m.preferHeroTexture = true
         desiredMode = "fullOnly"
         if desiredHero then desiredMode = "heroThenFull"
@@ -302,7 +302,7 @@ sub RenderHero(meta as object)
     m.detailGenres.visible = genres <> ""
     m.detailDesc.text = description
     m.detailDesc.visible = description.Trim() <> ""
-    m.logoLoader.uri = ProxyImageUri(logo)
+    m.logoLoader.uri = ResolveImageUri(logo)
     ApplyDetailsLogoPresentation()
 end sub
 
@@ -398,7 +398,7 @@ end sub
 sub onBgPosterReady()
     if m.bgPosterLoader = invalid or m.bgPoster = invalid then return
     if m.bgMode <> "heroThenFull" then return
-    if StringOf(m.bgPosterLoader.uri) <> ProxyImageUri(m.bgUri) or m.bgUri = "" then return
+    if StringOf(m.bgPosterLoader.uri) <> ResolveImageUri(m.bgUri) or m.bgUri = "" then return
     ' Continuity (heroTextureReady): show low-res instantly when ready.
     ' No continuity: fade in first ready background from black (poster may win race).
     if m.bgPosterLoader.ready = true or m.bgPosterLoader.status = "ready"
@@ -465,7 +465,7 @@ end sub
 
 sub onBgFullReady()
     if m.bgFullLoader = invalid or m.bgPosterFull = invalid then return
-    if StringOf(m.bgFullLoader.uri) <> ProxyImageUri(m.bgUri) or m.bgUri = "" then return
+    if StringOf(m.bgFullLoader.uri) <> ResolveImageUri(m.bgUri) or m.bgUri = "" then return
     if m.bgFullLoader.ready = true or m.bgFullLoader.status = "ready"
         m.bgPosterFull.visible = true
         if m.bgMode = "fullOnly"

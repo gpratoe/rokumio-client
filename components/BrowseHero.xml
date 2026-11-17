@@ -12,6 +12,7 @@
     <script type="text/brightscript" uri="pkg:/components/BrowseHero.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/ImageProxy.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageCache.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/HeroFit.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/Hero.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />

@@ -12,6 +12,8 @@
     <script type="text/brightscript" uri="pkg:/components/AddonCard.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageProxy.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageCache.brs" />
 
     <children>
         <Poster id="tileBorder" width="1600" height="320" uri="pkg:/images/chip.9.png">

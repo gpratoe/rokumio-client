@@ -137,12 +137,12 @@ sub ApplyParamsChrome(params as object)
 
     bg = params.background
     if bg = invalid then bg = ""
-    m.bgLoader.uri = bg
+    m.bgLoader.uri = ResolveImageUri(bg)
 
     ' Logo artwork: a loaded logo takes the hero slot and the title steps
     ' aside once ready; artwork that never loads leaves the title up.
     logo = StringOf(params.logo)
-    m.logoLoader.uri = logo
+    m.logoLoader.uri = ResolveImageUri(logo)
     ApplyLogoPresentation()
 
     action = ""

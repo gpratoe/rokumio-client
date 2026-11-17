@@ -62,7 +62,7 @@ sub ApplyContent()
     rawLogo = ""
     if content.addonLogo <> invalid then rawLogo = StringOf(content.addonLogo).Trim()
     m.isPlaceholder = IsPlaceholderLogo(rawLogo)
-    m.logo.uri = RokuLogoUri(rawLogo)
+    m.logo.uri = ResolveImageUri(RokuLogoUri(rawLogo))
     UpdateLook()
 end sub
 

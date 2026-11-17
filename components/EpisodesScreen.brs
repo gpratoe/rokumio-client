@@ -125,10 +125,10 @@ function OnEnter(params as object) as void
 
     bg = m.meta.background
     if bg = invalid then bg = ""
-    m.bgLoader.uri = ProxyImageUri(bg)
+    m.bgLoader.uri = ResolveImageUri(bg)
 
     logo = StringOf(m.meta.logo)
-    m.logoLoader.uri = ProxyImageUri(logo)
+    m.logoLoader.uri = ResolveImageUri(logo)
     ApplyHeroLogo()
 
     LoadSeries()
@@ -420,7 +420,7 @@ sub BuildSeasonPage(rowIndex as integer)
         ' string field — a numeric thumbnail would throw on the compare first
         ' and on the assignment next.
         thumbnail = StringOf(ep.thumbnail)
-        if thumbnail <> "" then item.hdPosterUrl = thumbnail
+        if thumbnail <> "" then item.hdPosterUrl = ResolveImageUri(thumbnail)
         if season <> 0
             mark = MarkAt(marks, e)
             item.watched = mark.watched

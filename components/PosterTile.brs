@@ -135,7 +135,7 @@ sub onItemContentChanged()
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
     requestPoster = ""
-    if poster <> "" then requestPoster = ProxyImageUri(poster)
+    if poster <> "" then requestPoster = ResolveImageUri(poster)
     nonce = 0
     if m.top.itemContent.reloadNonce <> invalid then nonce = m.top.itemContent.reloadNonce
     forceReload = nonce <> 0 and nonce <> m.lastReloadNonce

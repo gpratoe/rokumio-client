@@ -121,7 +121,7 @@ end sub
 function HeroRequestUri(source as dynamic) as string
     src = StringOf(source)
     if src = "" then return ""
-    return ProxyImageUri(src)
+    return ResolveImageUri(src)
 end function
 
 

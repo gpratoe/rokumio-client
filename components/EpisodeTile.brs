@@ -56,7 +56,7 @@ sub onItemContentChanged()
     poster = m.top.itemContent.hdPosterUrl
     if poster = invalid then poster = ""
     requestPoster = ""
-    if poster <> "" then requestPoster = ProxyImageUri(poster)
+    if poster <> "" then requestPoster = ResolveImageUri(poster)
     label = m.top.itemContent.title
     if label = invalid then label = ""
     m.epTitle.text = label
@@ -109,7 +109,7 @@ end sub
 sub ApplyPosterPresentation()
     if m.posterLoader = invalid then return
     uri = ""
-    if m.top.itemContent <> invalid and m.top.itemContent.hdPosterUrl <> invalid then uri = ProxyImageUri(StringOf(m.top.itemContent.hdPosterUrl))
+    if m.top.itemContent <> invalid and m.top.itemContent.hdPosterUrl <> invalid then uri = ResolveImageUri(StringOf(m.top.itemContent.hdPosterUrl))
     if uri = ""
         ShowArtless()
         return

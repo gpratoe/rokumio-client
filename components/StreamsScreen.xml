@@ -27,6 +27,8 @@
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
     <script type="text/brightscript" uri="pkg:/source/util/DirectPlay.brs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageProxy.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageCache.brs" />
 
     <children>
         <Rectangle id="streamBg" width="1920" height="1080" />

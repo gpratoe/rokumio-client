@@ -9,6 +9,8 @@
     <script type="text/brightscript" uri="pkg:/components/AddonTile.brs" />
     <script type="text/brightscript" uri="pkg:/source/core/Theme.bs" />
     <script type="text/brightscript" uri="pkg:/source/util/Helpers.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageProxy.brs" />
+    <script type="text/brightscript" uri="pkg:/source/util/ImageCache.brs" />
 
     <children>
         <Rectangle id="tileFace" width="992" height="152" translation="[4, 4]" />
