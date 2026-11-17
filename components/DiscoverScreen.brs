@@ -741,6 +741,21 @@ sub UpdateDiscoverHero(position as object)
         return
     end if
     RenderDiscoverHero(m.metas[flat])
+
+    ' High-priority, predictive: hero assets for focused and likely-next items.
+    heroUrls = []
+    for offset = -1 to 2
+        idx = flat + offset
+        if idx >= 0 and idx < m.metas.Count()
+            m2 = m.metas[idx]
+            if m2 <> invalid
+                if m2.poster <> invalid and m2.poster <> "" then heroUrls.Push(StringOf(m2.poster))
+                if m2.background <> invalid and m2.background <> "" then heroUrls.Push(StringOf(m2.background))
+                if m2.logo <> invalid and m2.logo <> "" then heroUrls.Push(StringOf(m2.logo))
+            end if
+        end if
+    end for
+    if heroUrls.Count() > 0 then ImageCachePrefetch(heroUrls, true)
 end sub
 
 sub ClearDiscoverHero()
@@ -910,7 +925,7 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
             if name = invalid then name = ""
             item.title = name
             poster = meta.poster
-            if poster <> invalid and poster <> "" then item.hdPosterUrl = poster
+            if poster <> invalid and poster <> "" then item.hdPosterUrl = ResolveImageUri(poster)
             if m.posterReloadNonce <> invalid then item.reloadNonce = m.posterReloadNonce
             glyph = ""
             if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
@@ -925,6 +940,8 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
     if rowToShow <> invalid and m.grid.numRows > 0
         m.grid.jumpToRowItem = rowToShow
     end if
+    ' Low-priority: warm some posters opportunistically.
+    ImageCachePrefetchMetas(m.metas, 12, false, false)
 end sub
 
 sub CancelLoad()

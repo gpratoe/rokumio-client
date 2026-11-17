@@ -209,7 +209,7 @@ sub BuildRows()
             if name = invalid then name = ""
             tile.title = name
             poster = item.poster
-            if poster <> invalid and poster <> "" then tile.hdPosterUrl = poster
+            if poster <> invalid and poster <> "" then tile.hdPosterUrl = ResolveImageUri(poster)
             if item.metaType <> invalid and LCase(item.metaType) = "channel" then tile.watchedGlyph = ""
             TileWatchFields(tile, item.metaId, item.metaType)
         end for
@@ -223,6 +223,8 @@ sub BuildRows()
     else
         m.grid.numRows = 0
     end if
+    ' Low-priority: warm some posters opportunistically.
+    ImageCachePrefetchMetas(m.items, 12, false, false)
 
     if m.items.Count() = 0
         m.status.text = ""
@@ -281,6 +283,21 @@ sub UpdateLibraryHero(position as object)
         return
     end if
     RenderLibraryHero(m.items[flat])
+
+    ' High-priority, predictive: hero/poster assets for likely-next items.
+    heroUrls = []
+    for offset = -1 to 2
+        idx = flat + offset
+        if idx >= 0 and idx < m.items.Count()
+            m2 = m.items[idx]
+            if m2 <> invalid
+                if m2.poster <> invalid and m2.poster <> "" then heroUrls.Push(StringOf(m2.poster))
+                if m2.background <> invalid and m2.background <> "" then heroUrls.Push(StringOf(m2.background))
+                if m2.logo <> invalid and m2.logo <> "" then heroUrls.Push(StringOf(m2.logo))
+            end if
+        end if
+    end for
+    if heroUrls.Count() > 0 then ImageCachePrefetch(heroUrls, true)
 end sub
 
 ' Saved items are slim (name/poster/metaType/posterShape); the shared hero

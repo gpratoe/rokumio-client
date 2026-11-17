@@ -670,7 +670,7 @@ sub RenderRows()
             if name = invalid then name = ""
             entry.title = name
             poster = meta.poster
-            if poster <> invalid and poster <> "" then entry.hdPosterUrl = poster
+            if poster <> invalid and poster <> "" then entry.hdPosterUrl = ResolveImageUri(poster)
             glyph = ""
             if m.stores <> invalid then glyph = m.stores.library.callFunc("LibraryWatchedGlyph", meta.id, meta.type)
             entry.watchedGlyph = glyph
@@ -687,6 +687,10 @@ sub RenderRows()
     ' TileRowHeights).
     m.results.rowHeights = TileRowHeights(sizes)
     m.results.numRows = m.rows.Count()
+    ' Low-priority: warm some search-result posters opportunistically.
+    for each row in m.rows
+        ImageCachePrefetchMetas(row.metas, 8, false, false)
+    end for
 end sub
 
 ' The status line: "Searching…" while any add-on is still resolving; once all

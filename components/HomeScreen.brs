@@ -228,6 +228,8 @@ sub ApplyCatalogRow(row as object)
     UpdateHomeEmptyState()
     m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
+    ' Low-priority: warm a few row posters for Home revisits (opportunistic).
+    ImageCachePrefetchMetas(displayMetas, 8, false, false)
     ResyncRowLabels()
     RefreshHomeHeroFromFocus()
 end sub
@@ -333,6 +335,35 @@ sub UpdateHomeHero(position as dynamic)
     RenderHomeHero(displayMeta)
     meta = displayMeta
 
+    ' High-priority, predictive: prefetch hero assets (bg/logo/poster) for the
+    ' focused item and likely-next neighbors so hero transitions land on local art.
+    ' Use enriched/cached hero meta when available so neighbors whose full meta
+    ' is known contribute their background/logo too (slim catalog metas often lack them).
+    heroUrls = []
+    for offset = -1 to 2
+        idx = itemIndex + offset
+        if idx >= 0 and idx < metas.Count()
+            m2 = metas[idx]
+            if m2 <> invalid and (m2.seeMore = invalid or m2.seeMore <> true)
+                eff = m2
+                key2 = HomeHeroMetaKey(m2)
+                if key2 <> "" and m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(key2)
+                    eff = m.heroMetaCache[key2]
+                else if key2 <> "" and m.stores <> invalid and m.stores.episodes <> invalid
+                    cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", m2.type, m2.id)
+                    if cachedFull <> invalid
+                        full = m.stores.episodes.callFunc("EpisodesMergeMeta", m2, cachedFull)
+                        eff = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+                    end if
+                end if
+                if eff.poster <> invalid and eff.poster <> "" then heroUrls.Push(StringOf(eff.poster))
+                if eff.background <> invalid and eff.background <> "" then heroUrls.Push(StringOf(eff.background))
+                if eff.logo <> invalid and eff.logo <> "" then heroUrls.Push(StringOf(eff.logo))
+            end if
+        end if
+    end for
+    if heroUrls.Count() > 0 then ImageCachePrefetch(heroUrls, true)
+
     needsHeroMeta = false
     if m.stores <> invalid and m.gridRows[rowIndex].source = "library"
         needsHeroMeta = m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta)
@@ -433,6 +464,13 @@ sub onHomeHeroMetaLoaded()
     m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
     display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.heroMetaCache[request.key] = display
+    ' Focused hero meta arrived — ensure its art is queued (predictive path may
+    ' have missed it when the meta was still slim).
+    ImageCachePrefetch([
+        StringOf(display.poster)
+        StringOf(display.background)
+        StringOf(display.logo)
+    ], true)
     if request.row < 0 or request.row >= m.gridRows.Count() then return
     row = m.gridRows[request.row]
     if request.item < 0 or request.item >= row.metas.Count() then return
@@ -554,6 +592,12 @@ function HeroTryFillFromSharedCache(candidate as object) as boolean
     display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.heroMetaCache[candidate.key] = display
     StoreHeroDisplayMeta(candidate.row, candidate.item, candidate.key, display)
+    ' Enriched neighbor meta now carries hero art URLs — prefetch them.
+    ImageCachePrefetch([
+        StringOf(display.poster)
+        StringOf(display.background)
+        StringOf(display.logo)
+    ], true)
     return true
 end function
 
@@ -609,6 +653,13 @@ sub onHeroPrefetchLoaded(event as object)
     display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.heroMetaCache[completed.key] = display
     StoreHeroDisplayMeta(completed.row, completed.item, completed.key, display)
+
+    ' Hero art URLs for this neighbor are now known — prefetch them predictively.
+    ImageCachePrefetch([
+        StringOf(display.poster)
+        StringOf(display.background)
+        StringOf(display.logo)
+    ], true)
 
     if completed.key = m.heroFocusKey
         RenderHomeHero(display)
@@ -757,7 +808,7 @@ sub PaintTileFields(item as object, meta as object, fallbackGlyph as dynamic)
     item.title = name
     poster = meta.poster
     if poster = invalid then poster = ""
-    item.hdPosterUrl = poster
+    item.hdPosterUrl = ResolveImageUri(poster)
     item.progress = 0
     if meta.progress <> invalid and meta.progress > 0 then item.progress = meta.progress
     glyph = meta.watchedGlyph
