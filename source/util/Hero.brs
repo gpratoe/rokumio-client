@@ -22,8 +22,12 @@ sub HeroInitState()
     m.heroPosterPendingUri = ""
     m.heroPosterSourceUri = ""
     m.heroLogoUri = ""
+    m.heroLogoSourceUri = ""
+    m.heroLogoRequestUri = ""
     m.heroLogoGraceUri = ""
+    m.heroLogoGraceSourceUri = ""
     m.heroLogoFallbackUri = ""
+    m.heroLogoFallbackSourceUri = ""
     m.heroLayoutMode = "title"
     m.heroFocusKey = ""
     if m.heroPosterPrev <> invalid
@@ -168,8 +172,12 @@ end sub
 sub HeroClear()
     m.heroFocusKey = ""
     m.heroLogoUri = ""
+    m.heroLogoSourceUri = ""
+    m.heroLogoRequestUri = ""
     m.heroLogoGraceUri = ""
+    m.heroLogoGraceSourceUri = ""
     m.heroLogoFallbackUri = ""
+    m.heroLogoFallbackSourceUri = ""
     if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
     if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
     HeroStopPosterPrevFade(true)
@@ -259,68 +267,123 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         HeroSetFillUri("")
         HeroSetFillVisible(false)
     else
-        if background <> m.heroPosterSourceUri
-            m.heroPosterSourceUri = background
-        end if
         requestUri = HeroRequestUri(background)
         currentPosterUri = HeroPosterUri()
-        if currentPosterUri <> requestUri
-            HeroPreparePosterCrossfade(requestUri)
+        samePosterImage = false
+        if currentPosterUri = requestUri
+            samePosterImage = true
+        else if m.heroPosterSourceUri = background and ImageCacheSameResolvedUri(background, currentPosterUri, requestUri)
+            samePosterImage = true
+        else if ImageCacheSameResolvedUri(background, currentPosterUri, requestUri) and HeroPosterReady(currentPosterUri)
+            samePosterImage = true
+        end if
+
+        if samePosterImage
+            ' Same underlying hero art (including remote -> cached tmp flip).
+            ' Keep current/crossfading presentation; do not reload or reset opacity.
+            m.heroPosterSourceUri = background
             m.heroPosterPendingUri = requestUri
-            if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-            if m.heroPoster <> invalid then m.heroPoster.opacity = 0
-            HeroSetPosterUri(requestUri)
             if m.heroPoster <> invalid then m.heroPoster.visible = true
-            HeroSetFillUri(requestUri)
             HeroSetFillVisible(true)
+            if HeroPosterReady(currentPosterUri) or HeroPosterFailed(currentPosterUri)
+                if m.heroPosterFadeAnim <> invalid and m.heroPosterFadeAnim.state = "stopped" and m.heroPoster <> invalid and m.heroPoster.opacity < 1
+                    m.heroPoster.opacity = 1
+                end if
+            end if
         else
-            m.heroPosterPendingUri = requestUri
-            if m.heroPoster <> invalid then m.heroPoster.visible = true
-            HeroSetFillUri(requestUri)
-            HeroSetFillVisible(true)
-            if HeroPosterReady(requestUri) or HeroPosterFailed(requestUri)
+            m.heroPosterSourceUri = background
+            if currentPosterUri <> requestUri
+                HeroPreparePosterCrossfade(requestUri)
+                m.heroPosterPendingUri = requestUri
                 if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
-                if m.heroPoster <> invalid then m.heroPoster.opacity = 1
+                if m.heroPoster <> invalid then m.heroPoster.opacity = 0
+                HeroSetPosterUri(requestUri)
+                if m.heroPoster <> invalid then m.heroPoster.visible = true
+                HeroSetFillUri(requestUri)
+                HeroSetFillVisible(true)
+            else
+                m.heroPosterPendingUri = requestUri
+                if m.heroPoster <> invalid then m.heroPoster.visible = true
+                HeroSetFillUri(requestUri)
+                HeroSetFillVisible(true)
+                if HeroPosterReady(requestUri) or HeroPosterFailed(requestUri)
+                    if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
+                    if m.heroPoster <> invalid then m.heroPoster.opacity = 1
+                end if
             end if
         end if
     end if
 
     if logo = ""
         m.heroLogoUri = ""
+        m.heroLogoSourceUri = ""
+        m.heroLogoRequestUri = ""
         m.heroLogoGraceUri = ""
+        m.heroLogoGraceSourceUri = ""
         m.heroLogoFallbackUri = ""
+        m.heroLogoFallbackSourceUri = ""
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         HeroSetLogoUri("")
         HeroApplyLayout("title", true)
         return
     end if
 
-    if sameLogoReady
+    logoRequest = HeroRequestUri(logo)
+    currentLogoUri = HeroLogoUri()
+    sameLogoImage = false
+    if currentLogoUri = logoRequest and m.heroLogoSourceUri = logo and HeroLogoReady(logoRequest)
+        sameLogoImage = true
+    else if m.heroLogoSourceUri = logo and ImageCacheSameResolvedUri(logo, currentLogoUri, logoRequest)
+        ' Same underlying logo (including remote -> cached tmp flip). Keep it.
+        sameLogoImage = HeroLogoReady(currentLogoUri) or HeroLogoReady(logoRequest)
+        if sameLogoImage
+            m.heroLogoRequestUri = logoRequest
+            m.heroLogoUri = logoRequest
+        end if
+    end if
+
+    if sameLogoImage and (HeroLogoReady(currentLogoUri) or HeroLogoReady(logoRequest))
+        tracked = currentLogoUri
+        if tracked = "" then tracked = logoRequest
+        m.heroLogoUri = tracked
+        m.heroLogoSourceUri = logo
+        m.heroLogoRequestUri = logoRequest
         m.heroLogoGraceUri = ""
+        m.heroLogoGraceSourceUri = ""
         m.heroLogoFallbackUri = ""
+        m.heroLogoFallbackSourceUri = ""
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         if m.heroLogo <> invalid then m.heroLogo.visible = true
         if m.heroTitle <> invalid then m.heroTitle.visible = false
         return
     end if
 
-    logoChanged = logo <> m.heroLogoUri
-    if logoChanged
-        m.heroLogoUri = logo
+    logoChanged = (logo <> m.heroLogoSourceUri) or (currentLogoUri <> logoRequest and not ImageCacheSameResolvedUri(logo, currentLogoUri, logoRequest))
+    if logo <> m.heroLogoSourceUri or (currentLogoUri <> logoRequest and not (m.heroLogoSourceUri = logo and ImageCacheSameResolvedUri(logo, currentLogoUri, logoRequest)))
+        m.heroLogoSourceUri = logo
+        m.heroLogoUri = logoRequest
+        m.heroLogoRequestUri = logoRequest
         m.heroLogoGraceUri = ""
+        m.heroLogoGraceSourceUri = ""
         m.heroLogoFallbackUri = ""
+        m.heroLogoFallbackSourceUri = ""
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
-        HeroSetLogoUri(logo)
+        HeroSetLogoUri(logoRequest)
+        logoChanged = true
+    else
+        logoChanged = false
     end if
 
-    if m.heroLogoFallbackUri = logo
+    if m.heroLogoFallbackSourceUri = logo
         HeroShowTitleFallback()
         return
     end if
 
-    if logoChanged or m.heroLogoGraceUri <> logo
-        m.heroLogoGraceUri = logo
+    if logoChanged or m.heroLogoGraceSourceUri <> logo
+        m.heroLogoGraceUri = m.heroLogoRequestUri
+        m.heroLogoGraceSourceUri = logo
         m.heroLogoFallbackUri = ""
+        m.heroLogoFallbackSourceUri = ""
         if m.heroTitleGrace <> invalid
             m.heroTitleGrace.control = "stop"
             m.heroTitleGrace.control = "start"
@@ -357,12 +420,16 @@ sub HeroOnLogoStatus()
     if HeroLogoReady(m.heroLogoUri)
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         m.heroLogoGraceUri = ""
+        m.heroLogoGraceSourceUri = ""
         m.heroLogoFallbackUri = ""
+        m.heroLogoFallbackSourceUri = ""
         HeroFitLogo()
     else if HeroLogoFailed(m.heroLogoUri)
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         m.heroLogoGraceUri = ""
+        m.heroLogoGraceSourceUri = ""
         m.heroLogoFallbackUri = m.heroLogoUri
+        m.heroLogoFallbackSourceUri = m.heroLogoSourceUri
         HeroShowTitleFallback()
     end if
 end sub
@@ -372,7 +439,9 @@ sub HeroOnTitleGraceFire()
     if HeroLogoUri() <> m.heroLogoUri then return
     if HeroLogoReady(m.heroLogoUri) then return
     m.heroLogoGraceUri = ""
+    m.heroLogoGraceSourceUri = ""
     m.heroLogoFallbackUri = m.heroLogoUri
+    m.heroLogoFallbackSourceUri = m.heroLogoSourceUri
     HeroShowTitleFallback()
 end sub
 
