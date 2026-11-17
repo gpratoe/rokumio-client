@@ -1,0 +1,27 @@
+{
+    "id": "org.rokumio.brokentest",
+    "version": "1.0.0",
+    "name": "Broken Data Test",
+    "description": "Rokumio test fixture: a catalog whose metas carry every malformed id shape, plus one valid control. NOT for real use.",
+    "logo": "https://raw.githubusercontent.com/gpratoe/rokumio-client/refs/heads/main/images/logo.png",
+    "resources": [
+        {
+            "name": "catalog",
+            "types": ["movie"],
+            "id": "broken"
+        },
+        {
+            "name": "meta",
+            "types": ["movie"],
+            "idPrefixes": ["tt"]
+        }
+    ],
+    "types": ["movie"],
+    "catalogs": [
+        {
+            "type": "movie",
+            "id": "broken",
+            "name": "Broken Test"
+        }
+    ]
+}

@@ -1,0 +1,38 @@
+{
+    "metas": [
+        {
+            "id": "tt0111161",
+            "type": "movie",
+            "name": "Working Control (opens fine)",
+            "poster": "https://images.metahub.space/poster/medium/tt0111161/img",
+            "description": "The one valid meta: this tile must render and open Details normally."
+        },
+        {
+            "type": "movie",
+            "name": "Missing Id (v0.3.1 crash shape)",
+            "poster": "https://images.metahub.space/poster/medium/tt0133093/img",
+            "description": "No id field at all. Killed Home in MakeRowNode on every launch pre-fix."
+        },
+        {
+            "id": null,
+            "type": "movie",
+            "name": "Null Id (the reported crash)",
+            "poster": "https://images.metahub.space/poster/medium/tt0114369/img",
+            "description": "id present but null — the exact roInvalid that crashed the v0.3.1 user."
+        },
+        {
+            "id": 12345,
+            "type": "movie",
+            "name": "Numeric Id (off-spec)",
+            "poster": "https://images.metahub.space/poster/medium/tt0068646/img",
+            "description": "The protocol requires ids to be strings; a number is dropped and warned."
+        },
+        {
+            "id": "",
+            "type": "movie",
+            "name": "Empty Id (off-spec)",
+            "poster": "https://images.metahub.space/poster/medium/tt0071562/img",
+            "description": "An id that is present but blank cannot address anything."
+        }
+    ]
+}

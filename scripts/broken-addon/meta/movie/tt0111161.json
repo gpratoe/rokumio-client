@@ -1,0 +1,18 @@
+{
+    "meta": {
+        "id": "tt0111161",
+        "type": "movie",
+        "name": "Working Control (opens fine)",
+        "poster": "https://images.metahub.space/poster/medium/tt0111161/img",
+        "background": "https://images.metahub.space/background/medium/tt0111161/img",
+        "logo": "https://images.metahub.space/logo/medium/tt0111161/img",
+        "description": "The Shawshank Redemption — the fixture's one valid meta, so the surviving tile has a fully working Details screen.",
+        "releaseInfo": "1994",
+        "runtime": "142m",
+        "imdbRating": "9.3",
+        "genres": ["Drama"],
+        "director": ["Frank Darabont"],
+        "cast": ["Tim Robbins", "Morgan Freeman", "Bob Gunton"],
+        "released": "1994-09-23T05:00:00.000Z"
+    }
+}
