@@ -57,6 +57,9 @@ sub init()
     m.discoverMaxRetries = 3
     m.discoverRetryOffset = 0
     m.discoverPrefetchFocusRow = -1
+    m.discoverMetaTasks = []
+    m.discoverMetaKeys = {}
+    m.discoverMetaQueue = []
 end sub
 
 function OnEnter(params as object) as void
@@ -102,6 +105,7 @@ function OnExit() as void
     if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
     CancelLoad()
     CancelSources()
+    CancelDiscoverMetaPrefetch()
 end function
 
 function OnBackPressed() as boolean
@@ -592,6 +596,8 @@ end sub
 
 ' A fresh filter set: start back at page 0.
 sub ResetDiscover()
+    CancelDiscoverMetaPrefetch()
+    m.discoverPrefetchFocusRow = -1
     m.metas = []
     m.allLoaded = false
     m.loaded = false
@@ -714,8 +720,16 @@ sub UpdateFiltersHint()
     end if
 end sub
 
+function DiscoverFocusRowOrDefault() as integer
+    data = invalid
+    if m.grid <> invalid then data = m.grid.rowItemFocused
+    if data <> invalid and data.Count() >= 1 and data[0] <> invalid and data[0] >= 0 then return data[0]
+    return 0
+end function
+
 sub RefreshDiscoverHeroFromFocus()
-    data = m.grid.rowItemFocused
+    data = invalid
+    if m.grid <> invalid then data = m.grid.rowItemFocused
     if data <> invalid and data.Count() >= 2
         row = data[0]
         col = data[1]
@@ -743,26 +757,9 @@ sub UpdateDiscoverHero(position as object)
     end if
     RenderDiscoverHero(m.metas[flat])
 
-    ' High-priority, predictive hero art for focused and grid neighbors
-    ' (left/right in the same row, below in the same column). Posters are not
-    ' prefetched here: tiles load them on-demand and rely on cache/retries.
-    heroUrls = []
-    neighborIdxs = [flat]
-    if col > 0 then neighborIdxs.Push(flat - 1)
-    if col < m.chunk - 1 and (flat + 1) < m.metas.Count() then neighborIdxs.Push(flat + 1)
-    below = flat + m.chunk
-    if below < m.metas.Count() then neighborIdxs.Push(below)
-    for each idx in neighborIdxs
-        if idx < 0 or idx >= m.metas.Count() then continue for
-        m2 = m.metas[idx]
-        if m2 = invalid then continue for
-        if m2.background <> invalid and m2.background <> "" then heroUrls.Push(StringOf(m2.background))
-        if m2.logo <> invalid and m2.logo <> "" then heroUrls.Push(StringOf(m2.logo))
-    end for
-    if heroUrls.Count() > 0 then ImageCachePrefetch(heroUrls, true)
-
-    ' Keep a 2-row lookahead of hero art as focus moves vertically: on row
-    ' change prefetch the next row beyond the current buffer.
+    ' Keep a 2-row lookahead of hero art as focus moves vertically (row
+    ' prefetch covers the window; redundant per-focus neighbor URL prefetch
+    ' removed in favor of row-level prefetch + meta enrichment).
     PrefetchDiscoverRowsAhead(row)
 end sub
 
@@ -787,17 +784,245 @@ sub PrefetchDiscoverHeroRows(startRow as integer, rowCount as integer)
             if meta.logo <> invalid and meta.logo <> "" then urls.Push(StringOf(meta.logo))
         end for
     end for
-    if urls.Count() > 0 then ImageCachePrefetch(urls, true)
+    if urls.Count() > 0
+        ' Skip URLs already in cache index to reduce redundant high-pri requests.
+        needed = []
+        cached = invalid
+        if m.global <> invalid and m.global.imageCacheTask <> invalid
+            cached = m.global.imageCacheTask.cached
+        end if
+        for each u in urls
+            req = ImageCacheRequestUrl(u)
+            if req = "" then continue for
+            if cached <> invalid and cached.DoesExist(req) then continue for
+            needed.Push(u)
+        end for
+        if needed.Count() > 0 then ImageCachePrefetch(needed, true)
+    end if
+    QueueDiscoverMetaPrefetchForRows(startRow, rowCount)
+end sub
+
+sub QueueDiscoverMetaPrefetchForRows(startRow as integer, rowCount as integer)
+    ' Windowed enrichment for slim catalog items: fetch per-title meta (same
+    ' add-on) for items in the prefetched rows so hero background/logo URLs can
+    ' be discovered and byte-prefetched. Queue is prioritized by proximity to the
+    ' current window (focused row first) so relevant hero art is fetched promptly.
+    if m.metas = invalid or m.metas.Count() = 0 then return
+    if m.chunk = invalid or m.chunk <= 0 then return
+    if m.selectedCatalog = invalid then return
+    if m.stores = invalid or m.stores.episodes = invalid then return
+
+    ' Rebuild pending queue for this window so focus/lookahead changes don't
+    ' leave relevant rows stuck behind stale work. In-flight tasks keep running;
+    ' pending candidates are reprioritized/recreated for the current window.
+    if m.discoverMetaQueue <> invalid
+        for each q in m.discoverMetaQueue
+            if q <> invalid and q.key <> invalid and m.discoverMetaKeys <> invalid
+                m.discoverMetaKeys.Delete(q.key)
+            end if
+        end for
+    end if
+    m.discoverMetaQueue = []
+
+    anchorIdx = startRow * m.chunk
+    if anchorIdx < 0 then anchorIdx = 0
+
+    lastRow = startRow + rowCount - 1
+    for r = startRow to lastRow
+        if r < 0 then continue for
+        base = r * m.chunk
+        if base >= m.metas.Count() then exit for
+        maxCol = m.chunk - 1
+        last = base + maxCol
+        if last >= m.metas.Count() then last = m.metas.Count() - 1
+        for i = base to last
+            meta = m.metas[i]
+            if meta = invalid then continue for
+            metaId = StringOf(meta.id)
+            metaType = StringOf(meta.type)
+            if metaType = "" and m.selectedCatalog <> invalid then metaType = StringOf(m.selectedCatalog.rawType)
+            if metaId = "" or metaType = "" then continue for
+            key = metaType + "|" + metaId
+
+            ' If full meta already cached centrally, apply it and prefetch hero art.
+            cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", metaType, metaId)
+            if cachedFull <> invalid
+                full = m.stores.episodes.callFunc("EpisodesMergeMeta", meta, cachedFull)
+                display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+                if display <> invalid
+                    m.metas[i] = display
+                    PrefetchDiscoverMetaHeroArt(display)
+                end if
+                continue for
+            end if
+
+            if m.discoverMetaKeys <> invalid and m.discoverMetaKeys.DoesExist(key) then continue for
+            if not DiscoverMetaNeedsEnrichment(meta) then continue for
+            m.discoverMetaQueue.Push({ idx: i, key: key, metaType: metaType, metaId: metaId, prio: Abs(i - anchorIdx) })
+            m.discoverMetaKeys[key] = true
+        end for
+    end for
+
+    if m.discoverMetaQueue <> invalid and m.discoverMetaQueue.Count() > 1
+        m.discoverMetaQueue.SortBy("prio", "r")
+    end if
+    DrainDiscoverMetaPrefetchQueue()
+end sub
+
+function DiscoverMetaNeedsEnrichment(meta as object) as boolean
+    if meta = invalid then return false
+    if m.stores <> invalid and m.stores.episodes <> invalid
+        if m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta) then return true
+    end if
+    if StringOf(meta.background).Trim() = "" then return true
+    if StringOf(meta.logo).Trim() = "" then return true
+    if StringOf(meta.description).Trim() = "" then return true
+    return false
+end function
+
+sub PrefetchDiscoverMetaHeroArt(meta as object)
+    if meta = invalid then return
+    urls = []
+    if meta.background <> invalid and meta.background <> "" then urls.Push(StringOf(meta.background))
+    if meta.logo <> invalid and meta.logo <> "" then urls.Push(StringOf(meta.logo))
+    if urls.Count() = 0 then return
+
+    ' Only request hero background/logo not already in the byte-cache index.
+    ' The image-cache task dedupes queued/in-flight/failed URLs; avoid a sticky
+    ' per-URL suppression here so enrichment can (re)request when needed.
+    needed = []
+    cached = invalid
+    if m.global <> invalid and m.global.imageCacheTask <> invalid
+        cached = m.global.imageCacheTask.cached
+    end if
+    for each u in urls
+        req = ImageCacheRequestUrl(u)
+        if req = "" then continue for
+        if cached <> invalid and cached.DoesExist(req) then continue for
+        needed.Push(u)
+    end for
+    if needed.Count() > 0 then ImageCachePrefetch(needed, true)
+end sub
+
+sub DrainDiscoverMetaPrefetchQueue()
+    if m.discoverMetaQueue = invalid then m.discoverMetaQueue = []
+    if m.discoverMetaTasks = invalid then m.discoverMetaTasks = []
+    if m.selectedCatalog = invalid then return
+    address = StringOf(m.selectedCatalog.address)
+    if address = "" then return
+    while m.discoverMetaTasks.Count() < 2 and m.discoverMetaQueue.Count() > 0
+        candidate = m.discoverMetaQueue.Shift()
+        if candidate = invalid then continue while
+        ' Skip if no longer valid
+        if candidate.idx = invalid or candidate.idx < 0 or candidate.idx >= m.metas.Count()
+            if m.discoverMetaKeys <> invalid then m.discoverMetaKeys.Delete(candidate.key)
+            continue while
+        end if
+        current = m.metas[candidate.idx]
+        if current = invalid or StringOf(current.id) <> candidate.metaId
+            if m.discoverMetaKeys <> invalid then m.discoverMetaKeys.Delete(candidate.key)
+            continue while
+        end if
+        task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onDiscoverMetaLoaded", {
+            addonAddress: address
+            metaType: candidate.metaType
+            metaId: candidate.metaId
+        }, "discoverMeta")
+        if task = invalid
+            if m.discoverMetaKeys <> invalid then m.discoverMetaKeys.Delete(candidate.key)
+            continue while
+        end if
+        m.discoverMetaTasks.Push({ task: task, key: candidate.key, idx: candidate.idx })
+        print "[discover] meta enrich fetch " + candidate.metaType + "/" + candidate.metaId
+    end while
+end sub
+
+sub onDiscoverMetaLoaded(event as object)
+    if event = invalid then return
+    task = event.getRoSGNode()
+    if task = invalid then return
+
+    completed = invalid
+    remaining = []
+    for each entry in m.discoverMetaTasks
+        isMatch = false
+        if completed = invalid and entry <> invalid and entry.task <> invalid
+            isMatch = entry.task.isSameNode(task)
+        end if
+        if isMatch
+            completed = entry
+        else
+            if entry <> invalid then remaining.Push(entry)
+        end if
+    end for
+    m.discoverMetaTasks = remaining
+    if completed = invalid then return
+    if m.discoverMetaKeys <> invalid then m.discoverMetaKeys.Delete(completed.key)
+
+    result = task.result
+    AsyncTask_Reap(task, m.top, false)
+
+    if result <> invalid and result.ok = true and result.meta <> invalid and m.stores <> invalid and m.stores.episodes <> invalid
+        baseMeta = invalid
+        if completed.idx <> invalid and completed.idx >= 0 and completed.idx < m.metas.Count()
+            current = m.metas[completed.idx]
+            if current <> invalid and StringOf(current.id) = StringOf(result.meta.id)
+                baseMeta = current
+            end if
+        end if
+        if baseMeta = invalid then baseMeta = { id: result.meta.id, type: result.meta.type }
+        full = m.stores.episodes.callFunc("EpisodesMergeMeta", baseMeta, result.meta)
+        m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
+        display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+        hasHero = false
+        if display <> invalid
+            if StringOf(display.background).Trim() <> "" or StringOf(display.logo).Trim() <> "" then hasHero = true
+        end if
+        if display <> invalid and completed.idx <> invalid and completed.idx >= 0 and completed.idx < m.metas.Count()
+            current = m.metas[completed.idx]
+            if current <> invalid and StringOf(current.id) = StringOf(display.id)
+                m.metas[completed.idx] = display
+                PrefetchDiscoverMetaHeroArt(display)
+                ' If this is the focused hero item, re-render so newly enriched
+                ' background/logo can be displayed immediately.
+                focus = m.grid.rowItemFocused
+                if focus <> invalid and focus.Count() >= 2 and m.chunk <> invalid and m.chunk > 0
+                    focusFlat = focus[0] * m.chunk + focus[1]
+                    if focusFlat = completed.idx then RenderDiscoverHero(display)
+                end if
+            end if
+        end if
+        artInfo = "no-hero"
+        if hasHero then artInfo = "has-hero"
+        print "[discover] meta enrich ok " + StringOf(completed.key) + " " + artInfo
+    else
+        err = ""
+        if result <> invalid and result.error <> invalid then err = " " + StringOf(result.error)
+        print "[discover] meta enrich failed " + StringOf(completed.key) + err
+    end if
+
+    DrainDiscoverMetaPrefetchQueue()
+end sub
+
+sub CancelDiscoverMetaPrefetch()
+    if m.discoverMetaTasks <> invalid
+        for each entry in m.discoverMetaTasks
+            if entry <> invalid and entry.task <> invalid then AsyncTask_Reap(entry.task, m.top, true)
+        end for
+    end if
+    m.discoverMetaTasks = []
+    m.discoverMetaKeys = {}
+    m.discoverMetaQueue = []
 end sub
 
 ' Maintain a sliding lookahead of 2 rows ahead of the focused row.
 sub PrefetchDiscoverRowsAhead(focusedRow as integer)
     if focusedRow = invalid then focusedRow = 0
-    if m.discoverPrefetchFocusRow <> focusedRow
-        m.discoverPrefetchFocusRow = focusedRow
-        ' On row change, extend the buffer by fetching one more row ahead.
-        PrefetchDiscoverHeroRows(focusedRow + 2, 1)
-    end if
+    if m.discoverPrefetchFocusRow = focusedRow then return
+    m.discoverPrefetchFocusRow = focusedRow
+    ' Prefetch/reprioritize the full hero window (focused row + next 2) so
+    ' enrichment and bg/logo byte-prefetch stay aligned with current focus.
+    PrefetchDiscoverHeroRows(focusedRow, 3)
 end sub
 
 ' Seed hero-art prefetch for the visible/focused row and the next 2 rows.
@@ -888,8 +1113,9 @@ sub onDiscoverLoaded()
         m.grid.jumpToRowItem = [0, 0]
         m.status.text = ""
         RefreshDiscoverHeroFromFocus()
-        ' Always prefetch hero art for the first row (and next 2) on catalog load.
-        PrefetchDiscoverInitialHeroRows(0)
+        ' Prefetch hero background/logo (and enrich slim metas) for the focused
+        ' row + next 2. When chips hold focus on entry, seed from row 0.
+        PrefetchDiscoverInitialHeroRows(DiscoverFocusRowOrDefault())
         LandingChipsFocus()
     else
         m.discoverRetryCount = 0
@@ -995,8 +1221,7 @@ sub UpdateGrid(rowToShow = invalid as dynamic)
     if rowToShow <> invalid and m.grid.numRows > 0
         m.grid.jumpToRowItem = rowToShow
     end if
-    ' Low-priority: warm some posters opportunistically.
-    ImageCachePrefetchMetas(m.metas, 12, false, false)
+
 end sub
 
 sub CancelLoad()
@@ -1106,6 +1331,13 @@ function onKeyEvent(key as string, press as boolean) as boolean
     else if key = "down" and m.filterBar.callFunc("FocusIsOnChips")
         m.filterBar.callFunc("BlurChips")
         m.grid.SetFocus(true)
+        ' Seed hero/logo prefetch+enrichment around the row that becomes focused.
+        if m.metas <> invalid and m.metas.Count() > 0
+            focusRow = DiscoverFocusRowOrDefault()
+            m.discoverPrefetchFocusRow = -1
+            PrefetchDiscoverRowsAhead(focusRow)
+            RefreshDiscoverHeroFromFocus()
+        end if
         UpdateFiltersHint()
         return true
     else if key = "up" and m.grid.HasFocus()

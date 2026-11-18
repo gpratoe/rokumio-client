@@ -45,7 +45,14 @@ sub ImageCacheTaskOnEnqueue(state as object, urls as dynamic, highPriority = fal
             state.entries[requestUrl].tick = state.tick
             continue for
         end if
-        if state.failed.DoesExist(requestUrl) then continue for
+        if state.failed.DoesExist(requestUrl)
+            ' Allow high-priority hero/logo requests to retry transient failures.
+            if highPriority
+                state.failed.Delete(requestUrl)
+            else
+                continue for
+            end if
+        end if
         if state.queued.DoesExist(requestUrl) then continue for
         if state.inflight.DoesExist(requestUrl) then continue for
         state.queued[requestUrl] = true
@@ -72,19 +79,18 @@ sub ImageCacheTaskOnEnqueue(state as object, urls as dynamic, highPriority = fal
 end sub
 
 sub ImageCacheTaskDrain(state as object, stopNode as object)
-    drained = 0
-    while drained < 4 and (state.queueHi.Count() > 0 or state.queue.Count() > 0)
-        if stopNode <> invalid and stopNode.stop = true then return
-        requestUrl = invalid
-        if state.queueHi.Count() > 0
-            requestUrl = state.queueHi.Shift()
-        else
-            requestUrl = state.queue.Shift()
-        end if
-        if requestUrl <> invalid then state.queued.Delete(requestUrl)
-        ImageCacheTaskFetchOne(state, requestUrl)
-        drained = drained + 1
-    end while
+    ' Fetch at most one item per call so the task loop can ingest new enqueue
+    ' batches between downloads (each download may block for several seconds).
+    if state.queueHi.Count() = 0 and state.queue.Count() = 0 then return
+    if stopNode <> invalid and stopNode.stop = true then return
+    requestUrl = invalid
+    if state.queueHi.Count() > 0
+        requestUrl = state.queueHi.Shift()
+    else
+        requestUrl = state.queue.Shift()
+    end if
+    if requestUrl <> invalid then state.queued.Delete(requestUrl)
+    ImageCacheTaskFetchOne(state, requestUrl)
 end sub
 
 sub ImageCacheTaskFetchOne(state as object, requestUrl as dynamic)

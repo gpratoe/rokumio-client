@@ -140,10 +140,34 @@ sub ImageCachePrefetch(urls as dynamic, highPriority = false as boolean)
     label = "low"
     if highPriority then label = "high"
     print "[imgcache] prefetch requested " + list.Count().ToStr() + " (" + label + ")"
+
+    ' Append to pending batches instead of replacing so rapid producers (e.g.
+    ' per-item enrichment completions) don't overwrite each other before the
+    ' task ingests them. The task consumes and clears these fields.
     if highPriority
-        task.enqueueHi = list
+        pending = task.enqueueHi
+        merged = []
+        if pending <> invalid and type(pending) = "roArray"
+            for each x in pending
+                merged.Push(x)
+            end for
+        end if
+        for each x in list
+            merged.Push(x)
+        end for
+        task.enqueueHi = merged
     else
-        task.enqueue = list
+        pending = task.enqueue
+        merged = []
+        if pending <> invalid and type(pending) = "roArray"
+            for each x in pending
+                merged.Push(x)
+            end for
+        end if
+        for each x in list
+            merged.Push(x)
+        end for
+        task.enqueue = merged
     end if
 end sub
 

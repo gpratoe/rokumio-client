@@ -14,6 +14,22 @@ sub init()
     ImageCacheTaskInit(m)
 end sub
 
+sub ImageCacheConsumePendingEnqueues()
+    ' Consume accumulated pending batches. Producers append to these fields;
+    ' take-and-clear here so bursts (e.g. per-item enrichment completions) are
+    ' not lost while downloads are in progress.
+    hi = m.top.enqueueHi
+    if hi <> invalid and type(hi) = "roArray" and hi.Count() > 0
+        m.top.enqueueHi = []
+        ImageCacheTaskOnEnqueue(m, hi, true)
+    end if
+    lo = m.top.enqueue
+    if lo <> invalid and type(lo) = "roArray" and lo.Count() > 0
+        m.top.enqueue = []
+        ImageCacheTaskOnEnqueue(m, lo, false)
+    end if
+end sub
+
 sub RunCache()
     ImageCacheEnsureDir()
     while true
@@ -23,12 +39,10 @@ sub RunCache()
             field = msg.GetField()
             if field = "stop"
                 if m.top.stop = true then exit while
-            else if field = "enqueue"
-                ImageCacheTaskOnEnqueue(m, m.top.enqueue, false)
-            else if field = "enqueueHi"
-                ImageCacheTaskOnEnqueue(m, m.top.enqueueHi, true)
             end if
         end if
+        ' Always ingest pending batches (event-driven and/or accumulated).
+        ImageCacheConsumePendingEnqueues()
         ImageCacheTaskDrain(m, m.top)
         if m.top.stop = true then exit while
     end while
