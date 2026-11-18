@@ -56,6 +56,7 @@ sub init()
     m.discoverRetryCount = 0
     m.discoverMaxRetries = 3
     m.discoverRetryOffset = 0
+    m.discoverPrefetchFocusRow = -1
 end sub
 
 function OnEnter(params as object) as void
@@ -759,6 +760,50 @@ sub UpdateDiscoverHero(position as object)
         if m2.logo <> invalid and m2.logo <> "" then heroUrls.Push(StringOf(m2.logo))
     end for
     if heroUrls.Count() > 0 then ImageCachePrefetch(heroUrls, true)
+
+    ' Keep a 2-row lookahead of hero art as focus moves vertically: on row
+    ' change prefetch the next row beyond the current buffer.
+    PrefetchDiscoverRowsAhead(row)
+end sub
+
+' Prefetch background/logo for all metas in [startRow, startRow + rowCount).
+' Posters are intentionally excluded (tiles load them on-demand).
+sub PrefetchDiscoverHeroRows(startRow as integer, rowCount as integer)
+    if m.metas = invalid or m.metas.Count() = 0 then return
+    if m.chunk = invalid or m.chunk <= 0 then return
+    urls = []
+    lastRow = startRow + rowCount - 1
+    for r = startRow to lastRow
+        if r < 0 then continue for
+        base = r * m.chunk
+        if base >= m.metas.Count() then exit for
+        maxCol = m.chunk - 1
+        last = base + maxCol
+        if last >= m.metas.Count() then last = m.metas.Count() - 1
+        for i = base to last
+            meta = m.metas[i]
+            if meta = invalid then continue for
+            if meta.background <> invalid and meta.background <> "" then urls.Push(StringOf(meta.background))
+            if meta.logo <> invalid and meta.logo <> "" then urls.Push(StringOf(meta.logo))
+        end for
+    end for
+    if urls.Count() > 0 then ImageCachePrefetch(urls, true)
+end sub
+
+' Maintain a sliding lookahead of 2 rows ahead of the focused row.
+sub PrefetchDiscoverRowsAhead(focusedRow as integer)
+    if focusedRow = invalid then focusedRow = 0
+    if m.discoverPrefetchFocusRow <> focusedRow
+        m.discoverPrefetchFocusRow = focusedRow
+        ' On row change, extend the buffer by fetching one more row ahead.
+        PrefetchDiscoverHeroRows(focusedRow + 2, 1)
+    end if
+end sub
+
+' Seed hero-art prefetch for the visible/focused row and the next 2 rows.
+sub PrefetchDiscoverInitialHeroRows(focusedRow = 0 as integer)
+    m.discoverPrefetchFocusRow = focusedRow
+    PrefetchDiscoverHeroRows(focusedRow, 3)
 end sub
 
 sub ClearDiscoverHero()
@@ -843,6 +888,8 @@ sub onDiscoverLoaded()
         m.grid.jumpToRowItem = [0, 0]
         m.status.text = ""
         RefreshDiscoverHeroFromFocus()
+        ' Always prefetch hero art for the first row (and next 2) on catalog load.
+        PrefetchDiscoverInitialHeroRows(0)
         LandingChipsFocus()
     else
         m.discoverRetryCount = 0
@@ -871,6 +918,11 @@ sub onDiscoverLoaded()
             m.allLoaded = not result.hasMore
             UpdateGrid(AppendRestorePosition())
             RefreshDiscoverHeroFromFocus()
+            ' Keep lookahead warm around the restored focus after more rows land.
+            restore = m.grid.rowItemFocused
+            focusRow = 0
+            if restore <> invalid and restore.Count() >= 1 then focusRow = restore[0]
+            PrefetchDiscoverInitialHeroRows(focusRow)
         end if
     end if
 end sub
