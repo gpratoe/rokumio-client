@@ -109,7 +109,8 @@
             "serverAddressHelp": "e.g. http://192.168.1.5:4141 - leave empty and OK to clear",
             "statusInvalidAddress": "Invalid address.",
             "statusServerCleared": "Server address cleared.",
-            "statusServerUpdated": "Server address updated."
+            "statusServerUpdated": "Server address updated.",
+            "saveFailed": "Could not save settings on this device. Changes may be lost after restart."
         },
         "main": {
             "logOutTitle": "Log out?",
@@ -131,6 +132,9 @@
             "importServerLinkedNotSaved": "Server linked, but the address could not be saved.",
             "importInvalidAddress": "Invalid server address was ignored.",
             "importNoChanges": "No changes requested.",
+            "saveFailed": "Could not save data on this device. Changes may be lost after restart.",
+            "saveFailedSerialize": "Could not save session data on this device. Changes may be lost after restart. [AUTH-SAVE-SERIALIZE]",
+            "saveFailedWrite": "Could not save session data on this device. Changes may be lost after restart. [AUTH-SAVE-WRITE]",
             "exitTitle": "Exit Rokumio?",
             "exitMessage": "Are you sure you want to exit? Your Continue Watching progress is saved.",
             "exitCancel": "Cancel",
@@ -456,7 +460,8 @@
             "serverAddressHelp": "p. ej. http://192.168.1.5:4141 - déjalo vacío y pulsa OK para borrar",
             "statusInvalidAddress": "Dirección no válida.",
             "statusServerCleared": "Dirección del servidor borrada.",
-            "statusServerUpdated": "Dirección del servidor actualizada."
+            "statusServerUpdated": "Dirección del servidor actualizada.",
+            "saveFailed": "No se pudo guardar la configuración en este dispositivo. Los cambios pueden perderse al reiniciar."
         },
         "main": {
             "logOutTitle": "¿Cerrar sesión?",
@@ -478,6 +483,9 @@
             "importServerLinkedNotSaved": "Servidor enlazado, pero la dirección no se pudo guardar.",
             "importInvalidAddress": "Se ignoró una dirección de servidor no válida.",
             "importNoChanges": "No se pidió ningún cambio.",
+            "saveFailed": "No se pudieron guardar los datos en este dispositivo. Los cambios pueden perderse al reiniciar.",
+            "saveFailedSerialize": "No se pudieron guardar los datos de sesión en este dispositivo. Los cambios pueden perderse al reiniciar. [AUTH-SAVE-SERIALIZE]",
+            "saveFailedWrite": "No se pudieron guardar los datos de sesión en este dispositivo. Los cambios pueden perderse al reiniciar. [AUTH-SAVE-WRITE]",
             "exitTitle": "¿Salir de Rokumio?",
             "exitMessage": "¿Seguro que quieres salir? Tu progreso está guardado.",
             "exitCancel": "Cancelar",

@@ -1129,7 +1129,7 @@ sub ReportSaveFault()
     if m.stores = invalid then return
     failed = m.stores.settings.callFunc("SettingsSaveFailed")
     scene = m.top.getScene()
-    if scene <> invalid and failed then scene.callFunc("Notify", "settings could not be saved", "error")
+    if scene <> invalid and failed then scene.callFunc("Notify", Lang("settings", "saveFailed"), "error")
 end sub
 
 ' Repaint the whole screen in the language the store holds.

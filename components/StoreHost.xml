@@ -32,6 +32,8 @@
         <function name="AuthLoginGuest" />
         <function name="AuthLoginStremio" />
         <function name="AuthLogout" />
+        <function name="AuthSaveFailed" />
+        <function name="AuthSaveFailureReason" />
         <function name="EpisodesEpisodesForSeason" />
         <function name="EpisodesSeriesData" />
         <function name="EpisodesMergeMeta" />

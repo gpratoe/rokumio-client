@@ -482,11 +482,28 @@ sub ReconcileSession()
 end sub
 
 ' The AuthScreen published its first-run choice.
+sub NotifyAuthSaveFailure()
+    RefreshSceneTexts()
+    reason = ""
+    if m.storeHost <> invalid then reason = m.storeHost.callFunc("AuthSaveFailureReason")
+    if reason = "serialize"
+        Notify(Lang("main", "saveFailedSerialize"), "error")
+    else if reason = "write"
+        Notify(Lang("main", "saveFailedWrite"), "error")
+    else
+        Notify(Lang("main", "saveFailed"), "error")
+    end if
+end sub
+
 sub onAuthAction()
     request = m.authScreen.pushRequest
     if request = invalid then return
     if request.action = "continueGuest"
-        if m.storeHost <> invalid then m.storeHost.callFunc("AuthLoginGuest")
+        loginResult = invalid
+        if m.storeHost <> invalid then loginResult = m.storeHost.callFunc("AuthLoginGuest")
+        if loginResult <> invalid and loginResult.saved = false
+            NotifyAuthSaveFailure()
+        end if
         ReconcileSession()
         if m.stack.top() <> invalid and m.stack.top().id = "authScreen"
             m.stack.pop()
@@ -538,7 +555,11 @@ sub onLinkCodeAction()
         return
     end if
     if request.action = "completeLogin"
-        if m.storeHost <> invalid then m.storeHost.callFunc("AuthLoginStremio", request.authKey, request.user)
+        loginResult = invalid
+        if m.storeHost <> invalid then loginResult = m.storeHost.callFunc("AuthLoginStremio", request.authKey, request.user)
+        if loginResult <> invalid and loginResult.saved = false
+            NotifyAuthSaveFailure()
+        end if
         ReconcileSession()
         m.revokedSessionHandled = false
         StartAddonSync()
@@ -654,7 +675,11 @@ end sub
 ' bounce; the manual logout additionally flushes the authKey at the API first
 ' (see DoLogout).
 sub ResetToAuthGate()
-    if m.storeHost <> invalid then m.storeHost.callFunc("AuthLogout")
+    logoutSaved = true
+    if m.storeHost <> invalid then logoutSaved = m.storeHost.callFunc("AuthLogout")
+    if not logoutSaved
+        NotifyAuthSaveFailure()
+    end if
     ReconcileSession()
 
     ' Pop all the way down to Home — every screen gets its normal OnExit/BlurFocus

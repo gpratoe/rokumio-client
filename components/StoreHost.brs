@@ -209,8 +209,18 @@ function AuthLoginStremio(authKey as string, user as dynamic) as object
 end function
 
 ' auth.Logout
-function AuthLogout() as void
-    m.stores.auth.Logout()
+function AuthLogout() as boolean
+    return m.stores.auth.Logout()
+end function
+
+' auth.SaveFailed
+function AuthSaveFailed() as boolean
+    return m.stores.auth.SaveFailed()
+end function
+
+' auth.SaveFailureReason
+function AuthSaveFailureReason() as string
+    return m.stores.auth.SaveFailureReason()
 end function
 
 ' episodes.EpisodesForSeason
