@@ -256,6 +256,11 @@ sub ApplyCatalogRow(row as object)
             RefreshHomeHeroFromFocus()
         end if
     end if
+    ' If streamed row lands inside the current committed prefetch window, refresh
+    ' execution so newly available hero art/enrichment can be prefetched.
+    if m.homeCommittedRails <> invalid and HomeRailInList(m.homeCommittedRails, slot)
+        HomeRefreshCommittedPrefetchWindow()
+    end if
 end sub
 
 ' Rewrite row titles so duplicated catalog names carry their type suffix; only
@@ -805,7 +810,7 @@ end sub
 ' Vertical: initial [0,1,2]; sequential forward keeps 2 ahead in vDir; discontinuous => ±1.
 ' Horizontal: initial forward buffer around first item; sequential forward preserves/extends
 ' hExtent buffer in hDir; discontinuous => ±1 local around focus plus forward buffer in hDir.
-sub HomeCommitPrefetchWindow(rowIndex as integer, itemIndex as integer)
+sub HomeCommitPrefetchWindow(rowIndex as integer, itemIndex as integer, forceExecute = false as boolean)
     if m.gridRows = invalid or m.gridRows.Count() = 0 then return
     rowIndex = HomeClampRail(rowIndex)
     itemIndex = HomeClampCol(itemIndex, rowIndex)
@@ -946,7 +951,7 @@ sub HomeCommitPrefetchWindow(rowIndex as integer, itemIndex as integer)
     if cols = invalid or cols.Count() = 0 then cols = HomeForwardCols(itemIndex, targetHDir, targetHExtent)
 
     ' No-op if committed window unchanged.
-    if prevFocusR >= 0 and prevFocusC >= 0 and (prevVMode <> "" or prevHMode <> "")
+    if (not forceExecute) and prevFocusR >= 0 and prevFocusC >= 0 and (prevVMode <> "" or prevHMode <> "")
         if rowIndex = prevFocusR and itemIndex = prevFocusC and targetVMode = prevVMode and targetHMode = prevHMode and targetVDir = prevVDir and targetHDir = prevHDir and targetHExtent = prevHExtent and HomeListsEqual(rails, prevRails) and HomeListsEqual(cols, prevCols)
             return
         end if
@@ -975,6 +980,17 @@ sub HomeCommitPrefetchWindow(rowIndex as integer, itemIndex as integer)
     m.homeCommittedCols = cols
 
     HomePrefetchHeroWindowByTarget(rails, cols, rowIndex, itemIndex)
+end sub
+
+sub HomeRefreshCommittedPrefetchWindow()
+    if m.homeCommittedFocusRow = invalid or m.homeCommittedFocusRow < 0 then return
+    if m.homeCommittedFocusCol = invalid or m.homeCommittedFocusCol < 0 then return
+    rails = m.homeCommittedRails
+    cols = m.homeCommittedCols
+    if rails = invalid or cols = invalid then return
+    ' Re-execute prefetch/enrichment for current committed window (e.g. when rows
+    ' or items become available inside it during streaming loads).
+    HomePrefetchHeroWindowByTarget(rails, cols, m.homeCommittedFocusRow, m.homeCommittedFocusCol)
 end sub
 
 
