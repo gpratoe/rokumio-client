@@ -57,6 +57,7 @@ sub init()
     m.discoverMaxRetries = 3
     m.discoverRetryOffset = 0
     m.discoverPrefetchFocusRow = -1
+    m.discoverPrefetchDir = 1
     m.discoverMetaTasks = []
     m.discoverMetaKeys = {}
     m.discoverMetaQueue = []
@@ -598,6 +599,7 @@ end sub
 sub ResetDiscover()
     CancelDiscoverMetaPrefetch()
     m.discoverPrefetchFocusRow = -1
+    m.discoverPrefetchDir = 1
     m.metas = []
     m.allLoaded = false
     m.loaded = false
@@ -757,23 +759,22 @@ sub UpdateDiscoverHero(position as object)
     end if
     RenderDiscoverHero(m.metas[flat])
 
-    ' Keep a 2-row lookahead of hero art as focus moves vertically (row
-    ' prefetch covers the window; redundant per-focus neighbor URL prefetch
-    ' removed in favor of row-level prefetch + meta enrichment).
+    ' Directional hero-art window (current row + 2 rows ahead in vertical
+    ' movement direction) with slim-meta enrichment for hero bg/logo.
     PrefetchDiscoverRowsAhead(row)
 end sub
 
-' Prefetch background/logo for all metas in [startRow, startRow + rowCount).
-' Posters are intentionally excluded (tiles load them on-demand).
-sub PrefetchDiscoverHeroRows(startRow as integer, rowCount as integer)
+' Prefetch hero background/logo for all metas in the given row indices.
+' Posters are intentionally excluded (Roku handles poster caching).
+sub PrefetchDiscoverHeroRows(rows as object, anchorRow = -1 as integer)
     if m.metas = invalid or m.metas.Count() = 0 then return
     if m.chunk = invalid or m.chunk <= 0 then return
+    if rows = invalid or rows.Count() = 0 then return
     urls = []
-    lastRow = startRow + rowCount - 1
-    for r = startRow to lastRow
-        if r < 0 then continue for
+    for each r in rows
+        if r = invalid or r < 0 then continue for
         base = r * m.chunk
-        if base >= m.metas.Count() then exit for
+        if base >= m.metas.Count() then continue for
         maxCol = m.chunk - 1
         last = base + maxCol
         if last >= m.metas.Count() then last = m.metas.Count() - 1
@@ -799,18 +800,19 @@ sub PrefetchDiscoverHeroRows(startRow as integer, rowCount as integer)
         end for
         if needed.Count() > 0 then ImageCachePrefetch(needed, true)
     end if
-    QueueDiscoverMetaPrefetchForRows(startRow, rowCount)
+    QueueDiscoverMetaPrefetchForRows(rows, anchorRow)
 end sub
 
-sub QueueDiscoverMetaPrefetchForRows(startRow as integer, rowCount as integer)
+sub QueueDiscoverMetaPrefetchForRows(rows as object, anchorRow = -1 as integer)
     ' Windowed enrichment for slim catalog items: fetch per-title meta (same
     ' add-on) for items in the prefetched rows so hero background/logo URLs can
     ' be discovered and byte-prefetched. Queue is prioritized by proximity to the
-    ' current window (focused row first) so relevant hero art is fetched promptly.
+    ' focused/anchor row so relevant hero art is fetched promptly.
     if m.metas = invalid or m.metas.Count() = 0 then return
     if m.chunk = invalid or m.chunk <= 0 then return
     if m.selectedCatalog = invalid then return
     if m.stores = invalid or m.stores.episodes = invalid then return
+    if rows = invalid or rows.Count() = 0 then return
 
     ' Rebuild pending queue for this window so focus/lookahead changes don't
     ' leave relevant rows stuck behind stale work. In-flight tasks keep running;
@@ -824,17 +826,18 @@ sub QueueDiscoverMetaPrefetchForRows(startRow as integer, rowCount as integer)
     end if
     m.discoverMetaQueue = []
 
-    anchorIdx = startRow * m.chunk
-    if anchorIdx < 0 then anchorIdx = 0
+    if anchorRow < 0 then anchorRow = rows[0]
+    anchorBase = anchorRow * m.chunk
+    if anchorBase < 0 then anchorBase = 0
 
-    lastRow = startRow + rowCount - 1
-    for r = startRow to lastRow
-        if r < 0 then continue for
+    for each r in rows
+        if r = invalid or r < 0 then continue for
         base = r * m.chunk
-        if base >= m.metas.Count() then exit for
+        if base >= m.metas.Count() then continue for
         maxCol = m.chunk - 1
         last = base + maxCol
         if last >= m.metas.Count() then last = m.metas.Count() - 1
+        rowDist = Abs(r - anchorRow)
         for i = base to last
             meta = m.metas[i]
             if meta = invalid then continue for
@@ -858,7 +861,9 @@ sub QueueDiscoverMetaPrefetchForRows(startRow as integer, rowCount as integer)
 
             if m.discoverMetaKeys <> invalid and m.discoverMetaKeys.DoesExist(key) then continue for
             if not DiscoverMetaNeedsEnrichment(meta) then continue for
-            m.discoverMetaQueue.Push({ idx: i, key: key, metaType: metaType, metaId: metaId, prio: Abs(i - anchorIdx) })
+            col = i - base
+            prio = rowDist * 100 + col
+            m.discoverMetaQueue.Push({ idx: i, key: key, metaType: metaType, metaId: metaId, prio: prio })
             m.discoverMetaKeys[key] = true
         end for
     end for
@@ -1015,20 +1020,55 @@ sub CancelDiscoverMetaPrefetch()
     m.discoverMetaQueue = []
 end sub
 
-' Maintain a sliding lookahead of 2 rows ahead of the focused row.
+function DiscoverPrefetchWindowRows(focusedRow as integer, dir as integer) as object
+    if dir = 0 then dir = 1
+    rows = []
+    total = 0
+    if m.chunk <> invalid and m.chunk > 0 and m.metas <> invalid
+        total = Int((m.metas.Count() + m.chunk - 1) / m.chunk)
+    end if
+    for offset = 0 to 2
+        rowIdx = focusedRow + (offset * dir)
+        if rowIdx < 0 then continue for
+        if total > 0 and rowIdx >= total then continue for
+        rows.Push(rowIdx)
+    end for
+    if rows.Count() = 0 then rows.Push(focusedRow)
+    return rows
+end function
+
+' Maintain a directional sliding window (focused row + 2 ahead in vertical
+' movement direction, default down) for hero bg/logo prefetch and slim-meta
+' enrichment.
 sub PrefetchDiscoverRowsAhead(focusedRow as integer)
     if focusedRow = invalid then focusedRow = 0
-    if m.discoverPrefetchFocusRow = focusedRow then return
+    prev = m.discoverPrefetchFocusRow
+    if prev = focusedRow then return
+    dir = m.discoverPrefetchDir
+    if dir = invalid or dir = 0 then dir = 1
+    if prev >= 0 and focusedRow <> prev
+        delta = focusedRow - prev
+        if delta > 0
+            dir = 1
+        else if delta < 0
+            dir = -1
+        end if
+    end if
+    m.discoverPrefetchDir = dir
     m.discoverPrefetchFocusRow = focusedRow
-    ' Prefetch/reprioritize the full hero window (focused row + next 2) so
-    ' enrichment and bg/logo byte-prefetch stay aligned with current focus.
-    PrefetchDiscoverHeroRows(focusedRow, 3)
+    rows = DiscoverPrefetchWindowRows(focusedRow, dir)
+    PrefetchDiscoverHeroRows(rows, focusedRow)
 end sub
 
-' Seed hero-art prefetch for the visible/focused row and the next 2 rows.
+' Seed hero-art prefetch window around the focused row (directional, default down).
 sub PrefetchDiscoverInitialHeroRows(focusedRow = 0 as integer)
+    if focusedRow = invalid then focusedRow = 0
+    dir = m.discoverPrefetchDir
+    if dir = invalid or dir = 0 then dir = 1
+    m.discoverPrefetchDir = dir
     m.discoverPrefetchFocusRow = focusedRow
-    PrefetchDiscoverHeroRows(focusedRow, 3)
+    rows = DiscoverPrefetchWindowRows(focusedRow, dir)
+    PrefetchDiscoverHeroRows(rows, focusedRow)
 end sub
 
 sub ClearDiscoverHero()

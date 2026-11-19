@@ -46,6 +46,13 @@ sub init()
     m.heroMetaTask = invalid
     m.heroMetaTaskKey = ""
     m.heroFocusKey = ""
+    m.homeVDir = 1
+    m.homeHDir = 1
+    m.homeHExtent = 6
+    m.homeLastFocusRow = -1
+    m.homeLastFocusCol = -1
+    m.heroRenderedKey = ""
+    m.heroRenderedSig = ""
     m.homeEmpty = m.top.FindNode("homeEmpty")
     m.heroBeforeBusy = ""
 
@@ -228,10 +235,16 @@ sub ApplyCatalogRow(row as object)
     UpdateHomeEmptyState()
     m.catalog.numRows = m.gridRows.Count()
     ApplyCatalogSizes()
-    ' Low-priority: warm a few row posters for Home revisits (opportunistic).
-    ImageCachePrefetchMetas(displayMetas, 8, false, false)
     ResyncRowLabels()
-    RefreshHomeHeroFromFocus()
+    ' Avoid reprocessing the same focused hero for every streamed row insert.
+    if m.heroRenderedKey = "" or m.heroRenderedKey = invalid
+        RefreshHomeHeroFromFocus()
+    else
+        data = m.catalog.rowItemFocused
+        if data = invalid or data.Count() < 2
+            RefreshHomeHeroFromFocus()
+        end if
+    end if
 end sub
 
 ' Rewrite row titles so duplicated catalog names carry their type suffix; only
@@ -315,7 +328,9 @@ sub UpdateHomeHero(position as dynamic)
         CancelHeroPrefetch()
         return
     end if
+
     key = HomeHeroMetaKey(meta)
+    sameFocus = (m.homeLastFocusRow = rowIndex and m.homeLastFocusCol = itemIndex and m.heroFocusKey = key)
     if key <> m.heroFocusKey
         CancelHeroMetaRequest()
         CancelHeroPrefetch()
@@ -332,46 +347,27 @@ sub UpdateHomeHero(position as dynamic)
         metas[itemIndex] = displayMeta
         UpdateHomeTileMeta(rowIndex, itemIndex, displayMeta)
     end if
-    RenderHomeHero(displayMeta)
+
+    sig = HomeHeroRenderSig(displayMeta)
+    if (not sameFocus) or m.heroRenderedKey <> key or m.heroRenderedSig <> sig
+        RenderHomeHero(displayMeta)
+        m.heroRenderedKey = key
+        m.heroRenderedSig = sig
+    end if
     meta = displayMeta
 
-    ' High-priority, predictive: prefetch hero assets (bg/logo/poster) for the
-    ' focused item and likely-next neighbors so hero transitions land on local art.
-    ' Use enriched/cached hero meta when available so neighbors whose full meta
-    ' is known contribute their background/logo too (slim catalog metas often lack them).
-    heroUrls = []
-    for offset = -1 to 2
-        idx = itemIndex + offset
-        if idx >= 0 and idx < metas.Count()
-            m2 = metas[idx]
-            if m2 <> invalid and (m2.seeMore = invalid or m2.seeMore <> true)
-                eff = m2
-                key2 = HomeHeroMetaKey(m2)
-                if key2 <> "" and m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(key2)
-                    eff = m.heroMetaCache[key2]
-                else if key2 <> "" and m.stores <> invalid and m.stores.episodes <> invalid
-                    cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", m2.type, m2.id)
-                    if cachedFull <> invalid
-                        full = m.stores.episodes.callFunc("EpisodesMergeMeta", m2, cachedFull)
-                        eff = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
-                    end if
-                end if
-                if eff.poster <> invalid and eff.poster <> "" then heroUrls.Push(StringOf(eff.poster))
-                if eff.background <> invalid and eff.background <> "" then heroUrls.Push(StringOf(eff.background))
-                if eff.logo <> invalid and eff.logo <> "" then heroUrls.Push(StringOf(eff.logo))
-            end if
-        end if
-    end for
-    if heroUrls.Count() > 0 then ImageCachePrefetch(heroUrls, true)
+    ' Directional hero bg/logo window: recompute only when focus position changed.
+    if not sameFocus
+        HomeUpdatePrefetchDirections(rowIndex, itemIndex)
+        HomePrefetchHeroWindow(rowIndex, itemIndex)
+    end if
 
     needsHeroMeta = false
     if m.stores <> invalid and m.gridRows[rowIndex].source = "library"
         needsHeroMeta = m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta)
         if StringOf(meta.background).Trim() = "" or StringOf(meta.description).Trim() = "" then needsHeroMeta = true
         if StringOf(meta.logo).Trim() = "" or Type(meta.genres) <> "roArray" then needsHeroMeta = true
-        ' A full meta cached centrally (e.g. fetched by Details/Episodes) can fill
-        ' the hero without another request, but we must not pull its episode list
-        ' into the grid row or the focus path.
+        ' A full meta cached centrally can fill the hero without another request.
         if needsHeroMeta and not m.heroMetaCache.DoesExist(key)
             cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", meta.type, meta.id)
             if cachedFull <> invalid
@@ -380,8 +376,13 @@ sub UpdateHomeHero(position as dynamic)
                 m.heroMetaCache[key] = display
                 metas[itemIndex] = display
                 UpdateHomeTileMeta(rowIndex, itemIndex, display)
-                RenderHomeHero(display)
                 meta = display
+                sig = HomeHeroRenderSig(meta)
+                if m.heroRenderedKey <> key or m.heroRenderedSig <> sig
+                    RenderHomeHero(meta)
+                    m.heroRenderedKey = key
+                    m.heroRenderedSig = sig
+                end if
                 needsHeroMeta = m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", meta)
                 if StringOf(meta.background).Trim() = "" or StringOf(meta.description).Trim() = "" then needsHeroMeta = true
                 if StringOf(meta.logo).Trim() = "" or Type(meta.genres) <> "roArray" then needsHeroMeta = true
@@ -404,6 +405,15 @@ end sub
 function HomeHeroMetaKey(meta as object) as string
     if meta = invalid then return ""
     return StringOf(meta.type) + "|" + StringOf(meta.id)
+end function
+
+function HomeHeroRenderSig(meta as object) as string
+    if meta = invalid then return ""
+    name = StringOf(meta.name)
+    if name.Trim() = "" then name = StringOf(meta.title)
+    desc = StringOf(meta.description)
+    if desc.Trim() = "" then desc = StringOf(meta.overview)
+    return name + "|" + StringOf(meta.background) + "|" + StringOf(meta.logo) + "|" + StringOf(meta.poster) + "|" + desc + "|" + StringOf(meta.imdbRating) + "|" + StringOf(meta.releaseInfo)
 end function
 
 sub RenderHomeHero(meta as object)
@@ -467,20 +477,24 @@ sub onHomeHeroMetaLoaded()
     m.stores.episodes.callFunc("EpisodesCacheFullMeta", full)
     display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.heroMetaCache[request.key] = display
-    ' Focused hero meta arrived — ensure its art is queued (predictive path may
-    ' have missed it when the meta was still slim).
-    ImageCachePrefetch([
-        StringOf(display.poster)
-        StringOf(display.background)
-        StringOf(display.logo)
-    ], true)
+    ' Focused hero meta arrived — ensure its hero art is queued (predictive path
+    ' may have missed it when the meta was still slim). No poster byte-caching.
+    urls = []
+    if display.background <> invalid and display.background <> "" then urls.Push(StringOf(display.background))
+    if display.logo <> invalid and display.logo <> "" then urls.Push(StringOf(display.logo))
+    if urls.Count() > 0 then ImageCachePrefetch(urls, true)
     if request.row < 0 or request.row >= m.gridRows.Count() then return
     row = m.gridRows[request.row]
     if request.item < 0 or request.item >= row.metas.Count() then return
     if HomeHeroMetaKey(row.metas[request.item]) <> request.key then return
     row.metas[request.item] = display
     UpdateHomeTileMeta(request.row, request.item, display)
-    RenderHomeHero(display)
+    sig = HomeHeroRenderSig(display)
+    if m.heroRenderedKey <> request.key or m.heroRenderedSig <> sig
+        RenderHomeHero(display)
+        m.heroRenderedKey = request.key
+        m.heroRenderedSig = sig
+    end if
 end sub
 
 sub CancelHeroMetaRequest()
@@ -505,6 +519,168 @@ sub CancelHeroPrefetch()
     m.heroPrefetchKeys = {}
 end sub
 
+sub HomeUpdatePrefetchDirections(rowIndex as integer, itemIndex as integer)
+    prevRow = m.homeLastFocusRow
+    prevCol = m.homeLastFocusCol
+    if prevRow = rowIndex and prevCol = itemIndex then return
+    vDir = m.homeVDir
+    hDir = m.homeHDir
+    hExtent = m.homeHExtent
+    if vDir = 0 then vDir = 1
+    if hDir = 0 then hDir = 1
+    if hExtent = invalid or hExtent < 6 then hExtent = 6
+
+    if prevRow >= 0 and rowIndex <> prevRow
+        if rowIndex > prevRow then vDir = 1 else vDir = -1
+    end if
+
+    if prevCol >= 0 and itemIndex <> prevCol
+        if itemIndex > prevCol
+            newHDir = 1
+        else
+            newHDir = -1
+        end if
+        if newHDir <> hDir
+            hDir = newHDir
+            hExtent = 6
+        else
+            movedForward = (hDir = 1 and itemIndex > prevCol) or (hDir = -1 and itemIndex < prevCol)
+            if movedForward
+                steps = Abs(itemIndex - prevCol)
+                hExtent = hExtent - steps
+                ' Keep >=2 items ahead of focus (extent >= 3 total). Extend by +4 when low.
+                if hExtent <= 3 then hExtent = hExtent + 4
+                if hExtent < 6 then hExtent = 6
+            else
+                ' Moving against current hDir without flipping (shouldn't happen often) - reset buffer.
+                hExtent = 6
+            end if
+        end if
+    else if prevRow >= 0 and rowIndex <> prevRow and (prevCol < 0 or itemIndex = prevCol)
+        ' Vertical move with same/unknown column: keep a reasonable buffer.
+        if hExtent < 6 then hExtent = 6
+    end if
+
+    m.homeVDir = vDir
+    m.homeHDir = hDir
+    m.homeHExtent = hExtent
+    m.homeLastFocusRow = rowIndex
+    m.homeLastFocusCol = itemIndex
+end sub
+
+function HomePrefetchItemRange(itemIndex as integer, count as integer, hDir as integer) as object
+    cols = []
+    for k = 0 to count - 1
+        cols.Push(itemIndex + (k * hDir))
+    end for
+    return cols
+end function
+
+sub HomePrefetchHeroWindow(rowIndex as integer, itemIndex as integer)
+    if m.gridRows = invalid or m.gridRows.Count() = 0 then return
+    vDir = m.homeVDir
+    hDir = m.homeHDir
+    hExtent = m.homeHExtent
+    if vDir = 0 then vDir = 1
+    if hDir = 0 then hDir = 1
+    if hExtent = invalid or hExtent < 6 then hExtent = 6
+
+    ' Vertical window: focused rail + 1 rail ahead (2 rails total).
+    railRows = [rowIndex, rowIndex + vDir]
+    ' Horizontal range per rail: focused column + ahead in hDir.
+    cols = HomePrefetchItemRange(itemIndex, hExtent, hDir)
+
+    urls = []
+    enrichCandidates = []
+    for each rr in railRows
+        if rr < 0 or rr >= m.gridRows.Count() then continue for
+        row = m.gridRows[rr]
+        metas = row.metas
+        if metas = invalid then continue for
+        for each col in cols
+            if col < 0 or col >= metas.Count() then continue for
+            meta = metas[col]
+            if meta = invalid or (meta.seeMore <> invalid and meta.seeMore = true) then continue for
+            key = HomeHeroMetaKey(meta)
+            eff = meta
+            if key <> "" and m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(key)
+                eff = m.heroMetaCache[key]
+            else if key <> "" and m.stores <> invalid and m.stores.episodes <> invalid
+                cachedFull = m.stores.episodes.callFunc("EpisodesFullMeta", meta.type, meta.id)
+                if cachedFull <> invalid
+                    if m.heroMetaCache = invalid then m.heroMetaCache = {}
+                    if not m.heroMetaCache.DoesExist(key)
+                        full = m.stores.episodes.callFunc("EpisodesMergeMeta", meta, cachedFull)
+                        display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
+                        m.heroMetaCache[key] = display
+                        metas[col] = display
+                        UpdateHomeTileMeta(rr, col, display)
+                        eff = display
+                    else
+                        eff = m.heroMetaCache[key]
+                    end if
+                end if
+            end if
+            if eff.background <> invalid and eff.background <> "" then urls.Push(StringOf(eff.background))
+            if eff.logo <> invalid and eff.logo <> "" then urls.Push(StringOf(eff.logo))
+
+            ' Collect enrichment candidates for items in window lacking hero art.
+            if key <> "" and not (m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(key))
+                needs = false
+                if StringOf(eff.background).Trim() = "" then needs = true
+                if StringOf(eff.logo).Trim() = "" then needs = true
+                if needs and not (m.heroPrefetchKeys <> invalid and m.heroPrefetchKeys.DoesExist(key)) and not (m.heroMetaTaskKey <> invalid and m.heroMetaTaskKey = key)
+                    enrichCandidates.Push({
+                        row: rr
+                        item: col
+                        meta: meta
+                        key: key
+                        source: row.source
+                        addonAddress: StringOf(row.addonAddress)
+                        rawType: StringOf(row.metaType)
+                        rowDist: Abs(rr - rowIndex)
+                        colDist: Abs(col - itemIndex)
+                    })
+                end if
+            end if
+        end for
+    end for
+
+    if urls.Count() > 0
+        needed = []
+        cached = invalid
+        if m.global <> invalid and m.global.imageCacheTask <> invalid
+            cached = m.global.imageCacheTask.cached
+        end if
+        for each u in urls
+            req = ImageCacheRequestUrl(u)
+            if req = "" then continue for
+            if cached <> invalid and cached.DoesExist(req) then continue for
+            needed.Push(u)
+        end for
+        if needed.Count() > 0 then ImageCachePrefetch(needed, true)
+    end if
+
+    ' Enrich a few in-window candidates to discover missing hero bg/logo.
+    if enrichCandidates.Count() > 1
+        ' prioritize by rail distance then column distance (simple bubble-like not needed; small list)
+        ' sort by rowDist*100+colDist
+        for i = 0 to enrichCandidates.Count() - 2
+            for j = i + 1 to enrichCandidates.Count() - 1
+                pi = enrichCandidates[i].rowDist * 100 + enrichCandidates[i].colDist
+                pj = enrichCandidates[j].rowDist * 100 + enrichCandidates[j].colDist
+                if pj < pi
+                    tmp = enrichCandidates[i]
+                    enrichCandidates[i] = enrichCandidates[j]
+                    enrichCandidates[j] = tmp
+                end if
+            end for
+        end for
+    end if
+    PrefetchNeighborHeroMeta(enrichCandidates)
+end sub
+
+
 sub onHeroPrefetchDelayFire()
     if m.heroFocusKey = "" or m.stores = invalid then return
     position = m.catalog.rowItemFocused
@@ -513,8 +689,8 @@ sub onHeroPrefetchDelayFire()
     itemIndex = position[1]
     if HomeHeroMetaKeyAt(rowIndex, itemIndex) <> m.heroFocusKey then return
 
-    candidates = HeroPrefetchCandidates(rowIndex, itemIndex)
-    PrefetchNeighborHeroMeta(candidates)
+    ' Refresh directional window prefetch/enrichment (covers in-window candidates).
+    HomePrefetchHeroWindow(rowIndex, itemIndex)
 end sub
 
 function HomeHeroMetaKeyAt(rowIndex as integer, itemIndex as integer) as string
@@ -525,28 +701,33 @@ function HomeHeroMetaKeyAt(rowIndex as integer, itemIndex as integer) as string
 end function
 
 function HeroPrefetchCandidates(rowIndex as integer, itemIndex as integer) as object
+    ' Directional candidate items for async hero-meta enrichment: current rail
+    ' horizontal window only (focused column + ahead in hDir), bounded.
     candidates = []
     if m.gridRows = invalid or rowIndex < 0 or rowIndex >= m.gridRows.Count() then return candidates
     row = m.gridRows[rowIndex]
     metas = row.metas
     if metas = invalid then return candidates
-
-    offsets = [-1, 1]
-    for each offset in offsets
-        idx = itemIndex + offset
-        if idx >= 0 and idx < metas.Count()
-            meta = metas[idx]
-            key = HomeHeroMetaKey(meta)
-            if key <> ""
-                candidates.Push({
-                    row: rowIndex
-                    item: idx
-                    meta: meta
-                    key: key
-                    source: row.source
-                })
-            end if
-        end if
+    hDir = m.homeHDir
+    if hDir = 0 then hDir = 1
+    extent = m.homeHExtent
+    if extent = invalid or extent < 3 then extent = 6
+    for offset = 1 to extent - 1
+        idx = itemIndex + (offset * hDir)
+        if idx < 0 or idx >= metas.Count() then continue for
+        meta = metas[idx]
+        if meta = invalid or (meta.seeMore <> invalid and meta.seeMore = true) then continue for
+        key = HomeHeroMetaKey(meta)
+        if key = "" then continue for
+        candidates.Push({
+            row: rowIndex
+            item: idx
+            meta: meta
+            key: key
+            source: row.source
+            addonAddress: StringOf(row.addonAddress)
+            rawType: StringOf(row.metaType)
+        })
     end for
     return candidates
 end function
@@ -555,7 +736,6 @@ sub PrefetchNeighborHeroMeta(candidates as object)
     if candidates = invalid or m.stores = invalid then return
     for each candidate in candidates
         if m.heroPrefetchTasks.Count() >= 2 then exit for
-        if candidate.source <> "library" then continue for
         if candidate.key = "" or candidate.key = m.heroFocusKey then continue for
         if m.heroMetaCache <> invalid and m.heroMetaCache.DoesExist(candidate.key) then continue for
         if m.heroPrefetchKeys <> invalid and m.heroPrefetchKeys.DoesExist(candidate.key) then continue for
@@ -564,14 +744,23 @@ sub PrefetchNeighborHeroMeta(candidates as object)
         if HeroTryFillFromSharedCache(candidate) then continue for
         if not HeroCandidateNeedsEnrichment(candidate.meta) then continue for
 
-        address = MetaAddress()
-        if address = "" then continue for
-        metaAddresses = [address]
-        if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", candidate.meta.type, candidate.meta.id, address)
+        address = ""
+        if candidate.source = "library"
+            address = MetaAddress()
+            if address = "" then continue for
+            metaAddresses = [address]
+            if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", candidate.meta.type, candidate.meta.id, address)
+        else
+            address = StringOf(candidate.addonAddress)
+            if address = "" then continue for
+            metaAddresses = [address]
+        end if
+        metaType = StringOf(candidate.meta.type)
+        if metaType = "" then metaType = StringOf(candidate.rawType)
         task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onHeroPrefetchLoaded", {
             addonAddress: address
             candidateAddresses: metaAddresses
-            metaType: candidate.meta.type
+            metaType: metaType
             metaId: candidate.meta.id
         }, "homeHeroPrefetch")
         if task = invalid then continue for
@@ -598,12 +787,11 @@ function HeroTryFillFromSharedCache(candidate as object) as boolean
     display = m.stores.episodes.callFunc("EpisodesDisplayMeta", full)
     m.heroMetaCache[candidate.key] = display
     StoreHeroDisplayMeta(candidate.row, candidate.item, candidate.key, display)
-    ' Enriched neighbor meta now carries hero art URLs — prefetch them.
-    ImageCachePrefetch([
-        StringOf(display.poster)
-        StringOf(display.background)
-        StringOf(display.logo)
-    ], true)
+    ' Enriched neighbor meta now carries hero art URLs — prefetch them (hero only).
+    urls = []
+    if display.background <> invalid and display.background <> "" then urls.Push(StringOf(display.background))
+    if display.logo <> invalid and display.logo <> "" then urls.Push(StringOf(display.logo))
+    if urls.Count() > 0 then ImageCachePrefetch(urls, true)
     return true
 end function
 
@@ -660,15 +848,19 @@ sub onHeroPrefetchLoaded(event as object)
     m.heroMetaCache[completed.key] = display
     StoreHeroDisplayMeta(completed.row, completed.item, completed.key, display)
 
-    ' Hero art URLs for this neighbor are now known — prefetch them predictively.
-    ImageCachePrefetch([
-        StringOf(display.poster)
-        StringOf(display.background)
-        StringOf(display.logo)
-    ], true)
+    ' Hero art URLs for this neighbor are now known — prefetch them (hero only).
+    urls = []
+    if display.background <> invalid and display.background <> "" then urls.Push(StringOf(display.background))
+    if display.logo <> invalid and display.logo <> "" then urls.Push(StringOf(display.logo))
+    if urls.Count() > 0 then ImageCachePrefetch(urls, true)
 
     if completed.key = m.heroFocusKey
-        RenderHomeHero(display)
+        sig = HomeHeroRenderSig(display)
+        if m.heroRenderedKey <> completed.key or m.heroRenderedSig <> sig
+            RenderHomeHero(display)
+            m.heroRenderedKey = completed.key
+            m.heroRenderedSig = sig
+        end if
     end if
 
 end sub
@@ -1013,6 +1205,8 @@ sub BlurFocus()
     CancelHeroMetaRequest()
     CancelHeroPrefetch()
     if m.hero <> invalid then m.hero.callFunc("Clear")
+    m.heroRenderedKey = ""
+    m.heroRenderedSig = ""
     CancelOpen()
 end sub
 
