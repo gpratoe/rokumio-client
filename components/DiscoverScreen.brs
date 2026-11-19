@@ -56,8 +56,14 @@ sub init()
     m.discoverRetryCount = 0
     m.discoverMaxRetries = 3
     m.discoverRetryOffset = 0
+    m.discoverPrefetchSettle = m.top.FindNode("discoverPrefetchSettle")
+    if m.discoverPrefetchSettle <> invalid then m.discoverPrefetchSettle.ObserveField("fire", "onDiscoverPrefetchSettle")
     m.discoverPrefetchFocusRow = -1
     m.discoverPrefetchDir = 1
+    m.discoverPendingFocusRow = -1
+    m.discoverPrefetchGen = m.discoverPrefetchGen + 1
+    m.discoverPendingFocusRow = -1
+    m.discoverPrefetchGen = 0
     m.discoverMetaTasks = []
     m.discoverMetaKeys = {}
     m.discoverMetaQueue = []
@@ -83,6 +89,8 @@ function OnEnter(params as object) as void
     CancelLoad()
     CancelSources()
     if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
+    if m.discoverPrefetchSettle <> invalid then m.discoverPrefetchSettle.control = "stop"
+    m.discoverPendingFocusRow = -1
     m.discoverRetryCount = 0
 
     m.targetCatalog = invalid
@@ -104,6 +112,7 @@ end function
 
 function OnExit() as void
     if m.discoverRetryTimer <> invalid then m.discoverRetryTimer.control = "stop"
+    if m.discoverPrefetchSettle <> invalid then m.discoverPrefetchSettle.control = "stop"
     CancelLoad()
     CancelSources()
     CancelDiscoverMetaPrefetch()
@@ -600,6 +609,8 @@ sub ResetDiscover()
     CancelDiscoverMetaPrefetch()
     m.discoverPrefetchFocusRow = -1
     m.discoverPrefetchDir = 1
+    m.discoverPendingFocusRow = -1
+    m.discoverPrefetchGen = m.discoverPrefetchGen + 1
     m.metas = []
     m.allLoaded = false
     m.loaded = false
@@ -759,9 +770,15 @@ sub UpdateDiscoverHero(position as object)
     end if
     RenderDiscoverHero(m.metas[flat])
 
-    ' Directional hero-art window (current row + 2 rows ahead in vertical
-    ' movement direction) with slim-meta enrichment for hero bg/logo.
-    PrefetchDiscoverRowsAhead(row)
+    ' Defer directional hero-art window prefetch/enrichment until focus settles
+    ' to avoid wasting work while fast-scrolling. Hero render stays immediate.
+    m.discoverPendingFocusRow = row
+    if m.discoverPrefetchSettle <> invalid
+        m.discoverPrefetchSettle.control = "stop"
+        m.discoverPrefetchSettle.control = "start"
+    else
+        DiscoverCommitPrefetchWindow(row)
+    end if
 end sub
 
 ' Prefetch hero background/logo for all metas in the given row indices.
@@ -987,14 +1004,21 @@ sub onDiscoverMetaLoaded(event as object)
             current = m.metas[completed.idx]
             if current <> invalid and StringOf(current.id) = StringOf(display.id)
                 m.metas[completed.idx] = display
-                PrefetchDiscoverMetaHeroArt(display)
-                ' If this is the focused hero item, re-render so newly enriched
-                ' background/logo can be displayed immediately.
                 focus = m.grid.rowItemFocused
+                isFocusedItem = false
                 if focus <> invalid and focus.Count() >= 2 and m.chunk <> invalid and m.chunk > 0
                     focusFlat = focus[0] * m.chunk + focus[1]
-                    if focusFlat = completed.idx then RenderDiscoverHero(display)
+                    if focusFlat = completed.idx then isFocusedItem = true
                 end if
+                rowIdx = -1
+                if m.chunk <> invalid and m.chunk > 0 then rowIdx = Int(completed.idx / m.chunk)
+                inWindow = DiscoverRowInCurrentWindow(rowIdx)
+                ' Prefetch hero art only when relevant to current window/focus; avoids
+                ' wasting bandwidth/cache on items scrolled past before enrichment.
+                if inWindow or isFocusedItem
+                    PrefetchDiscoverMetaHeroArt(display)
+                end if
+                if isFocusedItem then RenderDiscoverHero(display)
             end if
         end if
         artInfo = "no-hero"
@@ -1010,6 +1034,8 @@ sub onDiscoverMetaLoaded(event as object)
 end sub
 
 sub CancelDiscoverMetaPrefetch()
+    if m.discoverPrefetchSettle <> invalid then m.discoverPrefetchSettle.control = "stop"
+    m.discoverPendingFocusRow = -1
     if m.discoverMetaTasks <> invalid
         for each entry in m.discoverMetaTasks
             if entry <> invalid and entry.task <> invalid then AsyncTask_Reap(entry.task, m.top, true)
@@ -1019,6 +1045,22 @@ sub CancelDiscoverMetaPrefetch()
     m.discoverMetaKeys = {}
     m.discoverMetaQueue = []
 end sub
+
+sub onDiscoverPrefetchSettle()
+    row = m.discoverPendingFocusRow
+    if row = invalid then row = DiscoverFocusRowOrDefault()
+    DiscoverCommitPrefetchWindow(row)
+end sub
+
+function DiscoverRowInCurrentWindow(rowIdx as integer) as boolean
+    if rowIdx = invalid or rowIdx < 0 then return false
+    rows = DiscoverPrefetchWindowRows(m.discoverPrefetchFocusRow, m.discoverPrefetchDir)
+    if rows = invalid then return false
+    for each r in rows
+        if r = rowIdx then return true
+    end for
+    return false
+end function
 
 function DiscoverPrefetchWindowRows(focusedRow as integer, dir as integer) as object
     if dir = 0 then dir = 1
@@ -1037,13 +1079,12 @@ function DiscoverPrefetchWindowRows(focusedRow as integer, dir as integer) as ob
     return rows
 end function
 
-' Maintain a directional sliding window (focused row + 2 ahead in vertical
+' Commit directional sliding window (focused row + 2 ahead in vertical
 ' movement direction, default down) for hero bg/logo prefetch and slim-meta
-' enrichment.
-sub PrefetchDiscoverRowsAhead(focusedRow as integer)
+' enrichment. Called after focus settles to avoid fast-scroll waste.
+sub DiscoverCommitPrefetchWindow(focusedRow as integer)
     if focusedRow = invalid then focusedRow = 0
     prev = m.discoverPrefetchFocusRow
-    if prev = focusedRow then return
     dir = m.discoverPrefetchDir
     if dir = invalid or dir = 0 then dir = 1
     if prev >= 0 and focusedRow <> prev
@@ -1054,21 +1095,34 @@ sub PrefetchDiscoverRowsAhead(focusedRow as integer)
             dir = -1
         end if
     end if
+    if prev = focusedRow and m.discoverPrefetchGen <> invalid and m.discoverPrefetchGen > 0
+        ' Same committed focus row: refresh only if we have no window committed yet
+        ' is handled below via gen; otherwise avoid redundant work.
+        rowsCheck = DiscoverPrefetchWindowRows(focusedRow, dir)
+        if rowsCheck <> invalid and rowsCheck.Count() > 0 then return
+    end if
     m.discoverPrefetchDir = dir
     m.discoverPrefetchFocusRow = focusedRow
+    if m.discoverPrefetchGen = invalid then m.discoverPrefetchGen = 0
+    m.discoverPrefetchGen = m.discoverPrefetchGen + 1
     rows = DiscoverPrefetchWindowRows(focusedRow, dir)
     PrefetchDiscoverHeroRows(rows, focusedRow)
 end sub
 
+sub PrefetchDiscoverRowsAhead(focusedRow as integer)
+    ' Kept for compatibility; commits window immediately (callers that want
+    ' debounced behavior should go through settle path).
+    DiscoverCommitPrefetchWindow(focusedRow)
+end sub
+
 ' Seed hero-art prefetch window around the focused row (directional, default down).
+' Commits immediately so initial load can warm hero art without extra delay.
 sub PrefetchDiscoverInitialHeroRows(focusedRow = 0 as integer)
     if focusedRow = invalid then focusedRow = 0
-    dir = m.discoverPrefetchDir
-    if dir = invalid or dir = 0 then dir = 1
-    m.discoverPrefetchDir = dir
-    m.discoverPrefetchFocusRow = focusedRow
-    rows = DiscoverPrefetchWindowRows(focusedRow, dir)
-    PrefetchDiscoverHeroRows(rows, focusedRow)
+    if m.discoverPrefetchSettle <> invalid then m.discoverPrefetchSettle.control = "stop"
+    m.discoverPendingFocusRow = focusedRow
+    m.discoverPrefetchFocusRow = -1 ' force commit for initial seed
+    DiscoverCommitPrefetchWindow(focusedRow)
 end sub
 
 sub ClearDiscoverHero()

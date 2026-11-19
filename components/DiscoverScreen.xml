@@ -24,6 +24,7 @@
     <children>
         <Rectangle id="discoverBg" width="1920" height="1080" color="0x0" />
         <Timer id="discoverRetryTimer" duration="2.0" repeat="false" />
+        <Timer id="discoverPrefetchSettle" duration="0.18" repeat="false" />
         <BrowseHero id="hero" />
 
         <Label

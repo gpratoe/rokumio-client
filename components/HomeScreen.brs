@@ -356,10 +356,10 @@ sub UpdateHomeHero(position as dynamic)
     end if
     meta = displayMeta
 
-    ' Directional hero bg/logo window: recompute only when focus position changed.
+    ' Update direction/extent immediately to preserve semantics across rapid moves,
+    ' but defer heavy window prefetch/enrichment to heroPrefetchDelay settle.
     if not sameFocus
         HomeUpdatePrefetchDirections(rowIndex, itemIndex)
-        HomePrefetchHeroWindow(rowIndex, itemIndex)
     end if
 
     needsHeroMeta = false
@@ -658,7 +658,7 @@ sub HomePrefetchHeroWindow(rowIndex as integer, itemIndex as integer)
             if cached <> invalid and cached.DoesExist(req) then continue for
             needed.Push(u)
         end for
-        if needed.Count() > 0 then ImageCachePrefetch(needed, true)
+        if needed.Count() > 0 then ImageCachePrefetch(needed, true, true)
     end if
 
     ' Enrich a few in-window candidates to discover missing hero bg/logo.
