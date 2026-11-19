@@ -12,6 +12,7 @@ sub init()
     m.top.ObserveFieldScoped("enqueueHi", m.port)
     m.top.ObserveFieldScoped("stop", m.port)
     ImageCacheTaskInit(m)
+    ImageCacheInitMemoryMonitoring(m, m.port)
 end sub
 
 sub ImageCacheConsumePendingEnqueues()
@@ -41,12 +42,19 @@ sub RunCache()
     while true
         msg = Wait(250, m.port)
         if m.top.stop = true then exit while
-        if msg <> invalid and type(msg) = "roSGNodeEvent"
-            field = msg.GetField()
-            if field = "stop"
-                if m.top.stop = true then exit while
+        if msg <> invalid
+            msgType = type(msg)
+            if msgType = "roSGNodeEvent"
+                field = msg.GetField()
+                if field = "stop"
+                    if m.top.stop = true then exit while
+                end if
+            else if msgType = "roDeviceInfoEvent"
+                ImageCacheHandleDeviceInfoEvent(m, msg)
             end if
         end if
+        ' Periodic memory-pressure evaluation (hysteretic recovery / poll fallback).
+        ImageCacheEvaluateMemoryPressure(m, invalid, false, "poll")
         ' Always ingest pending batches (event-driven and/or accumulated).
         ImageCacheConsumePendingEnqueues()
         ImageCacheTaskDrain(m, m.top)
