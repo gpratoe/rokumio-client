@@ -7,6 +7,8 @@
         <field id="enqueue" type="array" alwaysNotify="true" />
         <!-- High-priority enqueue (e.g. focused hero assets), drained first. -->
         <field id="enqueueHi" type="array" alwaysNotify="true" />
+        <!-- When true, pending/queued hi-pri work is replaced by the latest batch. -->
+        <field id="enqueueHiReplace" type="boolean" value="false" />
         <!-- Published map of cached requestUrl -> true for render-thread resolve. -->
         <field id="cached" type="assocarray" />
         <!-- Optional status/debug snapshot written by the task. -->
