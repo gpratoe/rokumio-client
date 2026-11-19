@@ -61,8 +61,6 @@ sub init()
     m.discoverPrefetchFocusRow = -1
     m.discoverPrefetchDir = 1
     m.discoverPendingFocusRow = -1
-    m.discoverPrefetchGen = m.discoverPrefetchGen + 1
-    m.discoverPendingFocusRow = -1
     m.discoverPrefetchGen = 0
     m.discoverMetaTasks = []
     m.discoverMetaKeys = {}
@@ -610,6 +608,7 @@ sub ResetDiscover()
     m.discoverPrefetchFocusRow = -1
     m.discoverPrefetchDir = 1
     m.discoverPendingFocusRow = -1
+    if m.discoverPrefetchGen = invalid then m.discoverPrefetchGen = 0
     m.discoverPrefetchGen = m.discoverPrefetchGen + 1
     m.metas = []
     m.allLoaded = false
