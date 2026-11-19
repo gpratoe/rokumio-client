@@ -287,7 +287,11 @@ sub ImageCacheHandleDeviceInfoEvent(state as object, msg as dynamic)
     ' Any low-memory/general-memory/warning event is treated as pressure signal:
     ' re-evaluate level immediately (fast shrink if needed).
     info = invalid
-    if msg.GetInfo <> invalid then info = msg.GetInfo()
+    try
+        info = msg.GetInfo()
+    catch e
+        info = invalid
+    end try
     reason = "event"
     detail = ""
     if info <> invalid and type(info) = "roAssociativeArray"
