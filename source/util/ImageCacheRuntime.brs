@@ -96,14 +96,14 @@ function ImageCacheNowMs() as dynamic
     dt = CreateObject("roDateTime")
     if dt = invalid then return invalid
     dt.ToLocalTime()
-    ' Seconds * 1000 + milliseconds if available
     secs = dt.AsSeconds()
     ms = 0
     if secs <> invalid then ms = Int(secs) * 1000
-    if dt.GetMilliseconds <> invalid
+    try
         msec = dt.GetMilliseconds()
         if msec <> invalid then ms = ms + Int(msec)
-    end if
+    catch e
+    end try
     return ms
 end function
 
@@ -122,12 +122,57 @@ function ImageCacheTierForMemoryLevel(level as dynamic) as string
 end function
 
 function ImageCacheReadMemoryLevel(state as object) as string
-    if state.deviceInfo = invalid then return "normal"
+    if state = invalid or state.deviceInfo = invalid then return "normal"
     level = invalid
-    if state.deviceInfo.GetGeneralMemoryLevel <> invalid
-        level = state.deviceInfo.GetGeneralMemoryLevel()
-    end if
+    dev = state.deviceInfo
+    try
+        level = dev.GetGeneralMemoryLevel()
+    catch e
+        level = invalid
+    end try
     return ImageCacheTierForMemoryLevel(level)
+end function
+
+function ImageCacheMemorySnapshot(state as object) as string
+    parts = []
+    if state = invalid
+        return "level=unknown"
+    end if
+    level = "unknown"
+    if state.memoryLevel <> invalid and StringOf(state.memoryLevel) <> ""
+        level = StringOf(state.memoryLevel)
+    else
+        level = ImageCacheReadMemoryLevel(state)
+    end if
+    parts.Push("level=" + level)
+    dev = state.deviceInfo
+    if dev <> invalid
+        try
+            raw = dev.GetGeneralMemoryLevel()
+            if raw <> invalid then parts.Push("general=" + LCase(StringOf(raw)))
+        catch e
+        end try
+        try
+            v = dev.GetChannelAvailableMemory()
+            if v <> invalid then parts.Push("channelAvail=" + StringOf(v))
+        catch e
+        end try
+        try
+            v = dev.GetChannelMemoryLimit()
+            if v <> invalid then parts.Push("channelLimit=" + StringOf(v))
+        catch e
+        end try
+        try
+            v = dev.GetMemoryLimitPercent()
+            if v <> invalid then parts.Push("limitPercent=" + StringOf(v))
+        catch e
+        end try
+    end if
+    parts.Push("tier=" + StringOf(state.pressureTier))
+    parts.Push("maxBytes=" + Int(state.maxBytes).ToStr())
+    parts.Push("cached=" + Int(state.entries.Count()).ToStr())
+    parts.Push("total=" + Int(state.totalBytes).ToStr())
+    return parts.Join(" ")
 end function
 
 sub ImageCacheEvaluateMemoryPressure(state as object, nowMs = invalid as dynamic, force = false as boolean, reason = "poll" as string)
@@ -138,10 +183,14 @@ sub ImageCacheEvaluateMemoryPressure(state as object, nowMs = invalid as dynamic
     end if
     if nowMs <> invalid then state.lastMemoryCheckMs = nowMs
 
+    prevLevel = StringOf(state.memoryLevel)
     levelTier = ImageCacheReadMemoryLevel(state)
     state.memoryLevel = levelTier
     current = StringOf(state.pressureTier)
     if current = "" then current = "normal"
+    if prevLevel <> levelTier
+        print "[imgcache] memory level change " + prevLevel + " -> " + levelTier + " " + ImageCacheMemorySnapshot(state)
+    end if
 
     if ImageCacheTierRank(levelTier) < ImageCacheTierRank(current)
         ' Pressure increased: shrink immediately.
@@ -204,27 +253,32 @@ sub ImageCacheInitMemoryMonitoring(state as object, port as object)
     state.memoryEventsEnabled = false
     if dev = invalid then return
 
-    if port <> invalid and dev.SetMessagePort <> invalid
-        dev.SetMessagePort(port)
+    if port <> invalid
+        try
+            dev.SetMessagePort(port)
+        catch e
+        end try
     end if
-    if dev.EnableLowGeneralMemoryEvent <> invalid
+    try
         dev.EnableLowGeneralMemoryEvent(true)
         state.memoryEventsEnabled = true
-    end if
-    if dev.EnableMemoryWarningEvent <> invalid
+    catch e
+    end try
+    try
         dev.EnableMemoryWarningEvent(true)
         state.memoryEventsEnabled = true
-    end if
+    catch e
+    end try
 
     level = ImageCacheReadMemoryLevel(state)
     state.memoryLevel = level
     state.lastMemoryCheckMs = ImageCacheNowMs()
+    events = "false"
+    if state.memoryEventsEnabled = true then events = "true"
+    print "[imgcache] memory init " + ImageCacheMemorySnapshot(state) + " events=" + events
     if ImageCacheTierRank(level) < ImageCacheTierRank(StringOf(state.pressureTier))
         state.normalStableSinceMs = -1
         ImageCacheApplyBudgetTier(state, level, "init-level:" + level)
-    else
-        state.normalStableSinceMs = -1
-        print "[imgcache] memory level=" + level + " tier=" + StringOf(state.pressureTier) + " maxBytes=" + Int(state.maxBytes).ToStr()
     end if
 end sub
 
@@ -235,10 +289,13 @@ sub ImageCacheHandleDeviceInfoEvent(state as object, msg as dynamic)
     info = invalid
     if msg.GetInfo <> invalid then info = msg.GetInfo()
     reason = "event"
+    detail = ""
     if info <> invalid and type(info) = "roAssociativeArray"
-        ' Preserve useful context in logs when available.
         if info.DoesExist("type") then reason = "event:" + LCase(StringOf(info.type))
+        if info.DoesExist("generalMemoryLevel") then detail = detail + " generalMemoryLevel=" + LCase(StringOf(info.generalMemoryLevel))
+        if info.DoesExist("level") then detail = detail + " level=" + LCase(StringOf(info.level))
     end if
+    print "[imgcache] memory event " + reason + detail + " " + ImageCacheMemorySnapshot(state)
     state.normalStableSinceMs = -1
     ImageCacheEvaluateMemoryPressure(state, ImageCacheNowMs(), true, reason)
 end sub
