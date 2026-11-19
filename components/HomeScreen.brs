@@ -439,8 +439,11 @@ sub onHeroMetaDelayFire()
     address = MetaAddress()
     if address = "" then return
     request = m.heroMetaRequest
+    metaAddresses = [address]
+    if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", request.meta.type, request.meta.id, address)
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onHomeHeroMetaLoaded", {
         addonAddress: address
+        candidateAddresses: metaAddresses
         metaType: request.meta.type
         metaId: request.meta.id
     }, "homeHeroMeta")
@@ -563,8 +566,11 @@ sub PrefetchNeighborHeroMeta(candidates as object)
 
         address = MetaAddress()
         if address = "" then continue for
+        metaAddresses = [address]
+        if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", candidate.meta.type, candidate.meta.id, address)
         task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onHeroPrefetchLoaded", {
             addonAddress: address
+            candidateAddresses: metaAddresses
             metaType: candidate.meta.type
             metaId: candidate.meta.id
         }, "homeHeroPrefetch")
@@ -1269,8 +1275,11 @@ sub OpenContinueWatching(item as object)
     }
     ShowHomeBusy(true)
 
+    metaAddresses = [address]
+    if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", item.type, item.id, address)
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onContinueWatchingLoaded", {
         addonAddress: address
+        candidateAddresses: metaAddresses
         metaType: item.type
         metaId: item.id
     }, "continueWatchingLoader")

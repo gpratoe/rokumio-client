@@ -1,0 +1,11 @@
+{
+    "metas": [
+        {
+            "id": "tt9000001",
+            "type": "series",
+            "name": "Broken Episodes Fixture (Play/episodes test)",
+            "poster": "https://images.metahub.space/poster/medium/tt0944947/img",
+            "description": "Series meta whose first videos have malformed season/episode data and later videos are valid. Details Play must not crash and Episodes must remain usable."
+        }
+    ]
+}

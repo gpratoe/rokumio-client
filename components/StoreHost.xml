@@ -22,6 +22,7 @@
         <function name="AddonsAccountStamp" />
         <function name="AddonsPruneOutOfAccount" />
         <function name="AddonsSupportsResource" />
+        <function name="AddonsMetaAddresses" />
         <function name="AddonsSyncAccountCollection" />
         <function name="AddonsUninstall" />
         <function name="AddonsUpdateDisplayMetadata" />
@@ -32,6 +33,8 @@
         <function name="AuthLoginGuest" />
         <function name="AuthLoginStremio" />
         <function name="AuthLogout" />
+        <function name="AuthSaveFailed" />
+        <function name="AuthSaveFailureReason" />
         <function name="EpisodesEpisodesForSeason" />
         <function name="EpisodesSeriesData" />
         <function name="EpisodesMergeMeta" />
@@ -39,6 +42,9 @@
         <function name="EpisodesOrderedSeasons" />
         <function name="EpisodesOrderedVideoIds" />
         <function name="EpisodesResolveVideoId" />
+        <function name="EpisodesEpisodeVideoId" />
+        <function name="EpisodesResolveEpisodeSelection" />
+        <function name="EpisodesFirstPlayableEpisodeSelection" />
         <function name="EpisodesSeasons" />
         <function name="EpisodesCacheFullMeta" />
         <function name="EpisodesDisplayMeta" />

@@ -222,3 +222,108 @@ sub Test_Settings_HomeCatalogVisibilityRejectsInvalidIdentity()
     Harness_Ok(not settings.SetHomeCatalogVisible("https://catalog.example", "movie", "", false), "missing catalog id is rejected")
     Harness_Equal(settings.GetHiddenHomeCatalogs().Count(), 0, "invalid identities do not alter state")
 end sub
+
+sub Test_Settings_SetLanguageReportsRefusedWrite()
+    Harness_Suite("SettingsStore.SetLanguage reports a refused write")
+    registry = MockRegistry()
+    registry.failWrites = true
+    settings = SettingsStore(registry)
+
+    Harness_Ok(settings.SetLanguage("es"), "language change accepted")
+    Harness_Equal(settings.GetLanguage(), "es", "language updated in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported")
+    Harness_Equal(SettingsStore(registry).GetLanguage(), "en", "language not persisted")
+
+    registry.failWrites = false
+    Harness_Ok(settings.SetLanguage("es"), "retry accepted")
+    Harness_Ok(not settings.SaveFailed(), "failure cleared after successful save")
+    Harness_Equal(SettingsStore(registry).GetLanguage(), "es", "language persisted after retry")
+end sub
+
+sub Test_Settings_SetServerAddressReportsRefusedWrite()
+    Harness_Suite("SettingsStore.SetServerAddress reports a refused write")
+    registry = MockRegistry()
+    registry.failWrites = true
+    settings = SettingsStore(registry)
+
+    Harness_Ok(settings.SetServerAddress("http://192.168.1.5:4141/"), "valid address accepted")
+    Harness_Equal(settings.GetServerAddress(), "http://192.168.1.5:4141", "normalized address kept in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported")
+    Harness_Equal(SettingsStore(registry).GetServerAddress(), "", "address not persisted")
+
+    Harness_Ok(not settings.SetServerAddress("ftp://bad"), "invalid address rejected")
+    Harness_Equal(settings.GetServerAddress(), "http://192.168.1.5:4141", "invalid input does not change stored address")
+end sub
+
+sub Test_Settings_ClearServerAddressReportsRefusedWrite()
+    Harness_Suite("SettingsStore.ClearServerAddress reports a refused write")
+    registry = MockRegistry()
+    settings = SettingsStore(registry)
+    settings.SetServerAddress("http://192.168.1.5:4141")
+    registry.failWrites = true
+
+    settings.ClearServerAddress()
+    Harness_Equal(settings.GetServerAddress(), "", "address cleared in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported")
+    Harness_Equal(SettingsStore(registry).GetServerAddress(), "http://192.168.1.5:4141", "cleared address not persisted")
+end sub
+
+sub Test_Settings_SetAudioPassthroughReportsRefusedWrite()
+    Harness_Suite("SettingsStore.SetAudioPassthrough reports a refused write")
+    registry = MockRegistry()
+    registry.failWrites = true
+    settings = SettingsStore(registry)
+
+    Harness_Ok(settings.SetAudioPassthrough(true), "passthrough change accepted")
+    Harness_Equal(settings.GetAudioPassthrough(), true, "passthrough updated in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported")
+    Harness_Equal(SettingsStore(registry).GetAudioPassthrough(), false, "passthrough not persisted")
+end sub
+
+sub Test_Settings_SetAudioTransmuxReportsRefusedWrite()
+    Harness_Suite("SettingsStore.SetAudioTransmux reports a refused write")
+    registry = MockRegistry()
+    registry.failWrites = true
+    settings = SettingsStore(registry)
+
+    Harness_Ok(settings.SetAudioTransmux(true), "transmux change accepted")
+    Harness_Equal(settings.GetAudioTransmux(), true, "transmux updated in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported")
+    Harness_Equal(SettingsStore(registry).GetAudioTransmux(), false, "transmux not persisted")
+    Harness_Equal(SettingsStore(registry).GetAudioPassthrough(), false, "passthrough remains default")
+end sub
+
+sub Test_Settings_SetDirectPlayModeReportsRefusedWrite()
+    Harness_Suite("SettingsStore.SetDirectPlayMode reports a refused write")
+    registry = MockRegistry()
+    registry.failWrites = true
+    settings = SettingsStore(registry)
+
+    Harness_Ok(settings.SetDirectPlayMode("on"), "valid direct play mode accepted")
+    Harness_Equal(settings.GetDirectPlayMode(), "on", "direct play mode updated in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported")
+    Harness_Equal(SettingsStore(registry).GetDirectPlayMode(), "off", "direct play mode not persisted")
+
+    Harness_Ok(not settings.SetDirectPlayMode("always"), "invalid mode rejected")
+    Harness_Equal(settings.GetDirectPlayMode(), "on", "invalid mode does not change stored mode")
+end sub
+
+sub Test_Settings_SetHomeCatalogVisibleReportsRefusedWrite()
+    Harness_Suite("SettingsStore.SetHomeCatalogVisible reports a refused write")
+    registry = MockRegistry()
+    address = "https://catalog.example/addon?token=a|b"
+    settings = SettingsStore(registry)
+    Harness_Ok(settings.SetHomeCatalogVisible(address, "movie", "top", false), "catalog hidden initially")
+    Harness_Ok(not settings.SaveFailed(), "initial hide persisted")
+
+    registry.failWrites = true
+    Harness_Ok(settings.SetHomeCatalogVisible(address, "movie", "top", true), "show change accepted")
+    Harness_Ok(settings.IsHomeCatalogVisible(address, "movie", "top"), "catalog visible in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported")
+    Harness_Ok(not SettingsStore(registry).IsHomeCatalogVisible(address, "movie", "top"), "visibility change not persisted")
+
+    Harness_Ok(settings.SetHomeCatalogVisible(address, "series", "top", false), "hide another catalog accepted")
+    Harness_Ok(not settings.IsHomeCatalogVisible(address, "series", "top"), "hidden in memory")
+    Harness_Ok(settings.SaveFailed(), "refused write reported for hide")
+    Harness_Ok(SettingsStore(registry).IsHomeCatalogVisible(address, "series", "top"), "new hidden catalog not persisted")
+end sub

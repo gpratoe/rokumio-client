@@ -12,12 +12,16 @@ class AuthStore
     session as string
     authKey as string
     user as dynamic
+    saveRefused as boolean
+    saveFailureWhy as string
 
     sub new(registry = invalid as dynamic)
         m.registry = registry
         m.session = ""
         m.authKey = ""
         m.user = invalid
+        m.saveRefused = false
+        m.saveFailureWhy = ""
         m.Load()
     end sub
 
@@ -27,8 +31,8 @@ class AuthStore
         m.session = "guest"
         m.authKey = ""
         m.user = invalid
-        m.Save()
-        return { ok: true, session: m.session }
+        saved = m.Save()
+        return { ok: true, session: m.session, saved: saved }
     end function
 
     ' Sign in to a Stremio account with a paired authKey and its user profile.
@@ -36,8 +40,8 @@ class AuthStore
         m.session = "stremio"
         m.authKey = authKey
         m.user = user
-        m.Save()
-        return { ok: true, session: m.session, authKey: m.authKey }
+        saved = m.Save()
+        return { ok: true, session: m.session, authKey: m.authKey, saved: saved }
     end function
 
     function GetSession() as string
@@ -56,20 +60,69 @@ class AuthStore
         return m.session <> ""
     end function
 
-    sub Logout()
+    function Logout() as boolean
         m.session = ""
         m.authKey = ""
         m.user = invalid
-        m.Save()
-    end sub
+        return m.Save()
+    end function
 
-    sub Save()
-        if m.registry = invalid then return
+    ' The part of the user profile worth persisting. The full Stremio user
+    ' object can carry integration tokens, prefs and nested data we never read;
+    ' storing it whole makes the session payload larger and more variable than
+    ' needed. Only the fields the app uses (email for display, _id as the stable
+    ' identifier) are kept. m.user stays as provided in memory for the current
+    ' session.
+    function SanitizedUser(user as dynamic) as dynamic
+        if user = invalid or Type(user) <> "roAssociativeArray" then return invalid
+        sanitized = {}
+        if user._id <> invalid then sanitized._id = user._id
+        if user.email <> invalid then sanitized.email = user.email
+        if sanitized.Count() = 0 then return invalid
+        return sanitized
+    end function
+
+    ' Writes the current session to the registry and flushes. Returns false if
+    ' serialization fails or the registry refuses a write. Flush() has no return
+    ' value, so failure reasons reflect the checks we can verify. A missing
+    ' registry is in-memory-only mode and not a failure.
+    function Save() as boolean
+        if m.registry = invalid
+            m.saveRefused = false
+            m.saveFailureWhy = ""
+            return true
+        end if
         data = { session: m.session, authKey: m.authKey }
-        if m.user <> invalid then data.user = m.user
-        m.registry.Write("session", FormatJson(data))
+        sanitizedUser = m.SanitizedUser(m.user)
+        if sanitizedUser <> invalid then data.user = sanitizedUser
+        json = FormatJson(data)
+        if json = invalid or json = ""
+            m.saveRefused = true
+            m.saveFailureWhy = "serialize"
+            return false
+        end if
+        ok = m.registry.Write("session", json)
         m.registry.Flush()
-    end sub
+        m.saveRefused = not ok
+        if ok
+            m.saveFailureWhy = ""
+        else
+            m.saveFailureWhy = "write"
+        end if
+        return ok
+    end function
+
+    ' Whether the most recent Save() failed to persist. Reset on the next
+    ' successful save.
+    function SaveFailed() as boolean
+        return m.saveRefused
+    end function
+
+    ' The verifiable reason the last Save() failed: "serialize", "write", or ""
+    ' when none.
+    function SaveFailureReason() as string
+        return m.saveFailureWhy
+    end function
 
     sub Load()
         if m.registry = invalid then return

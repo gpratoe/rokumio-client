@@ -510,8 +510,11 @@ sub StartEpisodeLoad(params as object)
     if params.episodeOverview <> invalid and params.episodeOverview <> "" then return
     if m.epMetaTask <> invalid then return
 
+    metaAddresses = [ParamString(params.addonAddress)]
+    if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", "series", ParamString(params.metaId), ParamString(params.addonAddress))
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onEpisodeMetaLoaded", {
         addonAddress: ParamString(params.addonAddress)
+        candidateAddresses: metaAddresses
         metaType: "series"
         metaId: ParamString(params.metaId)
     }, "episodeMetaLoader")
