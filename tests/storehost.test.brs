@@ -156,3 +156,27 @@ sub Test_StoreHost_EpisodesIdAdapters_TolerateInvalid()
 
     m.stores = invalid
 end sub
+
+sub Test_StoreHost_AddonsMetaAddresses_Bridge()
+    Harness_Suite("StoreHost.AddonsMetaAddresses forwards meta provider selection")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    outcome = addons.InstallFromDescriptor("https://bridge-source.example.com/manifest.json", {
+        id: "com.example.bridge"
+        name: "Bridge Source"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["catalog"]
+    })
+    Harness_Ok(outcome.ok, "catalog-only source installed for bridge test")
+    m.stores = { addons: addons }
+
+    source = addons.Get("com.example.bridge").address
+    cinemeta = addons.Get("com.linvo.cinemeta").address
+    addresses = AddonsMetaAddresses("movie", "tt12345", source)
+
+    Harness_Equal(addresses.Count(), 1, "bridge returns eligible meta candidates")
+    Harness_Equal(addresses[0], cinemeta, "bridge selects Cinemeta fallback for catalog-only source")
+
+    m.stores = invalid
+end sub

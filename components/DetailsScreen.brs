@@ -322,8 +322,10 @@ sub MaybeRefreshMeta()
 
     if not m.stores.episodes.callFunc("EpisodesNeedsMetaFetch", m.meta) then return
 
+    metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", m.meta.type, m.meta.id, m.addonAddress)
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onMetaLoaded", {
         addonAddress: m.addonAddress
+        candidateAddresses: metaAddresses
         metaType: m.meta.type
         metaId: m.meta.id
     }, "detailsMetaLoader")

@@ -161,8 +161,11 @@ sub LoadSeries()
     end if
 
     CancelLoad()
+    metaAddresses = [m.addonAddress]
+    if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", "series", m.meta.id, m.addonAddress)
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onSeriesLoaded", {
         addonAddress: m.addonAddress
+        candidateAddresses: metaAddresses
         metaType: "series"
         metaId: m.meta.id
     }, "episodesLoader")

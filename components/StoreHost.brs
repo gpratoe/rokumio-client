@@ -109,6 +109,13 @@ function AddonsSupportsResource(resources as dynamic, types as dynamic, idPrefix
     return m.stores.addons.SupportsResource(resources, types, idPrefixes, name, metaType, id)
 end function
 
+' addons.MetaAddresses — ordered addon addresses eligible to provide `meta` for
+' (metaType, metaId), preferring the source addon when it matches, then Cinemeta,
+' then other matching providers. Used for meta fallback.
+function AddonsMetaAddresses(metaType as dynamic, metaId as dynamic, preferredAddress = "" as dynamic) as object
+    return m.stores.addons.MetaAddresses(metaType, metaId, preferredAddress)
+end function
+
 ' addons.CatalogCapabilities
 function AddonsCatalogCapabilities(catalog as dynamic) as object
     return m.stores.addons.CatalogCapabilities(catalog)

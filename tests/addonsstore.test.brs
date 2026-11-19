@@ -889,3 +889,299 @@ sub Test_Addons_RejectsNonTextManifestIdentity()
     Harness_Ok(addons.Register({ id: "com.example.ok", name: "Ok" }), "Register still accepts a text id")
     Harness_Ok(not addons.Register(invalid), "Register refuses an invalid record")
 end sub
+
+' ---- Meta fallback provider selection --------------------------------------
+
+sub Test_Addons_MetaAddresses_SourceEligibleFirst()
+    Harness_Suite("MetaAddresses prefers an eligible source, then Cinemeta")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    outcome = addons.InstallFromDescriptor("https://source.example.com/manifest.json", {
+        id: "com.example.source"
+        name: "Source"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["catalog", "meta"]
+        idPrefixes: ["tt"]
+    })
+
+    Harness_Ok(outcome.ok, "source addon installed")
+    source = addons.Get("com.example.source").address
+    cinemeta = addons.Get("com.linvo.cinemeta").address
+    addresses = addons.MetaAddresses("movie", "tt1234567", source)
+
+    Harness_Equal(addresses.Count(), 2, "source and cinemeta are eligible for tt movie meta")
+    Harness_Equal(addresses[0], source, "eligible source is tried first")
+    Harness_Equal(addresses[1], cinemeta, "eligible Cinemeta follows as fallback")
+end sub
+
+sub Test_Addons_MetaAddresses_CatalogOnlySourceFallsBackToCinemeta()
+    Harness_Suite("MetaAddresses skips a catalog-only source and falls back to Cinemeta for tt")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    outcome = addons.InstallFromDescriptor("https://catalogonly.example.com/manifest.json", {
+        id: "com.example.catalogonly"
+        name: "Catalog Only"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: [{ type: "movie", id: "top", name: "Top" }]
+        resources: ["catalog"]
+    })
+
+    Harness_Ok(outcome.ok, "catalog-only addon installed")
+    source = addons.Get("com.example.catalogonly").address
+    cinemeta = addons.Get("com.linvo.cinemeta").address
+    addresses = addons.MetaAddresses("movie", "tt7654321", source)
+
+    Harness_Equal(addresses.Count(), 1, "only Cinemeta can serve meta for this tt id")
+    Harness_Equal(addresses[0], cinemeta, "Cinemeta is selected when source cannot provide meta")
+end sub
+
+sub Test_Addons_MetaAddresses_PerResourceIdPrefixes()
+    Harness_Suite("MetaAddresses respects per-resource meta idPrefixes")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    outcome = addons.InstallFromDescriptor("https://tmdbmeta.example.com/manifest.json", {
+        id: "com.example.tmdbmeta"
+        name: "TMDB Meta"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: [
+            "catalog"
+            { name: "meta", types: ["movie", "series"], idPrefixes: ["tmdb:", "kitsu:"] }
+        ]
+    })
+
+    Harness_Ok(outcome.ok, "per-resource meta addon installed")
+    source = addons.Get("com.example.tmdbmeta").address
+    cinemeta = addons.Get("com.linvo.cinemeta").address
+
+    tmdb = addons.MetaAddresses("movie", "tmdb:123", source)
+    Harness_Equal(tmdb.Count(), 2, "source and Cinemeta are eligible meta providers for tmdb ids")
+    Harness_Equal(tmdb[0], source, "source serves meta for tmdb ids when declared")
+    Harness_Equal(tmdb[1], cinemeta, "Cinemeta remains an eligible fallback for tmdb ids")
+
+    kitsu = addons.MetaAddresses("series", "kitsu:99", source)
+    Harness_Equal(kitsu.Count(), 2, "source and Cinemeta are eligible meta providers for kitsu ids")
+    Harness_Equal(kitsu[0], source, "source serves meta for kitsu ids when declared")
+    Harness_Equal(kitsu[1], cinemeta, "Cinemeta remains an eligible fallback for kitsu ids")
+
+    tt = addons.MetaAddresses("movie", "tt1234567", source)
+    Harness_Equal(tt.Count(), 1, "source must not be selected for tt when meta prefix excludes it")
+    Harness_Equal(tt[0], cinemeta, "tt falls back to Cinemeta when source meta prefixes do not match")
+end sub
+
+sub Test_Addons_MetaAddresses_InheritedManifestIdPrefixes()
+    Harness_Suite("MetaAddresses honors short-form meta resources inheriting manifest idPrefixes")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    outcome = addons.InstallFromDescriptor("https://inherited.example.com/manifest.json", {
+        id: "com.example.inherited"
+        name: "Inherited Prefix"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["meta"]
+        idPrefixes: ["kitsu:"]
+    })
+
+    Harness_Ok(outcome.ok, "inherited-prefix addon installed")
+    source = addons.Get("com.example.inherited").address
+    cinemeta = addons.Get("com.linvo.cinemeta").address
+
+    kitsu = addons.MetaAddresses("movie", "kitsu:42", source)
+    Harness_Equal(kitsu.Count(), 2, "source and Cinemeta are eligible for inherited kitsu prefix")
+    Harness_Equal(kitsu[0], source, "source eligible for inherited kitsu prefix")
+    Harness_Equal(kitsu[1], cinemeta, "Cinemeta remains an eligible fallback for kitsu ids")
+
+    tt = addons.MetaAddresses("movie", "tt42", source)
+    Harness_Equal(tt.Count(), 1, "inherited non-matching prefix excludes tt")
+    Harness_Equal(tt[0], cinemeta, "tt falls back to Cinemeta when inherited prefixes do not match")
+end sub
+
+sub Test_Addons_MetaAddresses_CinemetaPrioritizedBeforeOtherEligible()
+    Harness_Suite("MetaAddresses prioritizes Cinemeta after source but before other eligible providers")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    sourceOutcome = addons.InstallFromDescriptor("https://nosourcemeta.example.com/manifest.json", {
+        id: "com.example.nosourcemeta"
+        name: "No Source Meta"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: [{ type: "movie", id: "top", name: "Top" }]
+        resources: ["catalog"]
+    })
+    otherOutcome = addons.InstallFromDescriptor("https://othermeta.example.com/manifest.json", {
+        id: "com.example.othermeta"
+        name: "Other Meta"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["meta"]
+        idPrefixes: ["tt"]
+    })
+
+    Harness_Ok(sourceOutcome.ok and otherOutcome.ok, "source and other addon installed")
+    source = addons.Get("com.example.nosourcemeta").address
+    cinemeta = addons.Get("com.linvo.cinemeta").address
+    other = addons.Get("com.example.othermeta").address
+    addresses = addons.MetaAddresses("movie", "tt998877", source)
+
+    Harness_Equal(addresses.Count(), 2, "cinemeta and other eligible provider selected")
+    Harness_Equal(addresses[0], cinemeta, "Cinemeta comes before other eligible providers")
+    Harness_Equal(addresses[1], other, "other eligible provider included after Cinemeta")
+end sub
+
+sub Test_Addons_MetaAddresses_DedupedStableOtherProviders()
+    Harness_Suite("MetaAddresses includes other eligible providers once in stable order")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    ' Remove Cinemeta so ordering of other eligible providers is observable.
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed for this case")
+    aOutcome = addons.InstallFromDescriptor("https://a-meta.example.com/manifest.json", {
+        id: "com.example.a"
+        name: "A Meta"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["meta"]
+        idPrefixes: ["tt"]
+    })
+    bOutcome = addons.InstallFromDescriptor("https://b-meta.example.com/manifest.json", {
+        id: "com.example.b"
+        name: "B Meta"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["meta"]
+        idPrefixes: ["tt"]
+    })
+    ' An ineligible addon should not appear.
+    cOutcome = addons.InstallFromDescriptor("https://c-catalog.example.com/manifest.json", {
+        id: "com.example.c"
+        name: "C Catalog"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: [{ type: "movie", id: "top", name: "Top" }]
+        resources: ["catalog"]
+    })
+
+    Harness_Ok(aOutcome.ok and bOutcome.ok and cOutcome.ok, "eligible and ineligible addons installed")
+    aAddr = addons.Get("com.example.a").address
+    bAddr = addons.Get("com.example.b").address
+    addresses = addons.MetaAddresses("movie", "tt101010", "https://unknown-source.example.com")
+
+    Harness_Equal(addresses.Count(), 3, "unknown source plus two eligible providers")
+    Harness_Equal(addresses[0], "https://unknown-source.example.com", "unknown preferred source is tried first")
+    Harness_Equal(addresses[1], aAddr, "first eligible installed provider kept in stable GetAll order")
+    Harness_Equal(addresses[2], bAddr, "second eligible installed provider kept in stable GetAll order")
+
+    ' Re-run to ensure no duplicates or reordering.
+    again = addons.MetaAddresses("movie", "tt101010", "https://unknown-source.example.com")
+    Harness_Equal(again.Count(), 3, "result remains deduped on repeated calls")
+    Harness_Equal(again[0], addresses[0], "repeated call keeps first candidate")
+    Harness_Equal(again[1], addresses[1], "repeated call keeps second candidate")
+    Harness_Equal(again[2], addresses[2], "repeated call keeps third candidate")
+end sub
+
+sub Test_Addons_MetaAddresses_SourceUnknownBestEffortFirst()
+    Harness_Suite("MetaAddresses tries an unknown preferred source first")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed so only fallbacks are controlled")
+    outcome = addons.InstallFromDescriptor("https://fallback.example.com/manifest.json", {
+        id: "com.example.fallback"
+        name: "Fallback"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["meta"]
+        idPrefixes: ["tt"]
+    })
+
+    Harness_Ok(outcome.ok, "fallback addon installed")
+    fallback = addons.Get("com.example.fallback").address
+    addresses = addons.MetaAddresses("movie", "tt555", "https://not-installed.example.com")
+
+    Harness_Equal(addresses.Count(), 2, "unknown source plus eligible fallback")
+    Harness_Equal(addresses[0], "https://not-installed.example.com", "unknown preferred address is included as best-effort source")
+    Harness_Equal(addresses[1], fallback, "eligible fallback appended after unknown source")
+end sub
+
+sub Test_Addons_MetaAddresses_SourceKnownIneligibleNotPrepended()
+    Harness_Suite("MetaAddresses does not prepend a known ineligible preferred source")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed to make absence observable")
+    sourceOutcome = addons.InstallFromDescriptor("https://source-no-meta.example.com/manifest.json", {
+        id: "com.example.sourcenometa"
+        name: "Source No Meta"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: [{ type: "movie", id: "top", name: "Top" }]
+        resources: ["catalog"]
+    })
+    otherOutcome = addons.InstallFromDescriptor("https://other-tt.example.com/manifest.json", {
+        id: "com.example.othertt"
+        name: "Other TT"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["meta"]
+        idPrefixes: ["tt"]
+    })
+
+    Harness_Ok(sourceOutcome.ok and otherOutcome.ok, "known source and fallback installed")
+    source = addons.Get("com.example.sourcenometa").address
+    other = addons.Get("com.example.othertt").address
+    addresses = addons.MetaAddresses("movie", "tt777", source)
+
+    Harness_Equal(addresses.Count(), 1, "known ineligible source is not best-effort prepended")
+    Harness_Equal(addresses[0], other, "eligible fallback remains available")
+end sub
+
+sub Test_Addons_MetaAddresses_NoEligibleProviders()
+    Harness_Suite("MetaAddresses returns empty when no provider can serve meta for the id")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed")
+    Harness_Ok(addons.Uninstall("org.stremio.opensubtitlesv3", true), "opensubtitles removed (no meta anyway)")
+    outcome = addons.InstallFromDescriptor("https://catalog-only-2.example.com/manifest.json", {
+        id: "com.example.catalog2"
+        name: "Catalog 2"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: [{ type: "movie", id: "top", name: "Top" }]
+        resources: ["catalog"]
+    })
+
+    Harness_Ok(outcome.ok, "catalog-only addon installed")
+    addresses = addons.MetaAddresses("movie", "tt0001", addons.Get("com.example.catalog2").address)
+    Harness_Equal(addresses.Count(), 0, "no eligible meta providers means no candidates")
+end sub
+
+sub Test_Addons_MetaAddresses_CinemetaRemovedFallsBackToOtherEligible()
+    Harness_Suite("MetaAddresses uses other eligible providers when Cinemeta is removed")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    Harness_Ok(addons.Uninstall("com.linvo.cinemeta", true), "cinemeta removed by user choice")
+    outcome = addons.InstallFromDescriptor("https://altmeta.example.com/manifest.json", {
+        id: "com.example.altmeta"
+        name: "Alt Meta"
+        version: "1.0.0"
+        types: ["movie", "series"]
+        catalogs: []
+        resources: ["meta"]
+        idPrefixes: ["tt"]
+    })
+
+    Harness_Ok(outcome.ok, "alternative meta addon installed")
+    alt = addons.Get("com.example.altmeta").address
+    addresses = addons.MetaAddresses("movie", "tt2468", "https://missing-source.example.com")
+
+    Harness_Equal(addresses.Count(), 2, "unknown source and alternative meta provider returned")
+    Harness_Equal(addresses[0], "https://missing-source.example.com", "best-effort source still first")
+    Harness_Equal(addresses[1], alt, "alternative eligible provider used when Cinemeta unavailable")
+end sub
+
+sub Test_Addons_MetaAddresses_PreferredIsCinemetaDeduped()
+    Harness_Suite("MetaAddresses dedupes when the preferred eligible source is Cinemeta")
+    addons = AddonsStore(ScriptedTransport([]), invalid)
+    cinemeta = addons.Get("com.linvo.cinemeta").address
+    addresses = addons.MetaAddresses("movie", "tt314159", cinemeta)
+
+    Harness_Equal(addresses.Count(), 1, "Cinemeta should appear once")
+    Harness_Equal(addresses[0], cinemeta, "preferred Cinemeta remains first and only candidate")
+end sub

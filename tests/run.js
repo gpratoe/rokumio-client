@@ -24,6 +24,7 @@ async function writeCombinedScript() {
         'tests/mocks.brs',
         'components/NetDiagTask.brs',
         'components/StoreHost.brs',
+        'components/MetaLoaderTask.brs',
         'source/util/ToastMetrics.brs',
         'tests/screenstack.test.brs',
         'tests/transport.test.brs',
@@ -68,6 +69,7 @@ async function writeCombinedScript() {
         'tests/cachesize.test.brs',
         'tests/textsstore.test.brs',
         'tests/serversettingsstore.test.brs',
+        'tests/metaloaderfallback.test.brs',
         'source/util/PosterLoaderCore.brs',
         'tests/posterloader.test.brs',
         'tests/_run.brs'
@@ -81,6 +83,11 @@ async function writeCombinedScript() {
         // byte-identical to the shipped file.
         if (rel === 'components/StoreHost.brs') {
             src = src.replace(/^sub init\(\)/m, 'sub init_unreachable_in_tests()');
+        }
+        // MetaLoaderTask.brs must not run as a task in the bundle; keep its
+        // pure fallback helper available for direct tests.
+        if (rel === 'components/MetaLoaderTask.brs') {
+            src = src.replace(/^sub init\(\)/m, 'sub init_unreachable_metaloader_in_tests()');
         }
         return src;
     });
