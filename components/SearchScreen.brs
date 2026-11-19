@@ -687,10 +687,6 @@ sub RenderRows()
     ' TileRowHeights).
     m.results.rowHeights = TileRowHeights(sizes)
     m.results.numRows = m.rows.Count()
-    ' Low-priority: warm some search-result posters opportunistically.
-    for each row in m.rows
-        ImageCachePrefetchMetas(row.metas, 8, false, false)
-    end for
 end sub
 
 ' The status line: "Searching…" while any add-on is still resolving; once all

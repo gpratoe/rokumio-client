@@ -171,10 +171,10 @@ sub ImageCachePrefetch(urls as dynamic, highPriority = false as boolean)
     end if
 end sub
 
-' Convenience: enqueue poster (and optionally hero art) URLs from a list of
-' metas. limit caps how many metas to scan (0 = all) so callers can prefetch a
-' focused neighborhood without walking an entire catalog.
-sub ImageCachePrefetchMetas(metas as dynamic, limit = 0 as integer, includeHero = false as boolean, highPriority = false as boolean)
+' Convenience: enqueue hero art (background/logo) URLs from a list of metas.
+' Posters are intentionally excluded (Roku handles poster caching). limit caps
+' how many metas to scan (0 = all).
+sub ImageCachePrefetchMetas(metas as dynamic, limit = 0 as integer, highPriority = false as boolean)
     if metas = invalid or type(metas) <> "roArray" then return
     urls = []
     count = metas.Count()
@@ -182,11 +182,8 @@ sub ImageCachePrefetchMetas(metas as dynamic, limit = 0 as integer, includeHero 
     for i = 0 to count - 1
         meta = metas[i]
         if meta = invalid then continue for
-        if meta.poster <> invalid and meta.poster <> "" then urls.Push(StringOf(meta.poster))
-        if includeHero
-            if meta.background <> invalid and meta.background <> "" then urls.Push(StringOf(meta.background))
-            if meta.logo <> invalid and meta.logo <> "" then urls.Push(StringOf(meta.logo))
-        end if
+        if meta.background <> invalid and meta.background <> "" then urls.Push(StringOf(meta.background))
+        if meta.logo <> invalid and meta.logo <> "" then urls.Push(StringOf(meta.logo))
     end for
     if urls.Count() > 0 then ImageCachePrefetch(urls, highPriority)
 end sub

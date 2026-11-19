@@ -223,8 +223,6 @@ sub BuildRows()
     else
         m.grid.numRows = 0
     end if
-    ' Low-priority: warm some posters opportunistically.
-    ImageCachePrefetchMetas(m.items, 12, false, false)
 
     if m.items.Count() = 0
         m.status.text = ""
@@ -291,7 +289,6 @@ sub UpdateLibraryHero(position as object)
         if idx >= 0 and idx < m.items.Count()
             m2 = m.items[idx]
             if m2 <> invalid
-                if m2.poster <> invalid and m2.poster <> "" then heroUrls.Push(StringOf(m2.poster))
                 if m2.background <> invalid and m2.background <> "" then heroUrls.Push(StringOf(m2.background))
                 if m2.logo <> invalid and m2.logo <> "" then heroUrls.Push(StringOf(m2.logo))
             end if
