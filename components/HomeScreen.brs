@@ -51,6 +51,17 @@ sub init()
     m.homeHExtent = 6
     m.homeLastFocusRow = -1
     m.homeLastFocusCol = -1
+    ' Committed prefetch window state (settle-classified): used for continuity/jump
+    ' detection and to avoid fast-scroll waste. Separate from per-move tracking.
+    m.homeCommittedFocusRow = -1
+    m.homeCommittedFocusCol = -1
+    m.homeCommittedVDir = 1
+    m.homeCommittedHDir = 1
+    m.homeCommittedVMode = ""
+    m.homeCommittedHMode = ""
+    m.homeCommittedHExtent = 6
+    m.homeCommittedRails = []
+    m.homeCommittedCols = []
     m.heroRenderedKey = ""
     m.heroRenderedSig = ""
     m.homeEmpty = m.top.FindNode("homeEmpty")
@@ -296,9 +307,27 @@ sub BuildRows()
     end for
     m.catalog.content = content
     if m.gridRows.Count() > 0 then m.catalog.numRows = m.gridRows.Count()
+    ' Grid structure/indices changed: reset committed prefetch window state.
+    m.homeCommittedFocusRow = -1
+    m.homeCommittedFocusCol = -1
+    m.homeCommittedVDir = 1
+    m.homeCommittedHDir = 1
+    m.homeCommittedVMode = ""
+    m.homeCommittedHMode = ""
+    m.homeCommittedHExtent = 6
+    m.homeCommittedRails = []
+    m.homeCommittedCols = []
     ApplyCatalogSizes()
     UpdateHomeEmptyState()
     RefreshHomeHeroFromFocus()
+    ' Seed initial committed prefetch window promptly on first build.
+    if m.homeCommittedFocusRow < 0
+        focusPos = m.catalog.rowItemFocused
+        if focusPos = invalid and m.gridRows <> invalid and m.gridRows.Count() > 0
+            focusPos = [0, 0]
+        end if
+        if focusPos <> invalid and focusPos.Count() >= 2 then HomeCommitPrefetchWindow(focusPos[0], focusPos[1])
+    end if
 end sub
 
 ' Keep the top hero synchronized with the focused poster. The focused row is
@@ -568,6 +597,104 @@ sub HomeUpdatePrefetchDirections(rowIndex as integer, itemIndex as integer)
     m.homeLastFocusCol = itemIndex
 end sub
 
+function HomeClampRail(rowIdx as integer) as integer
+    if rowIdx = invalid then rowIdx = 0
+    if rowIdx < 0 then rowIdx = 0
+    total = 0
+    if m.gridRows <> invalid then total = m.gridRows.Count()
+    if total > 0 and rowIdx >= total then rowIdx = total - 1
+    if rowIdx < 0 then rowIdx = 0
+    return rowIdx
+end function
+
+function HomeClampCol(colIdx as integer, rowIdx as integer) as integer
+    if colIdx = invalid then colIdx = 0
+    if colIdx < 0 then colIdx = 0
+    total = 0
+    if m.gridRows <> invalid and rowIdx >= 0 and rowIdx < m.gridRows.Count()
+        metas = m.gridRows[rowIdx].metas
+        if metas <> invalid then total = metas.Count()
+    end if
+    if total > 0 and colIdx >= total then colIdx = total - 1
+    if colIdx < 0 then colIdx = 0
+    return colIdx
+end function
+
+function HomeNormalizeIntList(values as object, maxExclusive = -1 as integer) as object
+    unique = {}
+    out = []
+    if values = invalid then return out
+    for each v in values
+        if v = invalid then continue for
+        n = Int(v)
+        if n < 0 then continue for
+        if maxExclusive >= 0 and n >= maxExclusive then continue for
+        k = n.ToStr()
+        if unique.DoesExist(k) then continue for
+        unique[k] = true
+        out.Push(n)
+    end for
+    if out.Count() > 1 then out.Sort()
+    return out
+end function
+
+function HomeListsEqual(a as object, b as object) as boolean
+    if a = invalid and b = invalid then return true
+    if a = invalid or b = invalid then return false
+    if a.Count() <> b.Count() then return false
+    for i = 0 to a.Count() - 1
+        if a[i] <> b[i] then return false
+    end for
+    return true
+end function
+
+function HomeForwardRails(focusRow as integer, vDir as integer) as object
+    if vDir = 0 then vDir = 1
+    return HomeNormalizeIntList([focusRow, focusRow + vDir, focusRow + (2 * vDir)], -1)
+end function
+
+function HomeSymmetricRails(focusRow as integer) as object
+    ' Discontinuity (far jump/local reversal): symmetric ±1 rail.
+    return HomeNormalizeIntList([focusRow - 1, focusRow, focusRow + 1], -1)
+end function
+
+function HomeForwardCols(focusCol as integer, hDir as integer, hExtent as integer) as object
+    if hDir = 0 then hDir = 1
+    if hExtent = invalid or hExtent < 1 then hExtent = 6
+    cols = []
+    for k = 0 to hExtent - 1
+        cols.Push(focusCol + (k * hDir))
+    end for
+    return HomeNormalizeIntList(cols, -1)
+end function
+
+function HomeSymmetricCols(focusCol as integer, hDir as integer, hExtent as integer) as object
+    ' Discontinuity: symmetric ±1 local around focus plus forward buffer in hDir.
+    if hDir = 0 then hDir = 1
+    if hExtent = invalid or hExtent < 1 then hExtent = 6
+    cols = [focusCol - hDir] ' opposite-side immediate neighbor
+    for k = 0 to hExtent - 1
+        cols.Push(focusCol + (k * hDir))
+    end for
+    return HomeNormalizeIntList(cols, -1)
+end function
+
+function HomeRailInList(rows as object, rowIdx as integer) as boolean
+    if rows = invalid or rowIdx = invalid then return false
+    for each r in rows
+        if r = rowIdx then return true
+    end for
+    return false
+end function
+
+function HomeColInList(cols as object, colIdx as integer) as boolean
+    if cols = invalid or colIdx = invalid then return false
+    for each c in cols
+        if c = colIdx then return true
+    end for
+    return false
+end function
+
 function HomePrefetchItemRange(itemIndex as integer, count as integer, hDir as integer) as object
     cols = []
     for k = 0 to count - 1
@@ -576,19 +703,10 @@ function HomePrefetchItemRange(itemIndex as integer, count as integer, hDir as i
     return cols
 end function
 
-sub HomePrefetchHeroWindow(rowIndex as integer, itemIndex as integer)
+' Execute hero bg/logo prefetch + in-window enrichment for an explicit committed window.
+sub HomePrefetchHeroWindowByTarget(railRows as object, cols as object, focusRow as integer, focusCol as integer)
     if m.gridRows = invalid or m.gridRows.Count() = 0 then return
-    vDir = m.homeVDir
-    hDir = m.homeHDir
-    hExtent = m.homeHExtent
-    if vDir = 0 then vDir = 1
-    if hDir = 0 then hDir = 1
-    if hExtent = invalid or hExtent < 6 then hExtent = 6
-
-    ' Vertical window: focused rail + 1 rail ahead (2 rails total).
-    railRows = [rowIndex, rowIndex + vDir]
-    ' Horizontal range per rail: focused column + ahead in hDir.
-    cols = HomePrefetchItemRange(itemIndex, hExtent, hDir)
+    if railRows = invalid or cols = invalid then return
 
     urls = []
     enrichCandidates = []
@@ -638,8 +756,8 @@ sub HomePrefetchHeroWindow(rowIndex as integer, itemIndex as integer)
                         source: row.source
                         addonAddress: StringOf(row.addonAddress)
                         rawType: StringOf(row.metaType)
-                        rowDist: Abs(rr - rowIndex)
-                        colDist: Abs(col - itemIndex)
+                        rowDist: Abs(rr - focusRow)
+                        colDist: Abs(col - focusCol)
                     })
                 end if
             end if
@@ -663,8 +781,6 @@ sub HomePrefetchHeroWindow(rowIndex as integer, itemIndex as integer)
 
     ' Enrich a few in-window candidates to discover missing hero bg/logo.
     if enrichCandidates.Count() > 1
-        ' prioritize by rail distance then column distance (simple bubble-like not needed; small list)
-        ' sort by rowDist*100+colDist
         for i = 0 to enrichCandidates.Count() - 2
             for j = i + 1 to enrichCandidates.Count() - 1
                 pi = enrichCandidates[i].rowDist * 100 + enrichCandidates[i].colDist
@@ -680,6 +796,187 @@ sub HomePrefetchHeroWindow(rowIndex as integer, itemIndex as integer)
     PrefetchNeighborHeroMeta(enrichCandidates)
 end sub
 
+' Compatibility wrapper (if needed by callers).
+sub HomePrefetchHeroWindow(rowIndex as integer, itemIndex as integer)
+    HomeCommitPrefetchWindow(rowIndex, itemIndex)
+end sub
+
+' Classify settled focus vs committed window per axis and commit hero prefetch window.
+' Vertical: initial [0,1,2]; sequential forward keeps 2 ahead in vDir; discontinuous => ±1.
+' Horizontal: initial forward buffer around first item; sequential forward preserves/extends
+' hExtent buffer in hDir; discontinuous => ±1 local around focus plus forward buffer in hDir.
+sub HomeCommitPrefetchWindow(rowIndex as integer, itemIndex as integer)
+    if m.gridRows = invalid or m.gridRows.Count() = 0 then return
+    rowIndex = HomeClampRail(rowIndex)
+    itemIndex = HomeClampCol(itemIndex, rowIndex)
+
+    prevFocusR = m.homeCommittedFocusRow
+    prevFocusC = m.homeCommittedFocusCol
+    if prevFocusR = invalid then prevFocusR = -1
+    if prevFocusC = invalid then prevFocusC = -1
+    prevVDir = m.homeCommittedVDir
+    prevHDir = m.homeCommittedHDir
+    prevVMode = StringOf(m.homeCommittedVMode)
+    prevHMode = StringOf(m.homeCommittedHMode)
+    prevHExtent = m.homeCommittedHExtent
+    if prevVDir = 0 then prevVDir = 1
+    if prevHDir = 0 then prevHDir = 1
+    if prevHExtent = invalid or prevHExtent < 1 then prevHExtent = 6
+    prevRails = m.homeCommittedRails
+    if prevRails = invalid then prevRails = []
+    prevCols = m.homeCommittedCols
+    if prevCols = invalid then prevCols = []
+
+    curVDir = m.homeVDir
+    curHDir = m.homeHDir
+    curHExtent = m.homeHExtent
+    if curVDir = 0 then curVDir = 1
+    if curHDir = 0 then curHDir = 1
+    if curHExtent = invalid or curHExtent < 6 then curHExtent = 6
+
+    targetVMode = "forward"
+    targetHMode = "forward"
+    targetVDir = curVDir
+    targetHDir = curHDir
+    targetHExtent = curHExtent
+    rails = []
+    cols = []
+
+    if prevFocusR < 0 or prevFocusC < 0 or (prevVMode = "" and prevHMode = "")
+        ' Initial: first load lands on first tile/row, no previous committed window.
+        targetVDir = 1
+        targetHDir = 1
+        targetHExtent = curHExtent
+        if targetHExtent < 6 then targetHExtent = 6
+        targetVMode = "forward"
+        targetHMode = "forward"
+        rails = HomeForwardRails(rowIndex, targetVDir)
+        cols = HomeForwardCols(itemIndex, targetHDir, targetHExtent)
+    else
+        deltaR = rowIndex - prevFocusR
+        deltaC = itemIndex - prevFocusC
+
+        ' Vertical classification
+        if deltaR = 0
+            targetVMode = prevVMode
+            if targetVMode = "" then targetVMode = "forward"
+            targetVDir = prevVDir
+            rails = prevRails
+            if rails = invalid or rails.Count() = 0
+                if targetVMode = "symmetric"
+                    rails = HomeSymmetricRails(rowIndex)
+                else
+                    rails = HomeForwardRails(rowIndex, targetVDir)
+                end if
+            end if
+        else
+            vMoveDir = 1
+            if deltaR < 0 then vMoveDir = -1
+            vSequential = false
+            if prevVMode = "symmetric"
+                if Abs(deltaR) = 1 then vSequential = true
+            else
+                if vMoveDir = prevVDir
+                    stepUnits = deltaR * prevVDir
+                    inPrev = HomeRailInList(prevRails, rowIndex)
+                    if inPrev or (stepUnits >= 1 and stepUnits <= 3)
+                        vSequential = true
+                    end if
+                end if
+            end if
+            if vSequential
+                targetVMode = "forward"
+                targetVDir = vMoveDir
+                rails = HomeForwardRails(rowIndex, targetVDir)
+            else
+                targetVMode = "symmetric"
+                targetVDir = vMoveDir
+                rails = HomeSymmetricRails(rowIndex)
+            end if
+        end if
+
+        ' Horizontal classification
+        if deltaC = 0
+            targetHMode = prevHMode
+            if targetHMode = "" then targetHMode = "forward"
+            targetHDir = prevHDir
+            targetHExtent = prevHExtent
+            cols = prevCols
+            if cols = invalid or cols.Count() = 0
+                if targetHMode = "symmetric"
+                    cols = HomeSymmetricCols(itemIndex, targetHDir, targetHExtent)
+                else
+                    cols = HomeForwardCols(itemIndex, targetHDir, targetHExtent)
+                end if
+            end if
+        else
+            hMoveDir = 1
+            if deltaC < 0 then hMoveDir = -1
+            hSequential = false
+            if prevHMode = "symmetric"
+                if Abs(deltaC) = 1 then hSequential = true
+            else
+                if hMoveDir = prevHDir
+                    stepUnits = deltaC * prevHDir
+                    inPrev = HomeColInList(prevCols, itemIndex)
+                    ' Continuous if within committed horizontal window or <=1 step beyond
+                    ' its forward edge (based on committed hExtent).
+                    if inPrev or (stepUnits >= 1 and stepUnits <= prevHExtent)
+                        hSequential = true
+                    end if
+                end if
+            end if
+            if hSequential
+                targetHMode = "forward"
+                targetHDir = hMoveDir
+                targetHExtent = curHExtent ' preserve/extend per-move semantics
+                if targetHExtent < 6 then targetHExtent = 6
+                cols = HomeForwardCols(itemIndex, targetHDir, targetHExtent)
+            else
+                targetHMode = "symmetric"
+                targetHDir = hMoveDir
+                targetHExtent = curHExtent
+                if targetHExtent < 6 then targetHExtent = 6
+                cols = HomeSymmetricCols(itemIndex, targetHDir, targetHExtent)
+            end if
+        end if
+    end if
+
+    if rails = invalid or rails.Count() = 0 then rails = HomeForwardRails(rowIndex, targetVDir)
+    if cols = invalid or cols.Count() = 0 then cols = HomeForwardCols(itemIndex, targetHDir, targetHExtent)
+
+    ' No-op if committed window unchanged.
+    if prevFocusR >= 0 and prevFocusC >= 0 and (prevVMode <> "" or prevHMode <> "")
+        if rowIndex = prevFocusR and itemIndex = prevFocusC and targetVMode = prevVMode and targetHMode = prevHMode and targetVDir = prevVDir and targetHDir = prevHDir and targetHExtent = prevHExtent and HomeListsEqual(rails, prevRails) and HomeListsEqual(cols, prevCols)
+            return
+        end if
+        if HomeListsEqual(rails, prevRails) and HomeListsEqual(cols, prevCols) and targetVMode = prevVMode and targetHMode = prevHMode and targetVDir = prevVDir and targetHDir = prevHDir and targetHExtent = prevHExtent
+            m.homeCommittedFocusRow = rowIndex
+            m.homeCommittedFocusCol = itemIndex
+            m.homeCommittedVDir = targetVDir
+            m.homeCommittedHDir = targetHDir
+            m.homeCommittedVMode = targetVMode
+            m.homeCommittedHMode = targetHMode
+            m.homeCommittedHExtent = targetHExtent
+            m.homeCommittedRails = rails
+            m.homeCommittedCols = cols
+            return
+        end if
+    end if
+
+    m.homeCommittedFocusRow = rowIndex
+    m.homeCommittedFocusCol = itemIndex
+    m.homeCommittedVDir = targetVDir
+    m.homeCommittedHDir = targetHDir
+    m.homeCommittedVMode = targetVMode
+    m.homeCommittedHMode = targetHMode
+    m.homeCommittedHExtent = targetHExtent
+    m.homeCommittedRails = rails
+    m.homeCommittedCols = cols
+
+    HomePrefetchHeroWindowByTarget(rails, cols, rowIndex, itemIndex)
+end sub
+
 
 sub onHeroPrefetchDelayFire()
     if m.heroFocusKey = "" or m.stores = invalid then return
@@ -689,8 +986,8 @@ sub onHeroPrefetchDelayFire()
     itemIndex = position[1]
     if HomeHeroMetaKeyAt(rowIndex, itemIndex) <> m.heroFocusKey then return
 
-    ' Refresh directional window prefetch/enrichment (covers in-window candidates).
-    HomePrefetchHeroWindow(rowIndex, itemIndex)
+    ' Settle-committed hero prefetch window (sequential forward vs discontinuous ±1).
+    HomeCommitPrefetchWindow(rowIndex, itemIndex)
 end sub
 
 function HomeHeroMetaKeyAt(rowIndex as integer, itemIndex as integer) as string
@@ -1183,6 +1480,11 @@ function OnEnter(params as object) as void
         m.catalog.SetFocus(true)
     end if
     if m.catalog.rowItemFocused <> invalid then UpdateHomeHero(m.catalog.rowItemFocused)
+    ' Ensure committed prefetch window exists promptly for current focus.
+    if m.homeCommittedFocusRow < 0 and m.catalog.rowItemFocused <> invalid
+        focusPos = m.catalog.rowItemFocused
+        if focusPos <> invalid and focusPos.Count() >= 2 then HomeCommitPrefetchWindow(focusPos[0], focusPos[1])
+    end if
 end function
 
 function OnExit() as void
@@ -1204,6 +1506,16 @@ sub BlurFocus()
     CollapseRail()
     CancelHeroMetaRequest()
     CancelHeroPrefetch()
+    ' Reset committed prefetch window so next focus/enter recomputes cleanly.
+    m.homeCommittedFocusRow = -1
+    m.homeCommittedFocusCol = -1
+    m.homeCommittedVDir = 1
+    m.homeCommittedHDir = 1
+    m.homeCommittedVMode = ""
+    m.homeCommittedHMode = ""
+    m.homeCommittedHExtent = 6
+    m.homeCommittedRails = []
+    m.homeCommittedCols = []
     if m.hero <> invalid then m.hero.callFunc("Clear")
     m.heroRenderedKey = ""
     m.heroRenderedSig = ""
