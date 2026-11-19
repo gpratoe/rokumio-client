@@ -65,14 +65,6 @@
             width="1920"
             height="1080"
             color="0x00000000" />
-        <!-- Cache indicators: shown only when rendered image came from local byte cache -->
-        <Rectangle
-            id="heroBgCacheIndicator"
-            translation="[1898, 12]"
-            width="12"
-            height="12"
-            color="0x22C55EFF"
-            visible="false" />
         <Poster
             id="heroLogo"
             translation="[162, 48]"
@@ -81,13 +73,6 @@
             loadWidth="560"
             loadHeight="360"
             loadDisplayMode="scaleToFit"
-            visible="false" />
-        <Rectangle
-            id="heroLogoCacheIndicator"
-            translation="[162, 48]"
-            width="12"
-            height="12"
-            color="0x22C55EFF"
             visible="false" />
 
         <Label
