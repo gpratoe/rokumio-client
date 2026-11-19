@@ -10,6 +10,8 @@ sub ImageCacheTaskInit(state as object)
     state.queued = {}
     state.inflight = {}
     state.failed = {}
+    state.retryCount = {}
+    state.hiWanted = {}
     state.entries = {}
     state.totalBytes = 0
     state.tick = 0
@@ -17,6 +19,7 @@ sub ImageCacheTaskInit(state as object)
     state.maxFiles = 250
     state.maxFileBytes = 5 * 1024 * 1024
     if state.top <> invalid then state.top.cached = {}
+    if state.top <> invalid then state.top.enqueueHiReplace = false
 end sub
 
 sub ImageCacheTaskPublish(state as object)
@@ -28,9 +31,20 @@ sub ImageCacheTaskPublish(state as object)
     state.top.cached = snap
 end sub
 
-sub ImageCacheTaskOnEnqueue(state as object, urls as dynamic, highPriority = false as boolean)
-    if urls = invalid or type(urls) <> "roArray" then return
+sub ImageCacheTaskOnEnqueue(state as object, urls as dynamic, highPriority = false as boolean, replaceHi = false as boolean)
+    if urls = invalid or type(urls) <> "roArray" then urls = []
     added = 0
+    if highPriority and replaceHi
+        ' "Latest wins" for hero window prefetch: drop stale queued hi-pri work so
+        ' fast scrolling doesn't waste bandwidth/cache on items no longer relevant.
+        if state.queueHi <> invalid
+            for each oldUrl in state.queueHi
+                if oldUrl <> invalid then state.queued.Delete(oldUrl)
+            end for
+        end if
+        state.queueHi = []
+    end if
+
     target = state.queue
     if highPriority then target = state.queueHi
     for each uri in urls
@@ -45,10 +59,12 @@ sub ImageCacheTaskOnEnqueue(state as object, urls as dynamic, highPriority = fal
             state.entries[requestUrl].tick = state.tick
             continue for
         end if
+        if highPriority then state.hiWanted[requestUrl] = true
         if state.failed.DoesExist(requestUrl)
-            ' Allow high-priority hero/logo requests to retry transient failures.
+            ' Allow high-priority hero/logo requests to retry failures.
             if highPriority
                 state.failed.Delete(requestUrl)
+                if state.retryCount <> invalid then state.retryCount.Delete(requestUrl)
             else
                 continue for
             end if
@@ -59,8 +75,8 @@ sub ImageCacheTaskOnEnqueue(state as object, urls as dynamic, highPriority = fal
         target.Push(requestUrl)
         added = added + 1
     end for
-    ' Cap queues: prefer keeping high-priority (focus/hero) work; shed stale
-    ' low-priority bulk prefetch first.
+    ' Cap queues: prefer keeping newest high-priority (focus/hero) work; shed
+    ' stale bulk/old work first. For hi-pri, drop from front (oldest queued).
     maxHi = 60
     maxLow = 120
     while state.queueHi.Count() > maxHi
@@ -71,10 +87,12 @@ sub ImageCacheTaskOnEnqueue(state as object, urls as dynamic, highPriority = fal
         dropped = state.queue.Shift()
         if dropped <> invalid then state.queued.Delete(dropped)
     end while
-    if added > 0
+    if added > 0 or (highPriority and replaceHi)
         label = "low"
         if highPriority then label = "high"
-        print "[imgcache] enqueued " + added.ToStr() + " (" + label + ", hi=" + state.queueHi.Count().ToStr() + " low=" + state.queue.Count().ToStr() + " cached=" + state.entries.Count().ToStr() + ")"
+        suffix = ""
+        if highPriority and replaceHi then suffix = ", replace"
+        print "[imgcache] enqueued " + added.ToStr() + " (" + label + suffix + ", hi=" + state.queueHi.Count().ToStr() + " low=" + state.queue.Count().ToStr() + " cached=" + state.entries.Count().ToStr() + ")"
     end if
 end sub
 
@@ -84,16 +102,18 @@ sub ImageCacheTaskDrain(state as object, stopNode as object)
     if state.queueHi.Count() = 0 and state.queue.Count() = 0 then return
     if stopNode <> invalid and stopNode.stop = true then return
     requestUrl = invalid
+    fromHi = false
     if state.queueHi.Count() > 0
         requestUrl = state.queueHi.Shift()
+        fromHi = true
     else
         requestUrl = state.queue.Shift()
     end if
     if requestUrl <> invalid then state.queued.Delete(requestUrl)
-    ImageCacheTaskFetchOne(state, requestUrl)
+    ImageCacheTaskFetchOne(state, requestUrl, fromHi)
 end sub
 
-sub ImageCacheTaskFetchOne(state as object, requestUrl as dynamic)
+sub ImageCacheTaskFetchOne(state as object, requestUrl as dynamic, fromHi = false as boolean)
     if requestUrl = invalid then return
     url = StringOf(requestUrl)
     if url = "" then return
@@ -110,18 +130,43 @@ sub ImageCacheTaskFetchOne(state as object, requestUrl as dynamic)
         if stat <> invalid and stat.size <> invalid then bytes = stat.size
         ImageCacheTaskRegister(state, url, path, bytes)
         state.inflight.Delete(url)
+        if state.retryCount <> invalid then state.retryCount.Delete(url)
         return
     end if
 
     tmpPath = path + ".part"
-    ok = ImageCacheDownloadToFile(url, tmpPath)
-    if not ok
+    res = ImageCacheDownloadToFile(url, tmpPath)
+    if res = invalid or res.ok <> true
         if fs <> invalid and tmpPath <> "" and fs.Exists(tmpPath) then fs.Delete(tmpPath)
-        state.failed[url] = true
-        print "[imgcache] failed " + url
+        transient = (res <> invalid and res.transient = true)
+        hiEligible = fromHi or (state.hiWanted <> invalid and state.hiWanted.DoesExist(url))
+        retries = 0
+        if state.retryCount <> invalid and state.retryCount.DoesExist(url) then retries = Int(state.retryCount[url])
+        if transient and hiEligible and retries < 2
+            retries = retries + 1
+            if state.retryCount = invalid then state.retryCount = {}
+            state.retryCount[url] = retries
+            if not state.queued.DoesExist(url)
+                state.queued[url] = true
+                state.queueHi.Push(url)
+            end if
+            code = 0
+            if res <> invalid and res.code <> invalid then code = Int(res.code)
+            print "[imgcache] retry " + retries.ToStr() + "/2 " + url + " code=" + code.ToStr()
+        else
+            state.failed[url] = true
+            if state.retryCount <> invalid then state.retryCount.Delete(url)
+            code = 0
+            if res <> invalid and res.code <> invalid then code = Int(res.code)
+            reason = "failed"
+            if res <> invalid and res.transient = true then reason = "failed (transient)"
+            print "[imgcache] " + reason + " " + url + " code=" + code.ToStr()
+        end if
         state.inflight.Delete(url)
         return
     end if
+
+    if state.retryCount <> invalid then state.retryCount.Delete(url)
 
     bytes = 0
     if fs <> invalid
@@ -156,10 +201,14 @@ sub ImageCacheTaskFetchOne(state as object, requestUrl as dynamic)
     state.inflight.Delete(url)
 end sub
 
-function ImageCacheDownloadToFile(url as string, filePath as string) as boolean
-    if url = "" or filePath = "" then return false
+function ImageCacheDownloadToFile(url as string, filePath as string) as object
+    result = { ok: false, transient: false, code: 0 }
+    if url = "" or filePath = "" then return result
     transfer = CreateObject("roUrlTransfer")
-    if transfer = invalid then return false
+    if transfer = invalid
+        result.transient = true
+        return result
+    end if
     port = CreateObject("roMessagePort")
     transfer.SetMessagePort(port)
     transfer.SetPort(port)
@@ -169,12 +218,34 @@ function ImageCacheDownloadToFile(url as string, filePath as string) as boolean
     transfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
     transfer.InitClientCertificates()
     started = transfer.AsyncGetToFile(filePath)
-    if started <> true then return false
+    if started <> true
+        result.transient = true
+        return result
+    end if
     msg = Wait(12000, port)
-    if msg = invalid then return false
-    if type(msg) <> "roUrlEvent" then return false
+    if msg = invalid
+        result.transient = true
+        return result
+    end if
+    if type(msg) <> "roUrlEvent"
+        result.transient = true
+        return result
+    end if
     code = msg.GetResponseCode()
-    return code >= 200 and code < 300
+    if code = invalid then code = 0
+    result.code = Int(code)
+    if code >= 200 and code < 300
+        result.ok = true
+        return result
+    end if
+    ' Transient: connection/unknown errors (<=0), timeouts/rate-limit/server errors.
+    ' Definitive client errors (e.g. 404/403/410) are not retried automatically.
+    if code <= 0 or code = 408 or code = 429 or (code >= 500 and code <= 599)
+        result.transient = true
+    else
+        result.transient = false
+    end if
+    return result
 end function
 
 sub ImageCacheTaskRegister(state as object, requestUrl as string, path as string, bytes as dynamic)

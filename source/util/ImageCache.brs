@@ -126,8 +126,9 @@ end function
 ' Enqueue image URIs for background byte prefetch (download-only). Best-effort
 ' and non-blocking: if the cache task is not available this is a no-op. Accepts
 ' a single URI string or an array of URIs. highPriority queues focus/hero assets
-' ahead of bulk poster prefetch.
-sub ImageCachePrefetch(urls as dynamic, highPriority = false as boolean)
+' ahead of bulk poster prefetch. replaceHi makes this batch "latest wins" for
+' hi-pri hero window prefetch by replacing stale pending/queued hi-pri work.
+sub ImageCachePrefetch(urls as dynamic, highPriority = false as boolean, replaceHi = false as boolean)
     if urls = invalid then return
     g = GetGlobalAA()
     if g = invalid or g.global = invalid then return
@@ -139,23 +140,47 @@ sub ImageCachePrefetch(urls as dynamic, highPriority = false as boolean)
     if list.Count() = 0 then return
     label = "low"
     if highPriority then label = "high"
-    print "[imgcache] prefetch requested " + list.Count().ToStr() + " (" + label + ")"
+    suffix = ""
+    if replaceHi and highPriority then suffix = ", replace"
+    print "[imgcache] prefetch requested " + list.Count().ToStr() + " (" + label + suffix + ")"
 
     ' Append to pending batches instead of replacing so rapid producers (e.g.
     ' per-item enrichment completions) don't overwrite each other before the
     ' task ingests them. The task consumes and clears these fields.
+    ' For window prefetch (replaceHi), latest batch wins to avoid fast-scroll waste.
     if highPriority
-        pending = task.enqueueHi
-        merged = []
-        if pending <> invalid and type(pending) = "roArray"
-            for each x in pending
-                merged.Push(x)
-            end for
+        if replaceHi
+            task.enqueueHiReplace = true
+            task.enqueueHi = list
+        else
+            ' If a replace batch is already pending, keep replace semantics and
+            ' merge into it rather than downgrading to append.
+            if task.enqueueHiReplace = true
+                pending = task.enqueueHi
+                merged = []
+                if pending <> invalid and type(pending) = "roArray"
+                    for each x in pending
+                        merged.Push(x)
+                    end for
+                end if
+                for each x in list
+                    merged.Push(x)
+                end for
+                task.enqueueHi = merged
+            else
+                pending = task.enqueueHi
+                merged = []
+                if pending <> invalid and type(pending) = "roArray"
+                    for each x in pending
+                        merged.Push(x)
+                    end for
+                end if
+                for each x in list
+                    merged.Push(x)
+                end for
+                task.enqueueHi = merged
+            end if
         end if
-        for each x in list
-            merged.Push(x)
-        end for
-        task.enqueueHi = merged
     else
         pending = task.enqueue
         merged = []
@@ -174,7 +199,7 @@ end sub
 ' Convenience: enqueue hero art (background/logo) URLs from a list of metas.
 ' Posters are intentionally excluded (Roku handles poster caching). limit caps
 ' how many metas to scan (0 = all).
-sub ImageCachePrefetchMetas(metas as dynamic, limit = 0 as integer, highPriority = false as boolean)
+sub ImageCachePrefetchMetas(metas as dynamic, limit = 0 as integer, highPriority = false as boolean, replaceHi = false as boolean)
     if metas = invalid or type(metas) <> "roArray" then return
     urls = []
     count = metas.Count()
@@ -185,7 +210,7 @@ sub ImageCachePrefetchMetas(metas as dynamic, limit = 0 as integer, highPriority
         if meta.background <> invalid and meta.background <> "" then urls.Push(StringOf(meta.background))
         if meta.logo <> invalid and meta.logo <> "" then urls.Push(StringOf(meta.logo))
     end for
-    if urls.Count() > 0 then ImageCachePrefetch(urls, highPriority)
+    if urls.Count() > 0 then ImageCachePrefetch(urls, highPriority, replaceHi)
 end sub
 
 

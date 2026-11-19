@@ -18,15 +18,21 @@ sub ImageCacheConsumePendingEnqueues()
     ' Consume accumulated pending batches. Producers append to these fields;
     ' take-and-clear here so bursts (e.g. per-item enrichment completions) are
     ' not lost while downloads are in progress.
+    hiReplace = (m.top.enqueueHiReplace = true)
     hi = m.top.enqueueHi
     if hi <> invalid and type(hi) = "roArray" and hi.Count() > 0
         m.top.enqueueHi = []
-        ImageCacheTaskOnEnqueue(m, hi, true)
+        m.top.enqueueHiReplace = false
+        ImageCacheTaskOnEnqueue(m, hi, true, hiReplace)
+    else if hiReplace
+        m.top.enqueueHi = []
+        m.top.enqueueHiReplace = false
+        ImageCacheTaskOnEnqueue(m, [], true, true)
     end if
     lo = m.top.enqueue
     if lo <> invalid and type(lo) = "roArray" and lo.Count() > 0
         m.top.enqueue = []
-        ImageCacheTaskOnEnqueue(m, lo, false)
+        ImageCacheTaskOnEnqueue(m, lo, false, false)
     end if
 end sub
 
