@@ -18,9 +18,16 @@
 
 class VideoIdCodec
 
-    ' "{seriesId}:{season}:{episode}".
-    function Build(seriesId as string, season as integer, episode as integer) as string
-        return seriesId + ":" + season.ToStr() + ":" + episode.ToStr()
+    ' "{seriesId}:{season}:{episode}" for a valid series episode identity.
+    ' Tolerant by design: add-on meta is untrusted, so missing/invalid
+    ' seriesId/season/episode degrades to "" instead of throwing at a typed
+    ' parameter boundary or on .ToStr(). Season/episode must be integer values.
+    function Build(seriesId as dynamic, season as dynamic, episode as dynamic) as string
+        id = m.AsSeriesId(seriesId)
+        s = m.AsEpisodeInt(season)
+        e = m.AsEpisodeInt(episode)
+        if id = "" or s = invalid or e = invalid then return ""
+        return id + ":" + s.ToStr() + ":" + e.ToStr()
     end function
 
     ' { season, episode } for a well-formed 3-part episode id, invalid for
@@ -28,13 +35,59 @@ class VideoIdCodec
     ' (2, 4, …) also reads as invalid. The movie-vs-junk distinction is the
     ' caller's: after Parse returns invalid, a colon in the id means malformed.
     function Parse(videoId as dynamic) as dynamic
-        if videoId = invalid then return invalid
+        if GetInterface(videoId, "ifString") = invalid then return invalid
         parts = videoId.Split(":")
         if parts.Count() <> 3 then return invalid
         return {
             season: parts[1].ToInt()
             episode: parts[2].ToInt()
         }
+    end function
+
+    ' Canonical id for an episode/video object, following Stremio's model:
+    ' prefer the video's own id when present, else derive from seriesId +
+    ' video.season + video.episode. Returns "" when no valid id can be produced.
+    function FromVideo(seriesId as dynamic, video as dynamic) as string
+        if video = invalid then return ""
+        ownId = m.AsSeriesId(video.id)
+        if ownId <> "" then return ownId
+        return m.Build(seriesId, video.season, video.episode)
+    end function
+
+    ' { videoId, season, episode } for a resolvable episode object, else invalid.
+    ' Season/episode prefer the object's fields when valid; if the canonical id is
+    ' known but ordinals are missing/malformed, parse them from the id so callers
+    ' (streams/player/progress) can keep params consistent.
+    function ResolveSelection(seriesId as dynamic, video as dynamic) as dynamic
+        videoId = m.FromVideo(seriesId, video)
+        if videoId = "" then return invalid
+        season = invalid
+        episode = invalid
+        if video <> invalid
+            season = m.AsEpisodeInt(video.season)
+            episode = m.AsEpisodeInt(video.episode)
+        end if
+        if season = invalid or episode = invalid
+            parsed = m.Parse(videoId)
+            if parsed <> invalid
+                if season = invalid then season = m.AsEpisodeInt(parsed.season)
+                if episode = invalid then episode = m.AsEpisodeInt(parsed.episode)
+            end if
+        end if
+        if season = invalid then season = 0
+        if episode = invalid then episode = 0
+        return { videoId: videoId, season: season, episode: episode }
+    end function
+
+    function AsSeriesId(value as dynamic) as string
+        if GetInterface(value, "ifString") = invalid then return ""
+        return value
+    end function
+
+    function AsEpisodeInt(value as dynamic) as dynamic
+        if value = invalid then return invalid
+        if GetInterface(value, "ifInt") <> invalid then return value
+        return invalid
     end function
 
 end class

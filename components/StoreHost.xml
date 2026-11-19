@@ -41,6 +41,9 @@
         <function name="EpisodesOrderedSeasons" />
         <function name="EpisodesOrderedVideoIds" />
         <function name="EpisodesResolveVideoId" />
+        <function name="EpisodesEpisodeVideoId" />
+        <function name="EpisodesResolveEpisodeSelection" />
+        <function name="EpisodesFirstPlayableEpisodeSelection" />
         <function name="EpisodesSeasons" />
         <function name="EpisodesCacheFullMeta" />
         <function name="EpisodesDisplayMeta" />

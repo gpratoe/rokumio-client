@@ -129,6 +129,22 @@ sub Test_StoreHost_EpisodesIdAdapters_TolerateInvalid()
     Harness_Equal(EpisodesResolveVideoId(invalid, 1, 2), "", "no id resolves no video, no crash")
     Harness_Equal(EpisodesResolveVideoId("", 1, 2), "", "blank id resolves no video")
     Harness_Equal(EpisodesResolveVideoId("ttQW", 1, 2), "ttQW:1:2", "a real id still builds the video id")
+    Harness_Equal(EpisodesResolveVideoId("ttQW", 1, invalid), "", "invalid episode resolves no video, no crash")
+    Harness_Equal(EpisodesResolveVideoId("ttQW", invalid, 2), "", "invalid season resolves no video, no crash")
+    Harness_Equal(EpisodesResolveVideoId("ttQW", invalid, invalid), "", "invalid season and episode resolve no video, no crash")
+
+    Harness_Equal(EpisodesEpisodeVideoId("ttQW", { id: "ttQW:3:4", season: 3, episode: 4 }), "ttQW:3:4", "episode helper prefers the video's own id")
+    Harness_Equal(EpisodesEpisodeVideoId("ttQW", { season: 1, episode: 2 }), "ttQW:1:2", "episode helper falls back to valid season/episode")
+    Harness_Equal(EpisodesEpisodeVideoId("ttQW", { season: 1, episode: invalid }), "", "episode helper returns empty when episode is unresolvable")
+
+    sel = EpisodesResolveEpisodeSelection("ttQW", { id: "ttQW:5:6" })
+    Harness_Ok(sel <> invalid and sel.videoId = "ttQW:5:6" and sel.season = 5 and sel.episode = 6, "selection recovers ordinals from a canonical video id")
+    malformedSel = EpisodesResolveEpisodeSelection("ttQW", { season: 1, episode: invalid })
+    Harness_Ok(malformedSel = invalid, "selection is invalid when the episode cannot be addressed")
+
+    playable = EpisodesFirstPlayableEpisodeSelection("ttQW", { videos: [{ season: 1, episode: invalid }, { id: "ttQW:1:2", season: 1, episode: 2 }] })
+    Harness_Ok(playable <> invalid and playable.videoId = "ttQW:1:2", "first playable selection skips malformed leading videos")
+    Harness_Ok(EpisodesFirstPlayableEpisodeSelection("ttQW", { videos: [{ season: 1, episode: invalid }] }) = invalid, "no playable selection when every video is malformed")
 
     Harness_Ok(EpisodesSeriesData(invalid, { videos: [] }) <> invalid, "no id: SeriesData answers the empty shape, no crash")
     empty = EpisodesSeriesData(invalid, { videos: [{ season: 1, episode: 1, id: "ttQW:1:1" }] })

@@ -635,18 +635,26 @@ sub onChipSelected()
 end sub
 
 sub ResumeEpisode()
-    if m.resume = invalid or m.stores = invalid then return
-    videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, m.resume.season, m.resume.episode)
+    if m.resume = invalid or m.meta = invalid or m.stores = invalid then return
+    resumeVideo = {
+        id: m.resume.videoId
+        season: m.resume.season
+        episode: m.resume.episode
+    }
+    sel = m.stores.episodes.callFunc("EpisodesResolveEpisodeSelection", m.meta.id, resumeVideo)
+    if sel = invalid then return
+    position = 0
+    if m.resume.position <> invalid then position = m.resume.position
     m.top.pushRequest = {
         screen: "streamsScreen"
         params: {
             addonAddress: m.addonAddress
             metaType: m.meta.type
             metaId: m.meta.id
-            videoId: videoId
-            season: m.resume.season
-            episode: m.resume.episode
-            position: m.resume.position
+            videoId: sel.videoId
+            season: sel.season
+            episode: sel.episode
+            position: position
             name: m.meta.name
             poster: m.meta.poster
             posterShape: m.meta.posterShape
@@ -660,11 +668,13 @@ end sub
 
 sub PlayMedia()
     if m.meta = invalid or m.stores = invalid then return
+    metaType = ""
+    if m.meta.type <> invalid then metaType = m.meta.type
     videoId = m.meta.id
     season = 1
     episode = 1
-    if m.meta.type = "movie"
-        videoId = m.meta.id
+    if metaType = "movie"
+        if videoId = invalid then return
     else
         videos = invalid
         if m.meta.videos <> invalid
@@ -673,12 +683,16 @@ sub PlayMedia()
             full = m.stores.episodes.callFunc("EpisodesFullMeta", m.meta.type, m.meta.id)
             if full <> invalid then videos = full.videos
         end if
+        sel = invalid
         if videos <> invalid and videos.Count() > 0
-            video = videos[0]
-            season = video.season
-            episode = video.episode
-            videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, season, episode)
+            sel = m.stores.episodes.callFunc("EpisodesFirstPlayableEpisodeSelection", m.meta.id, { videos: videos })
         end if
+        ' No addressable episode in known metadata: do not push a broken stream
+        ' request (malformed addon data must not crash the play path).
+        if sel = invalid then return
+        videoId = sel.videoId
+        season = sel.season
+        episode = sel.episode
     end if
     m.top.pushRequest = {
         screen: "streamsScreen"
