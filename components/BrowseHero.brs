@@ -14,6 +14,8 @@ sub init()
     m.heroTitleGrace = m.top.FindNode("heroTitleGrace")
     m.heroPosterLoader = m.top.FindNode("heroPosterLoader")
     m.heroLogoLoader = m.top.FindNode("heroLogoLoader")
+    m.heroBgCacheIndicator = m.top.FindNode("heroBgCacheIndicator")
+    m.heroLogoCacheIndicator = m.top.FindNode("heroLogoCacheIndicator")
     m.stores = invalid
     m.textsLanguage = ""
 

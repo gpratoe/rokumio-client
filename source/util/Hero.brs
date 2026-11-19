@@ -36,6 +36,68 @@ sub HeroInitState()
         m.heroPosterPrev.uri = ""
     end if
     if m.heroPosterPrevFadeOutAnim <> invalid then m.heroPosterPrevFadeOutAnim.control = "stop"
+    if m.heroBgCacheIndicator <> invalid then m.heroBgCacheIndicator.visible = false
+    if m.heroLogoCacheIndicator <> invalid then m.heroLogoCacheIndicator.visible = false
+end sub
+
+function HeroIsCachedPath(uri as dynamic) as boolean
+    s = StringOf(uri)
+    if s = "" then return false
+    dir = ImageCacheDir()
+    if dir = "" then return false
+    return Left(s, Len(dir) + 1) = (dir + "/")
+end function
+
+sub HeroUpdateBgCacheIndicator()
+    if m.heroBgCacheIndicator = invalid then return
+    show = false
+    ' Current poster rendered/ready from cache
+    currUri = HeroPosterUri()
+    if HeroPosterReady(currUri) and HeroIsCachedPath(currUri)
+        show = true
+    else if m.heroPosterPrev <> invalid and m.heroPosterPrev.visible = true and m.heroPosterPrev.opacity > 0
+        prevUri = StringOf(m.heroPosterPrev.uri)
+        if prevUri <> "" and HeroIsCachedPath(prevUri)
+            ' Previous rendered background still visible during crossfade.
+            show = true
+        end if
+    end if
+    m.heroBgCacheIndicator.visible = show
+end sub
+
+sub HeroUpdateLogoCacheIndicatorPosition()
+    if m.heroLogoCacheIndicator = invalid or m.heroLogo = invalid then return
+    ' Place indicator just to the right of the logo's rendered area.
+    x = 162
+    y = 48
+    w = 0
+    if m.heroLogo.translation <> invalid and m.heroLogo.translation.Count() >= 2
+        x = Int(m.heroLogo.translation[0])
+        y = Int(m.heroLogo.translation[1])
+    end if
+    if m.heroLogo.width <> invalid then w = Int(m.heroLogo.width)
+    ix = x + w + 6
+    if ix > 1900 then ix = x + w - 16
+    if ix < 0 then ix = 0
+    m.heroLogoCacheIndicator.translation = [ix, y]
+end sub
+
+sub HeroUpdateLogoCacheIndicator()
+    if m.heroLogoCacheIndicator = invalid then return
+    show = false
+    if m.heroLogo <> invalid and m.heroLogo.visible = true
+        uri = HeroLogoUri()
+        if HeroLogoReady(uri) and HeroIsCachedPath(uri)
+            show = true
+        end if
+    end if
+    m.heroLogoCacheIndicator.visible = show
+    if show then HeroUpdateLogoCacheIndicatorPosition()
+end sub
+
+sub HeroUpdateCacheIndicators()
+    HeroUpdateBgCacheIndicator()
+    HeroUpdateLogoCacheIndicator()
 end sub
 
 function HeroPosterUri() as string
@@ -141,6 +203,7 @@ sub HeroStopPosterPrevFade(clearNode = true as boolean)
     m.heroPosterPrev.opacity = 0
     m.heroPosterPrev.visible = false
     if clearNode then m.heroPosterPrev.uri = ""
+    HeroUpdateBgCacheIndicator()
 end sub
 
 sub HeroPreparePosterCrossfade(newRequestUri as string)
@@ -161,6 +224,7 @@ sub HeroPreparePosterCrossfade(newRequestUri as string)
     else
         HeroStopPosterPrevFade(true)
     end if
+    HeroUpdateBgCacheIndicator()
 end sub
 
 sub HeroOnPosterPrevFadeOutState()
@@ -203,6 +267,8 @@ sub HeroClear()
         m.heroDescription.text = ""
         m.heroDescription.visible = false
     end if
+    if m.heroBgCacheIndicator <> invalid then m.heroBgCacheIndicator.visible = false
+    if m.heroLogoCacheIndicator <> invalid then m.heroLogoCacheIndicator.visible = false
     HeroApplyLayout("title", false)
 end sub
 
@@ -266,6 +332,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         if m.heroPoster <> invalid then m.heroPoster.visible = false
         HeroSetFillUri("")
         HeroSetFillVisible(false)
+        HeroUpdateBgCacheIndicator()
     else
         requestUri = HeroRequestUri(background)
         currentPosterUri = HeroPosterUri()
@@ -312,6 +379,7 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
                 end if
             end if
         end if
+        HeroUpdateBgCacheIndicator()
     end if
 
     if logo = ""
@@ -324,7 +392,9 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         m.heroLogoFallbackSourceUri = ""
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         HeroSetLogoUri("")
+        if m.heroLogoCacheIndicator <> invalid then m.heroLogoCacheIndicator.visible = false
         HeroApplyLayout("title", true)
+        HeroUpdateBgCacheIndicator()
         return
     end if
 
@@ -355,6 +425,8 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         if m.heroLogo <> invalid then m.heroLogo.visible = true
         if m.heroTitle <> invalid then m.heroTitle.visible = false
+        HeroUpdateLogoCacheIndicator()
+        HeroUpdateBgCacheIndicator()
         return
     end if
 
@@ -393,9 +465,12 @@ sub HeroRender(meta as object, fallbackMetaType = "" as string, posterFallback =
     if m.heroLayoutMode = "wide"
         if m.heroLogo <> invalid then m.heroLogo.visible = false
         if m.heroTitle <> invalid then m.heroTitle.visible = false
+        if m.heroLogoCacheIndicator <> invalid then m.heroLogoCacheIndicator.visible = false
     else
         HeroApplyLayout("title", false)
     end if
+    HeroUpdateBgCacheIndicator()
+    HeroUpdateLogoCacheIndicator()
 end sub
 
 sub HeroOnPosterStatus()
@@ -413,6 +488,7 @@ sub HeroOnPosterStatus()
         if m.heroPosterFadeAnim <> invalid then m.heroPosterFadeAnim.control = "stop"
         m.heroPoster.opacity = 1
     end if
+    HeroUpdateBgCacheIndicator()
 end sub
 
 sub HeroOnLogoStatus()
@@ -424,6 +500,7 @@ sub HeroOnLogoStatus()
         m.heroLogoFallbackUri = ""
         m.heroLogoFallbackSourceUri = ""
         HeroFitLogo()
+        HeroUpdateLogoCacheIndicator()
     else if HeroLogoFailed(m.heroLogoUri)
         if m.heroTitleGrace <> invalid then m.heroTitleGrace.control = "stop"
         m.heroLogoGraceUri = ""
@@ -448,6 +525,7 @@ end sub
 sub HeroShowTitleFallback()
     m.heroLogo.visible = false
     m.heroTitle.visible = true
+    if m.heroLogoCacheIndicator <> invalid then m.heroLogoCacheIndicator.visible = false
     if m.heroLayoutMode = "tall"
         HeroApplyLayout("title", true)
     else if m.heroLayoutMode <> "wide"
@@ -469,6 +547,7 @@ sub HeroApplyLayout(mode as string, showTitle = true as boolean)
     m.heroDescription.translation = [166, 333]
     m.heroDescription.width = 620
     m.heroDescription.height = 185
+    if m.heroLogoCacheIndicator <> invalid then m.heroLogoCacheIndicator.visible = false
 end sub
 
 sub HeroFitLogo()
@@ -489,6 +568,7 @@ sub HeroFitLogo()
     m.heroDescription.height = 175
     m.heroLogo.visible = true
     m.heroTitle.visible = false
+    HeroUpdateLogoCacheIndicator()
 end sub
 
 sub HeroResetLogoLayout()
