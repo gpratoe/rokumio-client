@@ -58,9 +58,11 @@ sub init()
     m.discoverRetryOffset = 0
     m.discoverPrefetchSettle = m.top.FindNode("discoverPrefetchSettle")
     if m.discoverPrefetchSettle <> invalid then m.discoverPrefetchSettle.ObserveField("fire", "onDiscoverPrefetchSettle")
-    m.discoverPrefetchFocusRow = -1
-    m.discoverPrefetchDir = 1
     m.discoverPendingFocusRow = -1
+    m.discoverCommittedFocusRow = -1
+    m.discoverCommittedDir = 1
+    m.discoverCommittedMode = ""
+    m.discoverCommittedWindow = []
     m.discoverPrefetchGen = 0
     m.discoverMetaTasks = []
     m.discoverMetaKeys = {}
@@ -605,9 +607,11 @@ end sub
 ' A fresh filter set: start back at page 0.
 sub ResetDiscover()
     CancelDiscoverMetaPrefetch()
-    m.discoverPrefetchFocusRow = -1
-    m.discoverPrefetchDir = 1
     m.discoverPendingFocusRow = -1
+    m.discoverCommittedFocusRow = -1
+    m.discoverCommittedDir = 1
+    m.discoverCommittedMode = ""
+    m.discoverCommittedWindow = []
     if m.discoverPrefetchGen = invalid then m.discoverPrefetchGen = 0
     m.discoverPrefetchGen = m.discoverPrefetchGen + 1
     m.metas = []
@@ -1051,61 +1055,185 @@ sub onDiscoverPrefetchSettle()
     DiscoverCommitPrefetchWindow(row)
 end sub
 
-function DiscoverRowInCurrentWindow(rowIdx as integer) as boolean
-    if rowIdx = invalid or rowIdx < 0 then return false
-    rows = DiscoverPrefetchWindowRows(m.discoverPrefetchFocusRow, m.discoverPrefetchDir)
-    if rows = invalid then return false
+function DiscoverTotalRows() as integer
+    if m.chunk = invalid or m.chunk <= 0 or m.metas = invalid then return 0
+    return Int((m.metas.Count() + m.chunk - 1) / m.chunk)
+end function
+
+function DiscoverClampRow(rowIdx as integer) as integer
+    if rowIdx = invalid then rowIdx = 0
+    total = DiscoverTotalRows()
+    if rowIdx < 0 then rowIdx = 0
+    if total > 0 and rowIdx >= total then rowIdx = total - 1
+    if rowIdx < 0 then rowIdx = 0
+    return rowIdx
+end function
+
+function DiscoverNormalizeRowSet(rows as object) as object
+    unique = {}
+    normalized = []
+    if rows = invalid then return normalized
+    total = DiscoverTotalRows()
+    for each r in rows
+        if r = invalid then continue for
+        rowIdx = Int(r)
+        if rowIdx < 0 then continue for
+        if total > 0 and rowIdx >= total then continue for
+        key = rowIdx.ToStr()
+        if unique.DoesExist(key) then continue for
+        unique[key] = true
+        normalized.Push(rowIdx)
+    end for
+    if normalized.Count() > 1 then normalized.Sort()
+    return normalized
+end function
+
+function DiscoverWindowsEqual(a as object, b as object) as boolean
+    if a = invalid and b = invalid then return true
+    if a = invalid or b = invalid then return false
+    if a.Count() <> b.Count() then return false
+    for i = 0 to a.Count() - 1
+        if a[i] <> b[i] then return false
+    end for
+    return true
+end function
+
+function DiscoverForwardWindowRows(focusedRow as integer, dir as integer) as object
+    if dir = 0 then dir = 1
+    rows = []
+    for offset = 0 to 2
+        rows.Push(focusedRow + (offset * dir))
+    end for
+    return DiscoverNormalizeRowSet(rows)
+end function
+
+function DiscoverSymmetricWindowRows(focusedRow as integer) as object
+    ' Discontinuity (far jump/local reversal): symmetric ±1 around landed focus.
+    return DiscoverNormalizeRowSet([focusedRow - 1, focusedRow, focusedRow + 1])
+end function
+
+function DiscoverRowInList(rows as object, rowIdx as integer) as boolean
+    if rows = invalid or rowIdx = invalid then return false
     for each r in rows
         if r = rowIdx then return true
     end for
     return false
 end function
 
-function DiscoverPrefetchWindowRows(focusedRow as integer, dir as integer) as object
-    if dir = 0 then dir = 1
-    rows = []
-    total = 0
-    if m.chunk <> invalid and m.chunk > 0 and m.metas <> invalid
-        total = Int((m.metas.Count() + m.chunk - 1) / m.chunk)
-    end if
-    for offset = 0 to 2
-        rowIdx = focusedRow + (offset * dir)
-        if rowIdx < 0 then continue for
-        if total > 0 and rowIdx >= total then continue for
-        rows.Push(rowIdx)
-    end for
-    if rows.Count() = 0 then rows.Push(focusedRow)
-    return rows
+function DiscoverRowInCurrentWindow(rowIdx as integer) as boolean
+    if rowIdx = invalid or rowIdx < 0 then return false
+    return DiscoverRowInList(m.discoverCommittedWindow, rowIdx)
 end function
 
-' Commit directional sliding window (focused row + 2 ahead in vertical
-' movement direction, default down) for hero bg/logo prefetch and slim-meta
-' enrichment. Called after focus settles to avoid fast-scroll waste.
+' Backward-compatible helper name; returns current committed window when available.
+function DiscoverPrefetchWindowRows(focusedRow as integer, dir as integer) as object
+    if m.discoverCommittedWindow <> invalid and m.discoverCommittedWindow.Count() > 0
+        return m.discoverCommittedWindow
+    end if
+    return DiscoverForwardWindowRows(focusedRow, dir)
+end function
+
+' Commit hero bg/logo prefetch + slim-meta enrichment window after focus settles.
+' Policy: initial [0,1,2]; sequential forward (same dir, within window or <=1 step
+' beyond forward edge) keeps 2 ahead; discontinuous (far jump/gap or local
+' reversal/step-back, incl. large same-dir skip) uses symmetric ±1.
 sub DiscoverCommitPrefetchWindow(focusedRow as integer)
     if focusedRow = invalid then focusedRow = 0
-    prev = m.discoverPrefetchFocusRow
-    dir = m.discoverPrefetchDir
-    if dir = invalid or dir = 0 then dir = 1
-    if prev >= 0 and focusedRow <> prev
-        delta = focusedRow - prev
-        if delta > 0
-            dir = 1
-        else if delta < 0
-            dir = -1
+    focusedRow = DiscoverClampRow(focusedRow)
+
+    prevFocus = m.discoverCommittedFocusRow
+    prevDir = m.discoverCommittedDir
+    if prevDir = invalid or prevDir = 0 then prevDir = 1
+    prevMode = StringOf(m.discoverCommittedMode)
+    prevWindow = m.discoverCommittedWindow
+    if prevWindow = invalid then prevWindow = []
+
+    mode = "forward"
+    dir = prevDir
+    window = []
+
+    if prevFocus < 0 or prevMode = ""
+        ' Initial: first load lands on first tile/row (or seeded focus), no previous
+        ' committed window -> focused + 2 ahead in default direction.
+        dir = 1
+        mode = "forward"
+        window = DiscoverForwardWindowRows(focusedRow, dir)
+    else
+        delta = focusedRow - prevFocus
+        if delta = 0
+            window = prevWindow
+            if window = invalid or window.Count() = 0
+                mode = prevMode
+                if mode = "" then mode = "forward"
+                if mode = "symmetric"
+                    window = DiscoverSymmetricWindowRows(focusedRow)
+                else
+                    window = DiscoverForwardWindowRows(focusedRow, dir)
+                end if
+            else
+                mode = prevMode
+                dir = prevDir
+                ' Same committed focus/window: no-op.
+                return
+            end if
+        else
+            moveDir = 1
+            if delta < 0 then moveDir = -1
+            sequential = false
+            if prevMode = "symmetric"
+                ' Continuous forward from symmetric center: adjacent step only.
+                if Abs(delta) = 1 then sequential = true
+            else
+                ' Directional/initial forward window: same direction and within window
+                ' or <= 1 step beyond forward edge (no coverage gap).
+                if moveDir = prevDir
+                    stepUnits = delta * moveDir ' positive steps in moveDir
+                    inWindow = DiscoverRowInList(prevWindow, focusedRow)
+                    if inWindow or (stepUnits >= 1 and stepUnits <= 3)
+                        sequential = true
+                    end if
+                end if
+            end if
+
+            if sequential
+                mode = "forward"
+                dir = moveDir
+                window = DiscoverForwardWindowRows(focusedRow, dir)
+            else
+                ' Discontinuous (far jump/gap or local reversal/step-back): symmetric ±1.
+                mode = "symmetric"
+                dir = moveDir
+                window = DiscoverSymmetricWindowRows(focusedRow)
+            end if
         end if
     end if
-    if prev = focusedRow and m.discoverPrefetchGen <> invalid and m.discoverPrefetchGen > 0
-        ' Same committed focus row: refresh only if we have no window committed yet
-        ' is handled below via gen; otherwise avoid redundant work.
-        rowsCheck = DiscoverPrefetchWindowRows(focusedRow, dir)
-        if rowsCheck <> invalid and rowsCheck.Count() > 0 then return
+
+    if window = invalid or window.Count() = 0
+        window = DiscoverForwardWindowRows(focusedRow, dir)
+        mode = "forward"
     end if
-    m.discoverPrefetchDir = dir
-    m.discoverPrefetchFocusRow = focusedRow
+
+    if prevFocus >= 0 and DiscoverWindowsEqual(prevWindow, window) and focusedRow = prevFocus and mode = prevMode and dir = prevDir
+        return
+    end if
+    ' If computed window is identical but focus/mode changed in a meaningful way is
+    ' unlikely; still avoid redundant prefetch/enrichment churn when window is same.
+    if DiscoverWindowsEqual(prevWindow, window) and prevFocus >= 0 and m.discoverPrefetchGen <> invalid and m.discoverPrefetchGen > 0 and mode = prevMode
+        ' Keep committed focus/dir in sync, but skip expensive work.
+        m.discoverCommittedFocusRow = focusedRow
+        m.discoverCommittedDir = dir
+        m.discoverCommittedMode = mode
+        m.discoverCommittedWindow = window
+        return
+    end if
+
+    m.discoverCommittedFocusRow = focusedRow
+    m.discoverCommittedDir = dir
+    m.discoverCommittedMode = mode
+    m.discoverCommittedWindow = window
     if m.discoverPrefetchGen = invalid then m.discoverPrefetchGen = 0
     m.discoverPrefetchGen = m.discoverPrefetchGen + 1
-    rows = DiscoverPrefetchWindowRows(focusedRow, dir)
-    PrefetchDiscoverHeroRows(rows, focusedRow)
+    PrefetchDiscoverHeroRows(window, focusedRow)
 end sub
 
 sub PrefetchDiscoverRowsAhead(focusedRow as integer)
@@ -1114,13 +1242,15 @@ sub PrefetchDiscoverRowsAhead(focusedRow as integer)
     DiscoverCommitPrefetchWindow(focusedRow)
 end sub
 
-' Seed hero-art prefetch window around the focused row (directional, default down).
-' Commits immediately so initial load can warm hero art without extra delay.
+' Seed hero-art prefetch window for initial load (first tile/row, no previous
+' committed window -> [0,1,2]). Commits immediately.
 sub PrefetchDiscoverInitialHeroRows(focusedRow = 0 as integer)
     if focusedRow = invalid then focusedRow = 0
     if m.discoverPrefetchSettle <> invalid then m.discoverPrefetchSettle.control = "stop"
     m.discoverPendingFocusRow = focusedRow
-    m.discoverPrefetchFocusRow = -1 ' force commit for initial seed
+    m.discoverCommittedFocusRow = -1
+    m.discoverCommittedMode = ""
+    m.discoverCommittedWindow = []
     DiscoverCommitPrefetchWindow(focusedRow)
 end sub
 
@@ -1427,8 +1557,8 @@ function onKeyEvent(key as string, press as boolean) as boolean
         ' Seed hero/logo prefetch+enrichment around the row that becomes focused.
         if m.metas <> invalid and m.metas.Count() > 0
             focusRow = DiscoverFocusRowOrDefault()
-            m.discoverPrefetchFocusRow = -1
-            PrefetchDiscoverRowsAhead(focusRow)
+            ' Seed/ensure window around the row that becomes focused.
+            PrefetchDiscoverInitialHeroRows(focusRow)
             RefreshDiscoverHeroFromFocus()
         end if
         UpdateFiltersHint()
