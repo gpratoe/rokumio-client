@@ -2,6 +2,10 @@
 <component name="MetaLoaderTask" extends="Task">
     <interface>
         <field id="addonAddress" type="string" value="" />
+        <!-- Optional ordered candidate addresses to try (source/meta-capable
+             providers). When provided and non-empty, each is attempted in order
+             until usable meta is returned; otherwise addonAddress is used. -->
+        <field id="candidateAddresses" type="array" />
         <field id="metaType" type="string" value="" />
         <field id="metaId" type="string" value="" />
         <field id="result" type="assocarray" alwaysNotify="true" />

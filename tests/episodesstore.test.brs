@@ -97,6 +97,9 @@ sub Test_Episodes_ResolveVideoId()
 
     Harness_Equal(store.ResolveVideoId("tt1234567", 1, 1), "tt1234567:1:1", "movie/episode id shape")
     Harness_Equal(store.ResolveVideoId("tt1234567", 12, 4), "tt1234567:12:4", "double-digit season/episode")
+    Harness_Equal(store.ResolveVideoId("tt1234567", 1, invalid), "", "invalid episode yields no id, no crash")
+    Harness_Equal(store.ResolveVideoId("tt1234567", invalid, 1), "", "invalid season yields no id, no crash")
+    Harness_Equal(store.ResolveVideoId(invalid, 1, 1), "", "invalid series id yields no id, no crash")
 end sub
 
 sub Test_Episodes_OrderedSeasons()
@@ -293,3 +296,67 @@ sub Test_Episodes_NumericMetaFieldsDoNotThrow()
     Harness_Equal(numericProvided.description, "Fetched", "fetched string still fills the gap")
     Harness_Equal(numericProvided.runtime, 121, "provided numeric runtime kept")
 end sub
+
+sub Test_Episodes_EpisodeVideoId_PrefersOwnIdAndFallsBack()
+    Harness_Suite("EpisodesStore.EpisodeVideoId follows Stremio's id-first model")
+    store = EpisodesStore(ScriptedTransport([]))
+
+    Harness_Equal(store.EpisodeVideoId("tt1234567", { id: "tt1234567:2:3", season: 2, episode: 3 }), "tt1234567:2:3", "prefers the video's own id")
+    Harness_Equal(store.EpisodeVideoId("tt1234567", { season: 1, episode: 4 }), "tt1234567:1:4", "falls back to valid season/episode")
+    Harness_Equal(store.EpisodeVideoId("tt1234567", { season: 1, episode: invalid }), "", "invalid episode is not addressable")
+    Harness_Equal(store.EpisodeVideoId("tt1234567", { season: invalid, episode: 4 }), "", "invalid season is not addressable")
+    Harness_Equal(store.EpisodeVideoId("tt1234567", invalid), "", "missing video is not addressable")
+end sub
+
+sub Test_Episodes_ResolveEpisodeSelection_RecoversOrdinals()
+    Harness_Suite("EpisodesStore.ResolveEpisodeSelection returns id and ordinals")
+    store = EpisodesStore(ScriptedTransport([]))
+
+    sel = store.ResolveEpisodeSelection("tt1234567", { id: "tt1234567:3:7" })
+    Harness_Ok(sel <> invalid and sel.videoId = "tt1234567:3:7" and sel.season = 3 and sel.episode = 7, "recovers ordinals from a canonical video id")
+
+    fallback = store.ResolveEpisodeSelection("tt1234567", { season: 2, episode: 5 })
+    Harness_Ok(fallback <> invalid and fallback.videoId = "tt1234567:2:5" and fallback.season = 2 and fallback.episode = 5, "builds id and keeps ordinals when fields are valid")
+
+    Harness_Ok(store.ResolveEpisodeSelection("tt1234567", { season: 2, episode: invalid }) = invalid, "unresolvable episode yields no selection")
+end sub
+
+sub Test_Episodes_FirstPlayableEpisodeSelection_SkipsMalformed()
+    Harness_Suite("EpisodesStore.FirstPlayableEpisodeSelection picks the first addressable episode")
+    store = EpisodesStore(ScriptedTransport([]))
+    meta = {
+        videos: [
+            { season: 1, episode: invalid }
+            { id: "tt1234567:1:2", season: 1, episode: 2 }
+            { season: 1, episode: 3 }
+        ]
+    }
+    sel = store.FirstPlayableEpisodeSelection("tt1234567", meta)
+    Harness_Ok(sel <> invalid and sel.videoId = "tt1234567:1:2" and sel.episode = 2, "skips malformed leading video and returns first playable selection")
+
+    badOnly = { videos: [{ season: 1, episode: invalid }, { season: invalid, episode: 1 }] }
+    Harness_Ok(store.FirstPlayableEpisodeSelection("tt1234567", badOnly) = invalid, "returns invalid when no episode is addressable")
+end sub
+
+sub Test_Episodes_OrderedIdsSkipMalformedEpisodes()
+    Harness_Suite("EpisodesStore ordered ids skip episodes without a canonical id")
+    store = EpisodesStore(ScriptedTransport([]))
+    meta = {
+        id: "tt1234567"
+        type: "series"
+        videos: [
+            { season: 1, episode: 1 }
+            { season: 1, episode: invalid }
+            { season: 1, episode: 2 }
+        ]
+    }
+    ids = store.OrderedVideoIds("tt1234567", meta)
+    Harness_Equal(ids.Count(), 2, "malformed episode is excluded from ordered ids")
+    Harness_Equal(ids[0], "tt1234567:1:1", "first valid episode kept")
+    Harness_Equal(ids[1], "tt1234567:1:2", "later valid episode kept")
+
+    data = store.SeriesData("tt1234567", meta)
+    Harness_Equal(data.orderedVideoIds.Count(), 2, "series data ordered ids skip malformed episodes")
+    Harness_Equal(data.runs[0].episodes.Count(), 3, "display grouping still keeps the original episode entries")
+end sub
+

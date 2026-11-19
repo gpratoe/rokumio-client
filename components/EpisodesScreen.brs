@@ -161,8 +161,11 @@ sub LoadSeries()
     end if
 
     CancelLoad()
+    metaAddresses = [m.addonAddress]
+    if m.stores <> invalid then metaAddresses = m.stores.addons.callFunc("AddonsMetaAddresses", "series", m.meta.id, m.addonAddress)
     task = AsyncTask_Launch(m.top, "MetaLoaderTask", "onSeriesLoaded", {
         addonAddress: m.addonAddress
+        candidateAddresses: metaAddresses
         metaType: "series"
         metaId: m.meta.id
     }, "episodesLoader")
@@ -311,29 +314,49 @@ sub BuildList(meta as object)
     end if
 
     m.seasons = seriesData.seasons
-    m.seasonRuns = seriesData.runs
     orderedEpisodes = seriesData.orderedVideoIds
     m.orderedVideoIds = orderedEpisodes
     nowIso = m.stores.time.callFunc("TimeNowIso")
 
     ' Phase 1: one grouping pass over the series meta, then one series-wide
-    ' marks call. The old path sent the whole meta to EpisodesForSeason once
-    ' per season, and the whole ordered-id list to LibraryEpisodeMarks once
-    ' per season; both copies and the account-bitfield decode repeated 39
-    ' times for The Simpsons. These two queries do that work once per series —
-    ' and the air dates join them as one batch (the cards each carry a date
-    ' line, so per-episode store calls would reintroduce exactly the N-crossings
-    ' this phase exists to avoid).
+    ' marks call. Keep display, marks, and air-date batches aligned by dropping
+    ' episodes that cannot be addressed (no usable id and no valid
+    ' season+episode); malformed addon entries must not render as dead rows.
+    m.seasonRuns = []
     m.seasonEpisodes = []
     allEps = []
     m.dateOffsets = []
-    for each seasonRun in m.seasonRuns
-        m.seasonEpisodes.Push(seasonRun.episodes)
-        m.dateOffsets.Push(allEps.Count())
-        for each ep in seasonRun.episodes
-            allEps.Push(ep)
+    totalEpisodes = 0
+    if seriesData.runs <> invalid
+        for each seasonRun in seriesData.runs
+            runSeason = invalid
+            episodes = []
+            if seasonRun <> invalid
+                runSeason = seasonRun.season
+                if seasonRun.episodes <> invalid then episodes = seasonRun.episodes
+            end if
+            filteredEpisodes = []
+            for each ep in episodes
+                sel = m.stores.episodes.callFunc("EpisodesResolveEpisodeSelection", m.meta.id, ep)
+                if sel <> invalid then filteredEpisodes.Push(ep)
+            end for
+            m.seasonRuns.Push({ season: runSeason, episodes: filteredEpisodes })
+            m.seasonEpisodes.Push(filteredEpisodes)
+            m.dateOffsets.Push(allEps.Count())
+            for each ep in filteredEpisodes
+                allEps.Push(ep)
+            end for
+            totalEpisodes = totalEpisodes + filteredEpisodes.Count()
         end for
-    end for
+    end if
+
+    if totalEpisodes = 0
+        UpdateSeasonIndicator()
+        m.epStatus.text = Lang("episodes", "noneFound")
+        m.epStatus.visible = true
+        return
+    end if
+
     m.seriesMarks = m.stores.library.callFunc("LibraryEpisodeMarksForSeries", m.meta.id, m.seasonRuns, orderedEpisodes, nowIso)
     m.dateParts = m.stores.time.callFunc("TimeAirDatePartsBatch", allEps)
 
@@ -609,14 +632,16 @@ function ShowWatchDialog() as boolean
     data = m.epList.rowItemFocused
     if data = invalid or data.Count() < 2 then return false
     entry = EntryAt(data[0])
-    if entry = invalid or entry.season = 0 or entry.ep = invalid or entry.ep.episode = invalid then return false
+    if entry = invalid or entry.season = 0 or entry.ep = invalid then return false
     if m.activeRow < 0 or m.activeRow >= m.seasons.Count() then return false
 
-    videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, entry.season, entry.ep.episode)
+    sel = m.stores.episodes.callFunc("EpisodesResolveEpisodeSelection", m.meta.id, entry.ep)
+    if sel = invalid or sel.season = 0 then return false
+    videoId = sel.videoId
     seasonIds = SeasonVideoIds(m.activeRow)
     seasonIndex = IndexInIds(seasonIds, videoId)
     if seasonIndex < 0 then return false
-    mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, entry.season, entry.ep, m.orderedVideoIds, m.stores.time.callFunc("TimeNowIso"))
+    mark = m.stores.library.callFunc("LibraryEpisodeMark", m.meta.id, sel.season, entry.ep, m.orderedVideoIds, m.stores.time.callFunc("TimeNowIso"))
 
     m.pendingWatchAction = {
         metaId: m.meta.id
@@ -715,12 +740,12 @@ end sub
 function SeasonVideoIds(rowIndex as integer) as object
     ids = []
     if rowIndex < 0 or rowIndex >= m.seasons.Count() then return ids
-    if m.stores = invalid then return ids
+    if m.stores = invalid or m.meta = invalid then return ids
     episodes = m.seasonEpisodes[rowIndex]
     for each ep in episodes
-        if ep <> invalid and ep.episode <> invalid
-            ids.Push(m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, m.seasons[rowIndex], ep.episode))
-        end if
+        if ep = invalid then continue for
+        sel = m.stores.episodes.callFunc("EpisodesResolveEpisodeSelection", m.meta.id, ep)
+        if sel <> invalid and sel.videoId <> "" then ids.Push(sel.videoId)
     end for
     return ids
 end function
@@ -742,14 +767,17 @@ function EntryAt(episodeIndex as integer) as object
     return { season: m.seasons[m.activeRow], ep: episodes[episodeIndex] }
 end function
 
-' Episodes push stream selection for "{metaId}:{season}:{episode}" — the same
-' play path Details' resume chip uses.
-sub PushEpisode(season as integer, ep as object)
-    if ep = invalid or ep.episode = invalid then return
-    videoId = m.stores.episodes.callFunc("EpisodesResolveVideoId", m.meta.id, season, ep.episode)
+' Episodes push stream selection for the canonical episode id (prefer the
+' episode's own id, else derive from valid season/episode) — the same play
+' path Details' resume chip uses.
+sub PushEpisode(season as dynamic, ep as object)
+    if ep = invalid or m.meta = invalid or m.stores = invalid then return
+    sel = m.stores.episodes.callFunc("EpisodesResolveEpisodeSelection", m.meta.id, ep)
+    if sel = invalid then return
     position = 0
-    if m.resume <> invalid and m.resume.episode <> invalid and m.resume.episode = ep.episode and m.resume.season <> invalid and m.resume.season = season
+    if m.resume <> invalid and m.resume.episode <> invalid and m.resume.episode = sel.episode and m.resume.season <> invalid and m.resume.season = sel.season
         position = m.resume.position
+        if position = invalid then position = 0
     end if
     m.top.pushRequest = {
         screen: "streamsScreen"
@@ -757,9 +785,9 @@ sub PushEpisode(season as integer, ep as object)
             addonAddress: m.addonAddress
             metaType: "series"
             metaId: m.meta.id
-            videoId: videoId
-            season: season
-            episode: ep.episode
+            videoId: sel.videoId
+            season: sel.season
+            episode: sel.episode
             position: position
             name: m.meta.name
             poster: m.meta.poster

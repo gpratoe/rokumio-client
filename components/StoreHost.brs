@@ -109,6 +109,13 @@ function AddonsSupportsResource(resources as dynamic, types as dynamic, idPrefix
     return m.stores.addons.SupportsResource(resources, types, idPrefixes, name, metaType, id)
 end function
 
+' addons.MetaAddresses — ordered addon addresses eligible to provide `meta` for
+' (metaType, metaId), preferring the source addon when it matches, then Cinemeta,
+' then other matching providers. Used for meta fallback.
+function AddonsMetaAddresses(metaType as dynamic, metaId as dynamic, preferredAddress = "" as dynamic) as object
+    return m.stores.addons.MetaAddresses(metaType, metaId, preferredAddress)
+end function
+
 ' addons.CatalogCapabilities
 function AddonsCatalogCapabilities(catalog as dynamic) as object
     return m.stores.addons.CatalogCapabilities(catalog)
@@ -258,9 +265,29 @@ end function
 ' The Details play/resume path hands this m.meta.id straight from the add-on's
 ' meta; untyped + coerced like the library id adapters, so a non-text id
 ' degrades to "" and answers "no video" instead of a cast crash on the most
-' used path in the app.
-function EpisodesResolveVideoId(seriesId as dynamic, season as integer, episode as integer) as string
+' used path in the app. Season/episode are dynamic for the same reason: bad
+' add-on data must not crash at the callFunc boundary.
+function EpisodesResolveVideoId(seriesId as dynamic, season as dynamic, episode as dynamic) as string
     return m.stores.episodes.ResolveVideoId(StringOf(seriesId), season, episode)
+end function
+
+' episodes.EpisodeVideoId
+' Canonical id for an episode object: prefer video.id, else derive from valid
+' seriesId/season/episode. Returns "" when unresolvable.
+function EpisodesEpisodeVideoId(seriesId as dynamic, video as object) as string
+    return m.stores.episodes.EpisodeVideoId(StringOf(seriesId), video)
+end function
+
+' episodes.ResolveEpisodeSelection
+' { videoId, season, episode } for a resolvable episode object, else invalid.
+function EpisodesResolveEpisodeSelection(seriesId as dynamic, video as object) as dynamic
+    return m.stores.episodes.ResolveEpisodeSelection(StringOf(seriesId), video)
+end function
+
+' episodes.FirstPlayableEpisodeSelection
+' First addressable episode in a series meta (id-first, tolerant), else invalid.
+function EpisodesFirstPlayableEpisodeSelection(seriesId as dynamic, meta as object) as dynamic
+    return m.stores.episodes.FirstPlayableEpisodeSelection(StringOf(seriesId), meta)
 end function
 
 ' episodes.Seasons

@@ -83,11 +83,11 @@ class EpisodesStore
         return seasons
     end function
 
-    function EpisodesForSeason(meta as object, season as integer) as object
+    function EpisodesForSeason(meta as object, season as dynamic) as object
         episodes = []
         if meta = invalid or meta.videos = invalid then return episodes
         for each video in meta.videos
-            if video.season <> invalid and video.season = season then episodes.Push(video)
+            if video <> invalid and video.season <> invalid and video.season = season then episodes.Push(video)
         end for
         return episodes
     end function
@@ -132,13 +132,15 @@ class EpisodesStore
         orderedRuns = []
         orderedIds = []
         for each season in orderedSeasons
-            seasonRun = runs[runIndex[season.ToStr()]]
+            runKey = season.ToStr()
+            if runIndex[runKey] = invalid then continue for
+            seasonRun = runs[runIndex[runKey]]
             orderedRuns.Push(seasonRun)
             if season = 0 then continue for
             for each episode in seasonRun.episodes
-                if episode.episode <> invalid
-                    orderedIds.Push(m.ResolveVideoId(seriesId, season, episode.episode))
-                end if
+                if episode = invalid then continue for
+                id = m.ResolveVideoId(seriesId, season, episode.episode)
+                if id <> "" then orderedIds.Push(id)
             end for
         end for
 
@@ -151,12 +153,38 @@ class EpisodesStore
     ' "{imdbId}:{season}:{episode}" — the video id stream add-ons resolve.
     ' Built through VideoIdCodec so the convention has one owner (the account
     ' bitfield indexes the OrderedVideoIds list, and watched-state queries key
-    ' on the same string). Untyped + HasText like SeriesData: the id rides in
-    ' from the raw meta, and a non-text one answers "no video" rather than
-    ' throwing out of the play handler.
-    function ResolveVideoId(seriesId as dynamic, season as integer, episode as integer) as string
+    ' on the same string). Tolerant: add-on meta is untrusted, so invalid
+    ' seriesId/season/episode answers "" instead of crashing at a typed boundary.
+    function ResolveVideoId(seriesId as dynamic, season as dynamic, episode as dynamic) as string
         if not m.HasText(seriesId) then return ""
         return m.videoId.Build(seriesId, season, episode)
+    end function
+
+    ' Canonical episode id following Stremio's model: prefer the video's own id
+    ' when present, else derive from seriesId + season + episode. Returns "" when
+    ' the episode cannot be addressed (malformed/missing fields).
+    function EpisodeVideoId(seriesId as dynamic, video as dynamic) as string
+        return m.videoId.FromVideo(seriesId, video)
+    end function
+
+    ' { videoId, season, episode } for a resolvable episode/video object, else
+    ' invalid. Centralizes id-first resolution and ordinal recovery so screens do
+    ' not reconstruct stream/progress params from malformed addon data.
+    function ResolveEpisodeSelection(seriesId as dynamic, video as dynamic) as dynamic
+        if not m.HasText(seriesId) then return invalid
+        return m.videoId.ResolveSelection(seriesId, video)
+    end function
+
+    ' First resolvable episode in a series meta, in display/list order. Used for
+    ' "Play" from Details so a malformed leading video does not crash or block
+    ' playback when a later episode is addressable.
+    function FirstPlayableEpisodeSelection(seriesId as dynamic, meta as dynamic) as dynamic
+        if not m.HasText(seriesId) or meta = invalid or meta.videos = invalid then return invalid
+        for each video in meta.videos
+            sel = m.ResolveEpisodeSelection(seriesId, video)
+            if sel <> invalid then return sel
+        end for
+        return invalid
     end function
 
     ' Real seasons keep ascending order; season 0 (specials) is pushed to the
@@ -180,7 +208,8 @@ class EpisodesStore
     ' The series' ordered episode-id list, "{metaId}:{season}:{episode}" per
     ' regular (non-special) episode in display order — the ordering the account
     ' watched bitfield indexes (bit i is the i-th id here), so it must never
-    ' drift from what EpisodesScreen paints. Skips season 0 (specials).
+    ' drift from what EpisodesScreen paints. Skips season 0 (specials) and any
+    ' episode that cannot produce a valid canonical id.
     function OrderedVideoIds(seriesId as dynamic, meta as object) as object
         ids = []
         if not m.HasText(seriesId) or meta = invalid or meta.videos = invalid then return ids
@@ -191,9 +220,9 @@ class EpisodesStore
             if season = 0 then continue for
             episodes = m.EpisodesForSeason(meta, season)
             for each ep in episodes
-                if ep.episode <> invalid
-                    ids.Push(m.ResolveVideoId(seriesId, season, ep.episode))
-                end if
+                if ep = invalid then continue for
+                id = m.ResolveVideoId(seriesId, season, ep.episode)
+                if id <> "" then ids.Push(id)
             end for
         end for
         return ids

@@ -847,6 +847,80 @@ class AddonsStore
         return count
     end function
 
+    ' Ordered addon addresses eligible to provide `meta` for (metaType, metaId),
+    ' using the same resource/type/idPrefix matching as stream provider selection.
+    ' preferredAddress (usually the source/catalog addon) is tried first when it
+    ' can serve meta for this id; then Cinemeta when eligible; then other eligible
+    ' addons. Dedupe by address. If the preferred addon is unknown, it is still
+    ' tried first as a best-effort source and eligible fallbacks are appended.
+    function MetaAddresses(metaType as dynamic, metaId as dynamic, preferredAddress = "" as dynamic) as object
+        addresses = []
+        seen = {}
+        metaTypeStr = ""
+        if metaType <> invalid then metaTypeStr = metaType.ToStr()
+        metaIdStr = ""
+        if metaId <> invalid then metaIdStr = metaId.ToStr()
+        preferred = ""
+        if preferredAddress <> invalid then preferred = preferredAddress.ToStr()
+
+        addons = m.GetAll()
+        preferredKnown = false
+        preferredEligible = false
+        preferredMatch = ""
+        cinemetaAddress = ""
+
+        for each addon in addons
+            if addon = invalid or addon.address = invalid then continue for
+            addr = addon.address.ToStr()
+            if addr = "" then continue for
+            if preferred <> "" and addr = preferred
+                preferredKnown = true
+                if m.SupportsResource(addon.resources, addon.types, addon.idPrefixes, "meta", metaTypeStr, metaIdStr)
+                    preferredEligible = true
+                    preferredMatch = addr
+                end if
+            end if
+            if addon.id <> invalid and addon.id.ToStr() = "com.linvo.cinemeta" and cinemetaAddress = ""
+                cinemetaAddress = addr
+            end if
+        end for
+
+        if preferred <> ""
+            if preferredEligible
+                addresses.Push(preferredMatch)
+                seen[preferredMatch] = true
+            else if not preferredKnown
+                addresses.Push(preferred)
+                seen[preferred] = true
+            end if
+        end if
+
+        if cinemetaAddress <> "" and not seen.DoesExist(cinemetaAddress)
+            for each addon in addons
+                if addon = invalid or addon.address = invalid then continue for
+                addr = addon.address.ToStr()
+                if addr <> cinemetaAddress then continue for
+                if m.SupportsResource(addon.resources, addon.types, addon.idPrefixes, "meta", metaTypeStr, metaIdStr)
+                    addresses.Push(cinemetaAddress)
+                    seen[cinemetaAddress] = true
+                end if
+                exit for
+            end for
+        end if
+
+        for each addon in addons
+            if addon = invalid or addon.address = invalid then continue for
+            addr = addon.address.ToStr()
+            if addr = "" or seen.DoesExist(addr) then continue for
+            if m.SupportsResource(addon.resources, addon.types, addon.idPrefixes, "meta", metaTypeStr, metaIdStr)
+                addresses.Push(addr)
+                seen[addr] = true
+            end if
+        end for
+
+        return addresses
+    end function
+
     ' An installed add-on wins over a built-in with the same id (e.g. a
     ' self-hosted mirror of an official add-on). A removed built-in reports
     ' invalid until it is reinstalled by URL. Built-in seeds only resolve in a

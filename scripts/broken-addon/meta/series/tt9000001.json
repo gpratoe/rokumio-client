@@ -1,0 +1,59 @@
+{
+    "meta": {
+        "id": "tt9000001",
+        "type": "series",
+        "name": "Broken Episodes Fixture (Play/episodes test)",
+        "poster": "https://images.metahub.space/poster/medium/tt0944947/img",
+        "background": "https://images.metahub.space/background/medium/tt0944947/img",
+        "description": "Device-test fixture for invalid episode identity data. The leading videos have missing/invalid season or episode values (the crash case fixed in 0.4.x); later videos are valid. From Details, Play should skip malformed entries and resolve a playable episode without crashing. In Episodes, valid episodes should open streams normally and malformed entries must not crash actions.",
+        "releaseInfo": "2026",
+        "genres": ["Test"],
+        "videos": [
+            {
+                "id": "tt9000001:1:1",
+                "title": "Broken: episode null (reported crash shape)",
+                "season": 1,
+                "episode": null,
+                "released": "2026-01-01T00:00:00.000Z",
+                "overview": "Has a canonical id but episode is null; resolution must remain safe and id-first handling should still work where possible."
+            },
+            {
+                "title": "Broken: episode missing, no id",
+                "season": 1,
+                "released": "2026-01-02T00:00:00.000Z",
+                "overview": "No episode field and no video id. This was the Details Play crash case (invalid episode passed to typed resolver)."
+            },
+            {
+                "title": "Broken: season null, no id",
+                "season": null,
+                "episode": 3,
+                "released": "2026-01-03T00:00:00.000Z",
+                "overview": "Season is null and there is no video id, so the episode cannot be addressed."
+            },
+            {
+                "id": "tt9000001:1:4",
+                "title": "Valid: canonical id + ordinals",
+                "season": 1,
+                "episode": 4,
+                "released": "2026-01-04T00:00:00.000Z",
+                "thumbnail": "https://images.metahub.space/episode/medium/tt0944947/1/1/img",
+                "overview": "First fully addressable episode. Details Play should resolve to this (or another valid entry) without crashing."
+            },
+            {
+                "title": "Valid: ordinals only (fallback build)",
+                "season": 1,
+                "episode": 5,
+                "released": "2026-01-05T00:00:00.000Z",
+                "overview": "No explicit video id; resolver should derive tt9000001:1:5 from valid season/episode."
+            },
+            {
+                "id": "tt9000001:2:1",
+                "title": "Valid: season 2 episode 1",
+                "season": 2,
+                "episode": 1,
+                "released": "2026-01-06T00:00:00.000Z",
+                "overview": "Another valid episode in a different season."
+            }
+        ]
+    }
+}

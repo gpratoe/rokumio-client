@@ -1,25 +1,24 @@
 # broken-addon — Rokumio test fixture
 
-A static Stremio add-on whose catalog ships **every malformed meta id shape**
-plus one valid control. It exists to reproduce the v0.3.1 channel-killer (one
-add-on meta without a usable id crashed Home in `MakeRowNode` on every launch —
-Roku cast `roInvalid` into a typed `String` `callFunc` parameter, and
-BrightScript has no try/catch) and to verify the guard stack against it:
+A static Stremio add-on with malformed/off-spec payloads for on-device
+verification. It exists to reproduce crashes caused by bad add-on data and to
+confirm the guards/resolvers handle them safely:
 
-- row-build filter drops the bad metas and toasts ("Some titles were skipped…"),
-- the push handlers refuse to open one if a path ever leaks it ("This title is
-  not available"),
-- the library adapters coerce non-text ids so no call can crash on them.
+- **Movie catalog (`Broken Test Movies`)** — every malformed meta id shape plus
+  one valid control (v0.3.1 Home/`MakeRowNode` crash class).
+- **Series catalog (`Broken Test Series`)** — `tt9000001`, a series whose
+  `meta.videos` mixes malformed season/episode identity data with valid episodes
+  (the `EpisodesResolveVideoId` / Details Play crash when `episode` was
+  `Invalid`, plus id-first/fallback resolution checks).
 
-**Not for real use.** It is committed test tooling, like `scripts/metahub-proxy.js`.
+**Not for real use.** Committed test tooling, like `scripts/metahub-proxy.js`.
 
 ## Serve it
 
-Static JSON is all a Stremio add-on needs (see the official
-`stremio-static-addon-example`); any file server works. Ngrok supplies the
-HTTPS the app requires. Note the Stremio path-extras convention: with any
-extras (even a bare `skip=0`) the catalog URL gains a path segment, so the
-payload lives at `catalog/movie/broken/skip=0.json`:
+Static JSON is all a Stremio add-on needs; any file server works. Ngrok
+supplies the HTTPS the app requires. Catalog payloads are provided both as
+`catalog/<type>/broken.json` and as `catalog/<type>/broken/skip=0.json`
+(path-extras convention).
 
 ```sh
 cd scripts/broken-addon
@@ -34,13 +33,15 @@ https://<your-subdomain>.ngrok-free.app/manifest.json
 ```
 
 Tip: before installing, confirm ngrok is passing non-browser requests through
-(free tier injects an interstitial for browser-like requests):
+(free tier may inject an interstitial for browser-like requests):
 
 ```sh
 curl -H "User-Agent: rokumio" https://<your-subdomain>.ngrok-free.app/manifest.json
 ```
 
 ## Expected behavior
+
+### Movies — malformed meta ids
 
 | Meta | Pre-fix build | Fixed build |
 |---|---|---|
@@ -49,8 +50,26 @@ curl -H "User-Agent: rokumio" https://<your-subdomain>.ngrok-free.app/manifest.j
 | numeric id `12345` | crash | dropped (protocol requires text), toast |
 | empty id | crash | dropped, toast |
 
-On the fixed build the console shows the offending add-on, e.g.:
+On the fixed build the console may show the offending add-on, e.g.:
 
 ```
 Rokumio: dropped 4 metas without a usable id (addon=… catalog=broken)
 ```
+
+### Series — broken/valid episode identity (`tt9000001`)
+
+`meta/series/tt9000001.json` intentionally includes:
+- videos with missing/`null` `episode` or `season` and no usable `video.id`
+  (unaddressable; reproduces the old typed-parameter cast crash path),
+- a video with a canonical `id` but `episode: null` (id-first resolution),
+- valid videos (canonical `id` + ordinals, and ordinals-only fallback).
+
+Verify on a fixed build:
+- **Details → Play** on the series does **not** crash; it resolves the first
+  addressable episode and opens Streams (skipping malformed leading entries).
+- **Episodes screen** opens and lists seasons/episodes; selecting a valid
+  episode opens Streams.
+- Watched/options actions and season-scoped actions must not crash when
+  malformed entries are present (unaddressable entries are skipped).
+- No `Type Mismatch. Unable to cast "roInvalid" to "Integer"` from episode
+  resolution.
