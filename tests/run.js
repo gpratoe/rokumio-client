@@ -71,7 +71,11 @@ async function writeCombinedScript() {
         'tests/serversettingsstore.test.brs',
         'tests/metaloaderfallback.test.brs',
         'source/util/PosterLoaderCore.brs',
+        'source/util/ImageProxy.brs',
+        'source/util/ImageCache.brs',
+        'source/util/ImageCacheRuntime.brs',
         'tests/posterloader.test.brs',
+        'tests/imagecachepressure.test.brs',
         'tests/_run.brs'
     ].map(rel => {
         let src = fs.readFileSync(path.join(projectRoot, rel), 'utf8');

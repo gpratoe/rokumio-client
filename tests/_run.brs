@@ -539,6 +539,11 @@ sub Harness_RunAll()
     Test_MetaLoaderTryCandidates_EmptyOrInvalidAddressesReturnDefaultError()
     Test_MetaLoaderTryCandidates_MissingStoreReturnsUnavailable()
     Test_MetaLoaderTryCandidates_HandlesInvalidAddressEntriesWithoutCrash()
+    Test_ImageCachePressure_BudgetTierConfigs()
+    Test_ImageCachePressure_TierRankAndMapping()
+    Test_ImageCachePressure_PruneQueuesToCaps()
+    Test_ImageCachePressure_ApplyBudgetTierShrinksAndEvicts()
+    Test_ImageCachePressure_ApplyBudgetTierNoopWhenUnchanged()
     Harness_Finish()
 end sub
 
